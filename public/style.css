@@ -5,8 +5,9 @@
   --line: #2b302d;
   --muted: #8e9c93;
   --text: #e8ede9;
-  --mint: #b4e7c8;
-  --soft: #263c30;
+  --mint: #b7a8e6;
+  --soft: #1a1626;
+  --accent: #8b74d4;
   --serif: Georgia, "Times New Roman", serif;
 }
 * {
@@ -304,9 +305,9 @@ h1 {
   display: flex;
   flex-direction: column;
   min-height: calc(100vh - 96px);
-  max-width: 1090px;
+  max-width: 980px;
   margin: auto;
-  padding: 0 48px;
+  padding: 0 24px 8px;
 }
 .welcome {
   max-width: 790px;
@@ -413,97 +414,173 @@ h2 {
 .composer-area {
   position: sticky;
   bottom: 0;
-  background: linear-gradient(transparent, var(--bg) 15%);
-  padding: 20px 0 18px;
+  z-index: 5;
+  background: linear-gradient(transparent, var(--bg) 28%);
+  padding: 12px 0 18px;
   width: 100%;
-  max-width: 830px;
+  max-width: 820px;
   margin: 0 auto;
 }
 .composer {
-  border: 1px solid #3a4b3f;
-  border-radius: 14px;
-  background: #1d2720;
-  padding: 16px 18px;
-  box-shadow: 0 6px 35px #0002;
+  border: 1px solid #2c2a36;
+  border-radius: 28px;
+  background: #16151c;
+  padding: 10px 10px 8px 12px;
+  box-shadow: 0 10px 40px #00000066;
 }
 .composer:focus-within {
-  border-color: #6c987c;
+  border-color: #5c4d86;
+  box-shadow:
+    0 10px 40px #00000066,
+    0 0 0 1px #6d5aa840;
+}
+.composer-main {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  direction: ltr;
 }
 .composer textarea {
+  flex: 1;
   width: 100%;
   background: transparent;
   border: 0;
   outline: none;
-  resize: vertical;
+  resize: none;
+  overflow-y: auto;
   max-height: 200px;
-  min-height: 57px;
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.8;
+  min-height: 24px;
+  height: 24px;
+  color: #f4f2f8;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 8px 16px 8px 10px;
+}
+.composer textarea {
+  flex: 1;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  outline: none;
+  resize: none;
+  overflow-y: auto;
+  max-height: 200px;
+  min-height: 24px;
+  height: 24px;
+  color: #f4f2f8;
+  font-size: 15px;
+  line-height: 1.55;
+  padding: 8px 6px 8px 8px;
 }
 .composer textarea::placeholder {
-  color: #84968a;
+  color: #8d889a;
+}
+.composer-actions {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 2px 4px 0;
 }
 .composer-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-top: 9px;
-}
-.composer-toolbar > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.composer-toolbar select {
-  background: #29382c;
-  color: #c2d8c8;
-  border: 0;
-  border-radius: 6px;
-  padding: 6px;
-  font-size: 11px;
-}
-.attach {
-  background: none;
-  border: 0;
-  font-size: 24px;
-  color: #97b09f;
-  padding: 0;
-}
-.model-label {
-  font-size: 10px;
-  color: #7f9887;
+  gap: 6px;
+  margin-top: 2px;
+  padding: 0 4px 2px;
+  min-height: 28px;
   direction: ltr;
 }
-.send {
-  background: var(--mint);
+.composer-status {
+  margin-left: auto;
+  margin-inline-start: auto;
+  font-size: 11px;
+  color: #7d788c;
+  min-height: 1em;
+}
+.composer-toolbar select {
+  background: transparent;
+  color: #b7b3c4;
   border: 0;
-  color: #243e2e;
-  width: 35px;
-  height: 35px;
-  border-radius: 8px;
-  font-size: 24px;
+  border-radius: 999px;
+  padding: 4px 6px;
+  font-size: 12px;
+  max-width: 118px;
+}
+.attach {
+  display: grid;
+  place-items: center;
+  background: none;
+  border: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #b7b3c4;
+  border-radius: 50%;
+}
+.attach svg {
+  width: 16px;
+  height: 16px;
+}
+.attach:hover,
+.composer-toolbar select:hover {
+  background: #ffffff0d;
+  color: #eceaf3;
+}
+.model-label {
+  font-size: 12px;
+  color: #9b97a8;
+  direction: ltr;
+  white-space: nowrap;
+}
+.composer-status {
+  margin-inline-start: auto;
+  font-size: 11px;
+  color: #7d788c;
+  min-height: 1em;
+}
+.send,
+.stop {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+}
+.send {
+  background: #d8d4e4;
+  color: #141218;
+}
+.send:hover:not(.is-idle) {
+  background: #eceaf3;
+}
+.send.is-idle {
+  background: #2a2833;
+  color: #6d6878;
+  pointer-events: none;
+}
+.send svg {
+  width: 16px;
+  height: 16px;
 }
 .stop {
-  border: 1px solid #8d6961;
-  border-radius: 7px;
-  background: #4b302a;
-  padding: 9px;
-  color: #edc5b7;
-  margin-right: auto;
-  margin-left: 9px;
+  background: #2a2436;
+  color: #eceaf3;
+  border: 1px solid #5c4d86;
 }
-.composer-note {
-  display: flex;
-  justify-content: space-between;
-  color: #6c8273;
-  font-size: 9px;
-  padding: 13px 3px 0;
+.stop-icon {
+  width: 9px;
+  height: 9px;
+  background: currentColor;
+  border-radius: 2px;
 }
 .messages {
   width: 100%;
-  max-width: 830px;
+  max-width: 820px;
   margin: 0 auto;
+  padding-bottom: 28px;
+  flex: 1;
 }
 .message {
   padding: 25px 0;
@@ -627,7 +704,7 @@ h2 {
 }
 .primary {
   background: var(--mint);
-  color: #193827;
+  color: #141218;
   border: 0;
   border-radius: 7px;
   padding: 11px 18px;
@@ -902,9 +979,11 @@ input[type="checkbox"] {
     width: 52px;
     height: 52px;
   }
-  .composer-note {
-    font-size: 8px;
-    gap: 15px;
+  .composer-status {
+    display: none;
+  }
+  .composer {
+    padding: 8px;
   }
   .panel-view {
     padding: 30px 20px;

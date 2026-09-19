@@ -8,12 +8,18 @@ importers:
 
   .:
     dependencies:
+      dompurify:
+        specifier: ^3.4.15
+        version: 3.4.15
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
       mammoth:
         specifier: ^1.10.0
         version: 1.12.3
+      marked:
+        specifier: ^18.0.13
+        version: 18.0.13
       pdfjs-dist:
         specifier: ^5.4.149
         version: 5.7.284
@@ -114,6 +120,9 @@ packages:
   '@types/node@14.18.63':
     resolution: {integrity: sha512-fAtCfv4jJg+ExtXhvCkCqUKZ+4ok/JQk01qDKhL5BDDoS3AxKXhV5/MAVUZyQnSEd2GT92fkgZl0pz0Q0AzcIQ==}
 
+  '@types/trusted-types@2.0.7':
+    resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
+
   '@xmldom/xmldom@0.8.15':
     resolution: {integrity: sha512-/5NV/vDALVFDXgLmfsy9TRCBlKwO2LNBFzpzvb9iIj+jR+eSc6DLYYvVOdivT/jm7MtU6TebYuRmzEOI7w40UA==}
     engines: {node: '>=10.0.0'}
@@ -202,6 +211,9 @@ packages:
 
   dingbat-to-unicode@1.0.1:
     resolution: {integrity: sha512-98l0sW87ZT58pU4i61wa2OHwxbiYSbuxsCBozaVnYX2iCnr3bLM3fIes1/ej7h1YdOKuKt/MLs706TVnALA65w==}
+
+  dompurify@3.4.15:
+    resolution: {integrity: sha512-EUBjM+B+lkDE41iE82DDSCfkoPGfXx8IxFxPMjNzm/Uk4xDet77rTN9wqlxlVg71kK7XGuUMv6wUxJUwwv+Xyw==}
 
   duck@0.1.12:
     resolution: {integrity: sha512-wkctla1O6VfP89gQ+J/yDesM0S7B7XLXjKGzXxMDVFg7uEn706niAtyYovKbyq1oT9YwDcly721/iUWoc8MVRg==}
@@ -313,6 +325,11 @@ packages:
   mammoth@1.12.3:
     resolution: {integrity: sha512-kkv2MrSFk3f/w3uLsz4FG/91LdWp2j+qmp7AjG2v7w2xgX5YDxiaFlaWourXrXtyUR6335+9guyIlPBnhHLvKw==}
     engines: {node: '>=12.0.0'}
+    hasBin: true
+
+  marked@18.0.13:
+    resolution: {integrity: sha512-xTxVzZsBFwunP6HDmtBkabUQEYArnP7/rMDGmPj9SlrKlQ4i8MdYVow+nJL0eOqwpUqhzBoTBRADGN6uYwPyOw==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   minimatch@3.1.5:
@@ -589,6 +606,9 @@ snapshots:
 
   '@types/node@14.18.63': {}
 
+  '@types/trusted-types@2.0.7':
+    optional: true
+
   '@xmldom/xmldom@0.8.15': {}
 
   archiver-utils@2.1.0:
@@ -697,6 +717,10 @@ snapshots:
   dayjs@1.11.23: {}
 
   dingbat-to-unicode@1.0.1: {}
+
+  dompurify@3.4.15:
+    optionalDependencies:
+      '@types/trusted-types': 2.0.7
 
   duck@0.1.12:
     dependencies:
@@ -823,6 +847,8 @@ snapshots:
       path-is-absolute: 1.0.1
       underscore: 1.13.8
       xmlbuilder: 10.1.1
+
+  marked@18.0.13: {}
 
   minimatch@3.1.5:
     dependencies:

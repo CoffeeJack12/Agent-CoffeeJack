@@ -6,6 +6,7 @@
     <title>CoffeeJack — Your local companion</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/polish.css" />
   </head>
   <body>
     <aside class="sidebar">
@@ -24,11 +25,19 @@
         ><button class="nav" data-view="memory"><span>◇</span> الذاكرة</button
         ><button class="nav" data-view="activity">
           <span>≋</span> سجل التنفيذ</button
+        ><button class="nav" data-view="persona">
+          <span>✦</span> شخصية Jack</button
         ><button class="nav" data-view="settings">
           <span>⚙</span> الإعدادات
         </button>
       </nav>
       <div class="nav-label history-label">المحادثات الأخيرة</div>
+      <input
+        id="historySearch"
+        class="history-search"
+        placeholder="ابحث في محادثاتك…"
+        aria-label="البحث في المحادثات"
+      />
       <div id="history" class="history"></div>
       <div class="sidebar-bottom">
         <div class="private">
@@ -40,7 +49,7 @@
         <div class="profile">
           <div class="avatar">A</div>
           <div>عبدالرحمن<small>Personal workspace</small></div>
-          <span class="version">v0.1</span>
+          <span class="version">v0.2</span>
         </div>
       </div>
     </aside>
@@ -51,6 +60,17 @@
           <h1 id="pageTitle">المحادثة</h1>
         </div>
         <div class="header-actions">
+          <button
+            id="themeToggle"
+            class="ghost theme-toggle"
+            title="تبديل المظهر"
+            aria-label="تبديل المظهر"
+          >
+            ☼
+          </button>
+          <button id="mobileNew" class="ghost" aria-label="محادثة جديدة">
+            ＋
+          </button>
           <span class="connection"
             ><i id="connectionDot"></i
             ><span id="connectionLabel">جارٍ الاتصال</span></span
@@ -60,15 +80,21 @@
       <section id="chatView" class="view chat-view">
         <div id="welcome" class="welcome">
           <div class="welcome-kicker">
-            <span class="small-line"></span> SOME COFFEE. A LITTLE CLARITY.
+            <span class="small-line"></span> A SHARP MIND. A SOFT SPOT FOR
+            COFFEE.
           </div>
           <div class="jack-mark">
             <img src="/favicon.svg" alt="Jack" /><span class="spark">✦</span>
           </div>
-          <h2>قهوتك جاهزة.<br /><span>إيش ننجز اليوم؟</span></h2>
+          <div class="presence">
+            <i></i><span id="jackPresence">Jack هنا</span
+            ><span class="presence-separator">·</span
+            ><button id="personalityShortcut">خفيف دم، جاد وقت الجد</button>
+          </div>
+          <h2>أفكارك الكبيرة.<br /><span>نبدأها بفنجان.</span></h2>
           <p>
-            أنا Jack، مساعدك على جهازك. نبرمج، نبحث، ونرتب أفكارك.<br />قل لي
-            إيش تحتاج، وخلّينا نبدأ.
+            أنا Jack. أساعدك تفكّر، تبني، وتخلّص اللي عليك.<br />والنكتة؟ تجي في
+            وقتها. غالبًا.
           </p>
           <div class="suggestions">
             <button
@@ -87,53 +113,88 @@
               ><span class="arrow">↖</span>
             </button>
             <button
-              data-prompt="ساعدني أرتب أولوياتي لليوم. اسألني عن أهم الأشياء التي أريد إنجازها."
+              data-prompt="يا Jack، أعطني تعليقًا طريفًا عن التسويف، وبعدها ساعدني أبدأ بمهمة واحدة صغيرة."
             >
-              <span class="suggest-icon">◇</span><strong>رتّب أفكاري</strong
-              ><small>من أفكار كثيرة إلى خطوات واضحة</small
+              <span class="suggest-icon">✦</span><strong>غيّر جوّي</strong
+              ><small>شوية خفة دم، وبداية أخف</small
               ><span class="arrow">↖</span>
             </button>
           </div>
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
+        <button id="jumpBottom" class="ghost jump-bottom hidden">
+          ↓ آخر رد
+        </button>
         <div id="approval" class="approval hidden"></div>
         <div class="composer-area">
           <div id="notice" class="notice hidden" role="status"></div>
           <div id="attachments" class="attachments"></div>
           <form id="chatForm" class="composer">
-            <textarea
-              id="prompt"
-              dir="auto"
-              rows="2"
-              placeholder="اكتب لـ Jack… فكرة صغيرة تكفي."
-              aria-label="رسالتك إلى Jack"
-            ></textarea>
-            <div class="composer-toolbar">
-              <div>
+            <div class="composer-main">
+              <textarea
+                id="prompt"
+                dir="auto"
+                rows="1"
+                placeholder="اكتب لـ Jack..."
+                aria-label="رسالتك إلى Jack"
+              ></textarea>
+              <div class="composer-actions">
                 <button
+                  id="stop"
                   type="button"
-                  id="attach"
-                  class="attach"
-                  title="إرفاق ملف"
+                  class="stop hidden"
+                  aria-label="إيقاف"
+                  title="إيقاف"
                 >
-                  ＋</button
-                ><select id="mode" aria-label="نوع المهمة">
-                  <option value="auto">✦ تلقائي</option>
-                  <option value="coding">⌘ برمجة</option>
-                  <option value="vision">◎ صور</option></select
-                ><span id="modelLabel" class="model-label">Qwen3 · Local</span>
+                  <span class="stop-icon"></span>
+                </button>
+                <button
+                  id="send"
+                  type="submit"
+                  class="send is-idle"
+                  aria-label="إرسال"
+                  aria-disabled="true"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 19V5M5 12l7-7 7 7"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.2"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    />
+                  </svg>
+                </button>
               </div>
-              <button id="stop" type="button" class="stop hidden">
-                ■ إيقاف</button
-              ><button id="send" type="submit" class="send" aria-label="إرسال">
-                ↑
+            </div>
+            <div class="composer-toolbar">
+              <button
+                type="button"
+                id="attach"
+                class="attach"
+                title="إرفاق ملف"
+                aria-label="إرفاق ملف"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    d="M12 5v14M5 12h14"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
               </button>
+              <select id="mode" aria-label="نوع المهمة">
+                <option value="auto">تلقائي</option>
+                <option value="coding">برمجة</option>
+                <option value="vision">صور</option>
+              </select>
+              <span id="modelLabel" class="model-label">qwen3:8b · Local</span>
+              <span id="runStatus" class="composer-status"></span>
             </div>
           </form>
-          <div class="composer-note">
-            <span>◈ محلي أولًا · بدون اشتراك أو دفع لكل رسالة</span
-            ><span id="runStatus">Jack جاهز لما تكون جاهز.</span>
-          </div>
         </div>
         <input
           type="file"
@@ -141,6 +202,105 @@
           hidden
           accept=".txt,.md,.csv,.tsv,.json,.js,.ts,.py,.html,.css,.pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp"
         />
+      </section>
+      <section id="personaView" class="view panel-view hidden">
+        <div class="persona-heading">
+          <div>
+            <span class="eyebrow">MEET THE MIND BEHIND THE MUG</span>
+            <h2>شخصية ثابتة.<br /><span>بطريقتك أنت.</span></h2>
+            <p>ذكي، حاد، وعملي. مزح أسود لما يناسب، ونتائج بدون تمثيل.</p>
+          </div>
+          <div class="persona-avatar" aria-hidden="true">
+            <img src="/favicon.svg" alt="" /><span>✦</span>
+          </div>
+        </div>
+        <div class="persona-tabs" role="group" aria-label="أنماط الشخصية">
+          <button type="button" data-persona-preset="playful" class="preset">
+            ☕ رفيق القهوة</button
+          ><button type="button" data-persona-preset="focused" class="preset">
+            ⌘ وقت التركيز</button
+          ><button type="button" data-persona-preset="calm" class="preset">
+            ◌ على رواق
+          </button>
+        </div>
+        <form id="personaForm" class="persona-layout">
+          <div class="setting-card persona-controls">
+            <h3>طريقة الكلام</h3>
+            <label
+              >لغة الرد<select name="language">
+                <option value="auto">تلقائي — نفس لغة رسالتي</option>
+                <option value="ar">العربية</option>
+                <option value="en">English</option>
+              </select></label
+            ><label
+              >العربية اللي تريحك<select name="dialect">
+                <option value="jeddah">سعودي / جداوي طبيعي</option>
+                <option value="standard">فصحى واضحة</option>
+              </select></label
+            ><label
+              >جرعة خفة الدم<select name="humor">
+                <option value="playful">ساخر — ذكي وغامق لما يناسب</option>
+                <option value="subtle">لمسة جافة خفيفة</option>
+                <option value="off">بدون مزح</option>
+              </select></label
+            ><label
+              >طول الرد<select name="detail">
+                <option value="concise">المختصر المفيد</option>
+                <option value="balanced">على قد الموضوع</option>
+                <option value="thorough">بالتفصيل والأمثلة</option>
+              </select></label
+            >
+            <div class="settings-footer">
+              <button class="primary">حفظ شخصية Jack</button
+              ><span id="personaMessage" role="status"></span>
+            </div>
+          </div>
+          <div class="persona-preview">
+            <span class="eyebrow">A LITTLE TASTE</span>
+            <h3>كذا ممكن يرد عليك</h3>
+            <div class="preview-question" id="previewQuestion">
+              يا Jack، الكود خرب.
+            </div>
+            <div class="preview-answer">
+              <img src="/favicon.svg" alt="Jack" />
+              <p id="personaPreview"></p>
+            </div>
+            <small>مثال على النبرة، مو رد مولّد. يضبط أسلوبه حسب الموقف.</small>
+            <div class="principles">
+              <span>◈ حاد وصادق</span><span>◇ مخلص لعبدالرحمن</span
+              ><span>◎ يتحقق قبل ما يجزم</span>
+            </div>
+          </div>
+        </form>
+        <div class="self-model">
+          <div class="self-model-heading">
+            <div>
+              <span class="eyebrow">GROUNDED IN WHAT ACTUALLY HAPPENED</span>
+              <h3>يعرف سياقه، ويحاسب خطواته.</h3>
+            </div>
+            <span class="state-pill" id="selfState">جاهز</span>
+          </div>
+          <div class="self-stats">
+            <div>
+              <strong id="memoryCount">0</strong><span>ذكرى محفوظة</span>
+            </div>
+            <div>
+              <strong id="conversationCount">0</strong><span>محادثة</span>
+            </div>
+            <div>
+              <strong id="toolCount">0</strong><span>خطوة أداة ناجحة</span>
+            </div>
+          </div>
+          <p id="lastReflection">تظهر هنا نتيجة آخر طلب بعد تنفيذه.</p>
+          <details class="awareness-note">
+            <summary>إيش يعني «يعرف نفسه» هنا؟</summary>
+            <p>
+              له هوية وتعليمات ثابتة، وذاكرة قابلة للتعديل، وملخص مبني على نتائج
+              أدواته. هذا وعي وظيفي بالسياق والحدود، وليس ادعاءً بوعي ذاتي أو
+              مشاعر بشرية. لا يعمل من تلقاء نفسه بين طلباتك.
+            </p>
+          </details>
+        </div>
       </section>
       <section id="memoryView" class="view panel-view hidden">
         <div class="section-intro">

@@ -1,4 +1,12 @@
+import { marked } from "/vendor/marked.esm.js";
+import DOMPurify from "/vendor/purify.es.mjs";
 const $ = (selector) => document.querySelector(selector);
+try {
+  document.body.dataset.theme =
+    localStorage.getItem("coffeejack-theme") || "dark";
+} catch {
+  document.body.dataset.theme = "dark";
+}
 const state = {
   token: "",
   chatId: null,
@@ -12,6 +20,7 @@ const titles = {
   memory: "الذاكرة",
   activity: "سجل التنفيذ",
   settings: "الإعدادات",
+  persona: "شخصية Jack",
 };
 const escape = (text) =>
   String(text).replace(
@@ -22,15 +31,70 @@ const escape = (text) =>
       ],
   );
 function renderText(element, text) {
-  // Only fenced code is formatted; all model/user HTML is escaped.
-  element.innerHTML = text
-    .split(/(```[\s\S]*?```)/g)
-    .map((part) =>
-      part.startsWith("```")
-        ? `<pre><code>${escape(part.slice(3, -3).replace(/^\w*\n/, ""))}</code></pre>`
-        : escape(part),
-    )
-    .join("");
+  element.dataset.text = text;
+  element.innerHTML = DOMPurify.sanitize(
+    marked.parse(text, { breaks: true, gfm: true }),
+    {
+      ALLOWED_TAGS: [
+        "p",
+        "br",
+        "strong",
+        "em",
+        "del",
+        "ul",
+        "ol",
+        "li",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+        "pre",
+        "code",
+        "blockquote",
+        "table",
+        "thead",
+        "tbody",
+        "tr",
+        "th",
+        "td",
+        "hr",
+        "a",
+      ],
+      ALLOWED_ATTR: ["href", "title"],
+    },
+  );
+  for (const node of element.querySelectorAll("p,li,h1,h2,h3,h4,blockquote"))
+    node.dir = "auto";
+  for (const link of element.querySelectorAll("a")) {
+    if (!/^https?:\/\//i.test(link.getAttribute("href") ?? "")) {
+      link.removeAttribute("href");
+      continue;
+    }
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }
+  for (const block of element.querySelectorAll("pre")) {
+    const copy = document.createElement("button");
+    copy.className = "copy-code";
+    copy.textContent = "نسخ الكود";
+    copy.onclick = () =>
+      copyText(block.querySelector("code")?.textContent ?? "", copy);
+    block.append(copy);
+  }
+}
+async function copyText(text, button) {
+  const original = button.textContent;
+  try {
+    await navigator.clipboard.writeText(text);
+    button.textContent = "تم النسخ ✓";
+  } catch {
+    button.textContent = "تعذّر النسخ";
+  }
+  setTimeout(() => {
+    button.textContent = original;
+  }, 1600);
 }
 async function api(route, options = {}) {
   const response = await fetch("/api/" + route, {
@@ -55,6 +119,7 @@ async function refreshStatus() {
     const status = await api("status");
     state.status = status;
     state.token = status.token;
+    if (status.jack) updateSelfModel(status.jack);
     const ready =
       !status.modelError &&
       status.models.some((m) => m.name === status.settings.model);
@@ -65,6 +130,8 @@ async function refreshStatus() {
         ? "متصل محليًا"
         : "الموديل غير جاهز";
     $("#modelLabel").textContent = `${status.settings.model} · Local`;
+    if (status.jack?.persona?.language)
+      setComposerPlaceholder(status.jack.persona.language);
     $("#gaming").classList.toggle("on", status.gaming);
     $("#gaming").setAttribute("aria-pressed", String(status.gaming));
     $("#gaming span").textContent = status.gaming
@@ -128,6 +195,7 @@ async function history() {
     row.append(open, del);
     $("#history").append(row);
   }
+  filterHistory();
 }
 function newChat() {
   if (state.busy) return notice("أوقف المهمة الحالية أولًا.");
@@ -138,6 +206,7 @@ function newChat() {
   $("#welcome").classList.remove("hidden");
   showView("chat");
   $("#prompt").focus();
+  syncComposer();
   history().catch(report);
 }
 function addMessage(role, text = "") {
@@ -145,6 +214,14 @@ function addMessage(role, text = "") {
   const el = document.createElement("article");
   el.className = "message " + role;
   el.innerHTML = `<div class="message-head">${role === "assistant" ? '<img src="/favicon.svg" alt=""> Jack' : "◌ أنت"}</div><div class="message-content" dir="auto"></div>`;
+  if (role === "assistant") {
+    const copy = document.createElement("button");
+    copy.className = "copy-reply";
+    copy.textContent = "نسخ الرد";
+    copy.onclick = () =>
+      copyText(el.querySelector(".message-content").dataset.text ?? "", copy);
+    el.querySelector(".message-head").append(copy);
+  }
   renderText(el.querySelector(".message-content"), text);
   $("#messages").append(el);
   return el;
@@ -163,9 +240,35 @@ function showView(name) {
   if (name === "memory") loadMemories().catch(report);
   if (name === "activity") loadEvents().catch(report);
   if (name === "settings") loadSettings().catch(report);
+  if (name === "persona") loadPersona().catch(report);
 }
-function scrollBottom() {
-  window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
+function syncPromptDirection() {
+  const el = $("#prompt");
+  if (el.value) {
+    el.dir = "auto";
+    return;
+  }
+  el.dir = el.classList.contains("placeholder-ltr") ? "ltr" : "rtl";
+}
+function resizePrompt() {
+  const el = $("#prompt");
+  el.style.height = "auto";
+  el.style.height = Math.min(Math.max(el.scrollHeight, 24), 200) + "px";
+}
+function syncComposer() {
+  const empty = !$("#prompt").value.trim();
+  const idle = state.busy || empty;
+  $("#send").classList.toggle("is-idle", idle);
+  $("#send").classList.toggle("hidden", state.busy);
+  $("#send").setAttribute("aria-disabled", String(idle));
+  $("#stop").classList.toggle("hidden", !state.busy);
+  syncPromptDirection();
+  resizePrompt();
+}
+function setComposerPlaceholder(language) {
+  const english = language === "en";
+  $("#prompt").placeholder = english ? "Message Jack..." : "اكتب لـ Jack...";
+  $("#prompt").classList.toggle("placeholder-ltr", english);
 }
 function showApproval(event) {
   const el = $("#approval");
@@ -187,17 +290,22 @@ function showApproval(event) {
 }
 $("#chatForm").onsubmit = async (event) => {
   event.preventDefault();
-  const text = $("#prompt").value.trim();
+  const draft = $("#prompt").value;
+  const text = draft.trim();
   if (!text || state.busy) return;
   state.busy = true;
-  $("#send").disabled = true;
-  $("#stop").classList.remove("hidden");
-  $("#prompt").value = "";
+  syncComposer();
   notice();
   addMessage("user", text);
+  const userEl = $("#messages").lastElementChild;
   const answer = addMessage("assistant");
   const content = answer.querySelector(".message-content");
+  const thinking = document.createElement("div");
+  thinking.className = "thinking";
+  thinking.innerHTML = "<i></i><i></i><i></i><span>Jack يجهّز الرد…</span>";
+  answer.append(thinking);
   let full = "";
+  let accepted = false;
   const steps = [];
   $("#runStatus").textContent = "Jack يفكر…";
   try {
@@ -215,6 +323,9 @@ $("#chatForm").onsubmit = async (event) => {
       }),
     });
     if (!response.ok) throw new Error((await response.json()).error);
+    accepted = true;
+    $("#prompt").value = "";
+    syncComposer();
     state.attachments = [];
     drawAttachments();
     const reader = response.body.getReader();
@@ -235,12 +346,14 @@ $("#chatForm").onsubmit = async (event) => {
           history().catch(report);
         }
         if (item.type === "token") {
+          thinking.remove();
           full += item.text;
           renderText(content, full);
         }
         if (item.type === "round")
           $("#runStatus").textContent = `Jack يعمل · الخطوة ${item.round}`;
         if (item.type === "tool") {
+          thinking.remove();
           let el;
           if (item.status === "running") {
             el = document.createElement("details");
@@ -282,7 +395,7 @@ $("#chatForm").onsubmit = async (event) => {
           content.classList.add("error-text");
         }
         if (item.type === "done")
-          $("#runStatus").textContent = `اكتمل · ${item.tokens} tokens محليًا`;
+          $("#runStatus").textContent = "اكتمل الرد · على جهازك";
       }
       if (
         window.innerHeight + window.scrollY >=
@@ -293,13 +406,21 @@ $("#chatForm").onsubmit = async (event) => {
   } catch (e) {
     report(e);
     if (!full) content.textContent = e.message;
+    if (!accepted) {
+      userEl.remove();
+      answer.remove();
+      if (!$("#messages").children.length)
+        $("#welcome").classList.remove("hidden");
+      if (!$("#prompt").value) $("#prompt").value = draft;
+    }
   } finally {
+    thinking.remove();
     state.busy = false;
-    $("#send").disabled = false;
-    $("#stop").classList.add("hidden");
+    $("#runStatus").textContent = "";
     $("#approval").classList.add("hidden");
     await history().catch(report);
     await refreshStatus();
+    syncComposer();
     $("#prompt").focus();
   }
 };
@@ -310,6 +431,10 @@ $("#prompt").onkeydown = (e) => {
     $("#chatForm").requestSubmit();
   }
 };
+$("#prompt").oninput = syncComposer;
+$("#chatForm").addEventListener("pointerdown", (e) => {
+  if (!e.target.closest("button, select, a")) $("#prompt").focus();
+});
 $("#newChat").onclick = newChat;
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey && e.key.toLowerCase() === "k") {
@@ -325,6 +450,7 @@ document.querySelectorAll("[data-prompt]").forEach(
     (button.onclick = () => {
       $("#prompt").value = button.dataset.prompt;
       $("#mode").value = button.dataset.mode || "auto";
+      syncComposer();
       $("#prompt").focus();
     }),
 );
@@ -480,6 +606,171 @@ $("#settingsForm").onsubmit = async (e) => {
     $("#settingsMessage").textContent = err.message;
   }
 };
+function filterHistory() {
+  const query = $("#historySearch").value.trim().toLocaleLowerCase();
+  for (const row of document.querySelectorAll(".history-row"))
+    row.hidden = !row
+      .querySelector(".history-item")
+      .textContent.toLocaleLowerCase()
+      .includes(query);
+}
+$("#historySearch").oninput = filterHistory;
+$("#mobileNew").onclick = newChat;
+$("#personalityShortcut").onclick = () => showView("persona");
+$("#themeToggle").onclick = () => {
+  const theme = document.body.dataset.theme === "light" ? "dark" : "light";
+  document.body.dataset.theme = theme;
+  try {
+    localStorage.setItem("coffeejack-theme", theme);
+  } catch {}
+  $("#themeToggle").setAttribute("aria-pressed", String(theme === "light"));
+};
+$("#themeToggle").setAttribute(
+  "aria-pressed",
+  String(document.body.dataset.theme === "light"),
+);
+$("#jumpBottom").onclick = scrollBottom;
+window.addEventListener(
+  "scroll",
+  () =>
+    $("#jumpBottom").classList.toggle(
+      "hidden",
+      state.view !== "chat" ||
+        window.innerHeight + window.scrollY >= document.body.scrollHeight - 350,
+    ),
+  { passive: true },
+);
+
+const presets = {
+  playful: { humor: "playful", detail: "concise" },
+  focused: { humor: "off", detail: "concise" },
+  calm: { humor: "subtle", detail: "balanced" },
+};
+function personaValues() {
+  const form = $("#personaForm");
+  return Object.fromEntries(
+    ["language", "dialect", "humor", "detail"].map((key) => [
+      key,
+      form.elements[key].value,
+    ]),
+  );
+}
+function previewPersona() {
+  const values = personaValues();
+  const english = values.language === "en";
+  $("#previewQuestion").textContent = english
+    ? "Jack, my code broke."
+    : values.dialect === "standard"
+      ? "يا Jack، توقف الكود عن العمل."
+      : "يا Jack، الكود خرب.";
+  const examples = english
+    ? {
+        playful:
+          "Send the first error. The code picked drama; we pick the cause, then we break it properly.",
+        subtle:
+          "First error. One bug at a time—no speeches.",
+        off: "Send the first error and the relevant code. I’ll isolate the cause, patch it, and test.",
+      }
+    : values.dialect === "standard"
+      ? {
+          playful:
+            "أرسل أول رسالة خطأ. الكود قرر المسرح؛ إحنا نقرر السبب وبعدها نكسر المشكلة.",
+          subtle:
+            "أول رسالة خطأ. خطوة واحدة. بلا خطب.",
+          off: "أرسل أول رسالة خطأ والجزء المرتبط بها من الكود. أحدد السبب، أصلحه، ثم أختبر.",
+        }
+      : {
+          playful:
+            "هات أول رسالة خطأ. الكود اختار الدراما؛ إحنا نمسك السبب ونخلّصه. قهوتك اختيارية.",
+          subtle:
+            "خلّينا نشوف أول رسالة خطأ. خطوة خطوة، من غير تمثيل.",
+          off: "أرسل أول رسالة خطأ والكود المرتبط بها. أحدد السبب، أعدّله، وأختبر.",
+        };
+  $("#personaPreview").textContent = examples[values.humor];
+  for (const button of document.querySelectorAll("[data-persona-preset]")) {
+    const preset = presets[button.dataset.personaPreset];
+    const selected =
+      preset.humor === values.humor && preset.detail === values.detail;
+    button.classList.toggle("selected", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  }
+}
+function updateSelfModel(jack) {
+  const formatter = new Intl.NumberFormat("ar-SA");
+  $("#memoryCount").textContent = formatter.format(jack.memories);
+  $("#conversationCount").textContent = formatter.format(jack.conversations);
+  $("#toolCount").textContent = formatter.format(jack.completedTools);
+  const labels = {
+    ready: "جاهز",
+    working: "يعمل على طلبك",
+    gaming: "الأولوية للعبة",
+  };
+  $("#selfState").textContent = labels[jack.state] || "جاهز";
+  $("#jackPresence").textContent =
+    jack.state === "gaming"
+      ? "Jack على وضع الألعاب"
+      : jack.state === "working"
+        ? "Jack يعمل على طلبك"
+        : "Jack هنا";
+  $("#personalityShortcut").textContent = {
+    playful: "حاد، ساخر وقت اللزوم",
+    subtle: "هادي، وفيه حدّة خفيفة",
+    off: "مركّز على النتيجة",
+  }[jack.persona.humor];
+  const r = jack.lastReflection;
+  if (r) {
+    const result =
+      {
+        completed: "اكتمل الرد",
+        cancelled: "توقّف بطلبك",
+        error: "توقّف بسبب خطأ",
+        "step-limit": "وصل إلى حد الخطوات",
+      }[r.outcome] || r.outcome;
+    $("#lastReflection").textContent =
+      `آخر طلب: ${result} · ${r.successfulTools} أداة نجحت · ${r.failedTools} أخطاء أدوات · ${r.durationSeconds} ثانية. هذه نتائج تنفيذ فعلية، وليست أفكارًا داخلية.`;
+  } else
+    $("#lastReflection").textContent = "تظهر هنا نتيجة آخر طلب بعد تنفيذه.";
+}
+async function loadPersona() {
+  const jack = await api("persona");
+  for (const [key, value] of Object.entries(jack.persona))
+    if ($("#personaForm").elements[key])
+      $("#personaForm").elements[key].value = value;
+  $("#personaMessage").textContent = "";
+  updateSelfModel(jack);
+  setComposerPlaceholder(jack.persona.language);
+  previewPersona();
+}
+$("#personaForm").onchange = () => {
+  previewPersona();
+  $("#personaMessage").textContent =
+    "احفظ لتطبيق التغييرات على الردود القادمة.";
+};
+for (const button of document.querySelectorAll("[data-persona-preset]"))
+  button.onclick = () => {
+    for (const [key, value] of Object.entries(
+      presets[button.dataset.personaPreset],
+    ))
+      $("#personaForm").elements[key].value = value;
+    previewPersona();
+    $("#personaMessage").textContent =
+      "احفظ لتطبيق التغييرات على الردود القادمة.";
+  };
+$("#personaForm").onsubmit = async (event) => {
+  event.preventDefault();
+  try {
+    const jack = await api("persona", {
+      method: "POST",
+      body: personaValues(),
+    });
+    updateSelfModel(jack);
+    setComposerPlaceholder(jack.persona.language);
+    $("#personaMessage").textContent = "انحفظت. هذا أسلوبي من الآن ✓";
+  } catch (error) {
+    $("#personaMessage").textContent = error.message;
+  }
+};
 await refreshStatus();
 await history().catch(report);
+syncComposer();
 setInterval(refreshStatus, 15000);

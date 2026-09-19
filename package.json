@@ -14,8 +14,10 @@
     "check": "node --check server/index.mjs && node --check public/app.js"
   },
   "dependencies": {
+    "dompurify": "^3.4.15",
     "exceljs": "^4.4.0",
     "mammoth": "^1.10.0",
+    "marked": "^18.0.13",
     "pdfjs-dist": "^5.4.149",
     "playwright": "^1.55.0"
   },

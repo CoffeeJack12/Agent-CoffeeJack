@@ -97,4 +97,13 @@ export class Store {
   close() {
     this.db.close();
   }
+  counts() {
+    return {
+      memories: this.db.prepare("SELECT COUNT(*) AS n FROM memories").get().n,
+      conversations: this.db.prepare("SELECT COUNT(*) AS n FROM chats").get().n,
+      completedTools: this.db
+        .prepare("SELECT COUNT(*) AS n FROM events WHERE status='done'")
+        .get().n,
+    };
+  }
 }

@@ -8,6 +8,7 @@ import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
 import { runAgent } from "./agent.mjs";
 import { workspacePath } from "./files.mjs";
+import { getPersona, validatePersona, selfModel } from "./personality.mjs";
 
 export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
@@ -171,6 +172,7 @@ export async function createApp({
           gaming,
           autoGaming,
           busy: Boolean(active),
+          jack: selfModel(store, { active: Boolean(active), gaming }),
           approvals: [...approvals.values()].map(({ id, name, args }) => ({
             id,
             name,
@@ -208,6 +210,21 @@ export async function createApp({
       }
       if (route === "/api/events" && req.method === "GET")
         return json(res, 200, store.events());
+      if (route === "/api/persona" && req.method === "GET")
+        return json(
+          res,
+          200,
+          selfModel(store, { active: Boolean(active), gaming }),
+        );
+      if (route === "/api/persona" && req.method === "POST") {
+        const input = validatePersona(await body(req));
+        if (active)
+          return json(res, 409, {
+            error: "أوقف المهمة الحالية قبل تعديل شخصية Jack.",
+          });
+        store.set("persona", { ...getPersona(store), ...input });
+        return json(res, 200, selfModel(store, { active: false, gaming }));
+      }
       if (route === "/api/settings" && req.method === "POST") {
         if (active)
           return json(res, 409, {
@@ -399,7 +416,17 @@ export async function createApp({
         /^[a-z]+-\d+\.png$/.test(path.basename(route))
       )
         filename = path.join(artifacts, path.basename(route));
-      else if (["/", "/app.js", "/style.css", "/favicon.svg"].includes(route))
+      else if (
+        [
+          "/",
+          "/app.js",
+          "/style.css",
+          "/polish.css",
+          "/favicon.svg",
+          "/vendor/marked.esm.js",
+          "/vendor/purify.es.mjs",
+        ].includes(route)
+      )
         filename = path.join(
           root,
           "public",
@@ -410,6 +437,7 @@ export async function createApp({
       const mime = {
         ".html": "text/html; charset=utf-8",
         ".js": "text/javascript; charset=utf-8",
+        ".mjs": "text/javascript; charset=utf-8",
         ".css": "text/css; charset=utf-8",
         ".svg": "image/svg+xml",
         ".png": "image/png",

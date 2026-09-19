@@ -1,3 +1,21 @@
+export function buildChatRequest({ model, messages, tools }) {
+  return {
+    model,
+    messages,
+    ...(tools?.length ? { tools } : {}),
+    stream: true,
+    think: false,
+    keep_alive: "3m",
+    options: {
+      num_ctx: 8192,
+      num_predict: 3072,
+      temperature: 0.7,
+      top_p: 0.95,
+      top_k: 20,
+    },
+  };
+}
+
 export class Ollama {
   constructor(url = "http://127.0.0.1:11434") {
     this.url = url;
@@ -32,15 +50,7 @@ export class Ollama {
   async chat({ model, messages, tools, signal, onToken }) {
     const response = await this.request(
       "/api/chat",
-      {
-        model,
-        messages,
-        ...(tools?.length ? { tools } : {}),
-        stream: true,
-        think: false,
-        keep_alive: "3m",
-        options: { num_ctx: 8192, num_predict: 3072, temperature: 0.3 },
-      },
+      buildChatRequest({ model, messages, tools }),
       signal,
     );
     const decoder = new TextDecoder();
