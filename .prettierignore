@@ -1,0 +1,6 @@
+node_modules
+.runtime
+.local
+work
+outputs
+pnpm-lock.yaml

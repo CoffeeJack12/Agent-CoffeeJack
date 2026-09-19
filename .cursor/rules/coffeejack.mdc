@@ -1,0 +1,5 @@
+---
+description: CoffeeJack project conventions
+alwaysApply: true
+---
+CoffeeJack is a local-first, text-only personal assistant for Windows. Read README.md and docs/ARCHITECTURE.md before changes. Use Node 24, SQLite and Ollama. Preserve Arabic/English support and local-only defaults. Never commit .local, .runtime, secrets, memory, chat history or downloaded models. Tool execution must remain observable and cancellable. Terminal and computer/browser mutations require explicit approval inside the app. Do not claim tools or models succeeded without execution evidence. Run the node test suite after backend changes. Gaming mode must cancel work and unload resident models. Document unfinished capabilities honestly.

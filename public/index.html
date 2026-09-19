@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoffeeJack — Your local companion</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/"
+        ><img src="/favicon.svg" alt="" /><span
+          >CoffeeJack<small>YOUR LOCAL COMPANION</small></span
+        ></a
+      >
+      <button id="newChat" class="new-chat">
+        <span>＋</span> محادثة جديدة <kbd>Ctrl K</kbd>
+      </button>
+      <div class="nav-label">مساحتك</div>
+      <nav>
+        <button class="nav active" data-view="chat">
+          <span>◌</span> المحادثة</button
+        ><button class="nav" data-view="memory"><span>◇</span> الذاكرة</button
+        ><button class="nav" data-view="activity">
+          <span>≋</span> سجل التنفيذ</button
+        ><button class="nav" data-view="settings">
+          <span>⚙</span> الإعدادات
+        </button>
+      </nav>
+      <div class="nav-label history-label">المحادثات الأخيرة</div>
+      <div id="history" class="history"></div>
+      <div class="sidebar-bottom">
+        <div class="private">
+          <i></i>
+          <div>
+            على جهازك. لك وحدك.<small>الذاكرة والمحادثات تُحفظ محليًا</small>
+          </div>
+        </div>
+        <div class="profile">
+          <div class="avatar">A</div>
+          <div>عبدالرحمن<small>Personal workspace</small></div>
+          <span class="version">v0.1</span>
+        </div>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <span class="eyebrow">JACK WORKSPACE</span>
+          <h1 id="pageTitle">المحادثة</h1>
+        </div>
+        <div class="header-actions">
+          <span class="connection"
+            ><i id="connectionDot"></i
+            ><span id="connectionLabel">جارٍ الاتصال</span></span
+          ><button id="gaming" class="ghost">♧ <span>وضع الألعاب</span></button>
+        </div>
+      </header>
+      <section id="chatView" class="view chat-view">
+        <div id="welcome" class="welcome">
+          <div class="welcome-kicker">
+            <span class="small-line"></span> SOME COFFEE. A LITTLE CLARITY.
+          </div>
+          <div class="jack-mark">
+            <img src="/favicon.svg" alt="Jack" /><span class="spark">✦</span>
+          </div>
+          <h2>قهوتك جاهزة.<br /><span>إيش ننجز اليوم؟</span></h2>
+          <p>
+            أنا Jack، مساعدك على جهازك. نبرمج، نبحث، ونرتب أفكارك.<br />قل لي
+            إيش تحتاج، وخلّينا نبدأ.
+          </p>
+          <div class="suggestions">
+            <button
+              data-prompt="ابنِ لي صفحة شخصية بسيطة بالعربي داخل مجلد portfolio، ثم اختبرها في المتصفح."
+              data-mode="coding"
+            >
+              <span class="suggest-icon">⌘</span><strong>خلّينا نبني شيء</strong
+              ><small>موقع، برنامج، أو فكرة جديدة</small
+              ><span class="arrow">↖</span>
+            </button>
+            <button
+              data-prompt="ابحث على الويب عن آخر أخبار التقنية اليوم، ولخص أهم ثلاثة أخبار مع روابط المصادر."
+            >
+              <span class="suggest-icon">◎</span><strong>ابحث معي</strong
+              ><small>معلومات أوضح، من مصادرها</small
+              ><span class="arrow">↖</span>
+            </button>
+            <button
+              data-prompt="ساعدني أرتب أولوياتي لليوم. اسألني عن أهم الأشياء التي أريد إنجازها."
+            >
+              <span class="suggest-icon">◇</span><strong>رتّب أفكاري</strong
+              ><small>من أفكار كثيرة إلى خطوات واضحة</small
+              ><span class="arrow">↖</span>
+            </button>
+          </div>
+        </div>
+        <div id="messages" class="messages" aria-live="polite"></div>
+        <div id="approval" class="approval hidden"></div>
+        <div class="composer-area">
+          <div id="notice" class="notice hidden" role="status"></div>
+          <div id="attachments" class="attachments"></div>
+          <form id="chatForm" class="composer">
+            <textarea
+              id="prompt"
+              dir="auto"
+              rows="2"
+              placeholder="اكتب لـ Jack… فكرة صغيرة تكفي."
+              aria-label="رسالتك إلى Jack"
+            ></textarea>
+            <div class="composer-toolbar">
+              <div>
+                <button
+                  type="button"
+                  id="attach"
+                  class="attach"
+                  title="إرفاق ملف"
+                >
+                  ＋</button
+                ><select id="mode" aria-label="نوع المهمة">
+                  <option value="auto">✦ تلقائي</option>
+                  <option value="coding">⌘ برمجة</option>
+                  <option value="vision">◎ صور</option></select
+                ><span id="modelLabel" class="model-label">Qwen3 · Local</span>
+              </div>
+              <button id="stop" type="button" class="stop hidden">
+                ■ إيقاف</button
+              ><button id="send" type="submit" class="send" aria-label="إرسال">
+                ↑
+              </button>
+            </div>
+          </form>
+          <div class="composer-note">
+            <span>◈ محلي أولًا · بدون اشتراك أو دفع لكل رسالة</span
+            ><span id="runStatus">Jack جاهز لما تكون جاهز.</span>
+          </div>
+        </div>
+        <input
+          type="file"
+          id="fileInput"
+          hidden
+          accept=".txt,.md,.csv,.tsv,.json,.js,.ts,.py,.html,.css,.pdf,.docx,.xlsx,.png,.jpg,.jpeg,.webp"
+        />
+      </section>
+      <section id="memoryView" class="view panel-view hidden">
+        <div class="section-intro">
+          <span class="eyebrow">A LITTLE CONTEXT GOES A LONG WAY</span>
+          <h2>أشياء تستاهل نتذكرها.</h2>
+          <p>
+            تفضيلاتك، قراراتك، والدروس التي تعلّمناها. تقدر تضيفها أو تحذفها في
+            أي وقت.
+          </p>
+        </div>
+        <form id="memoryForm" class="inline-form">
+          <input
+            id="memoryInput"
+            placeholder="مثلًا: أفضل الشرح بالعربي مع أمثلة عملية"
+            required
+          /><button class="primary">حفظ في الذاكرة</button>
+        </form>
+        <div id="memories" class="card-list"></div>
+      </section>
+      <section id="activityView" class="view panel-view hidden">
+        <div class="section-intro">
+          <span class="eyebrow">EVERY STEP, IN THE OPEN</span>
+          <h2>تعرف إيش صار، بالضبط.</h2>
+          <p>كل أداة استخدمها Jack ونتيجتها، محفوظة هنا على جهازك.</p>
+        </div>
+        <button id="refreshEvents" class="ghost">تحديث السجل ↻</button>
+        <div id="events" class="card-list"></div>
+      </section>
+      <section id="settingsView" class="view panel-view hidden">
+        <div class="section-intro">
+          <span class="eyebrow">MAKE YOURSELF AT HOME</span>
+          <h2>Jack، على طريقتك.</h2>
+          <p>
+            الموديلات والمساحة والذاكرة تعمل من جهازك. خدمات الإنترنت تُستخدم
+            فقط عندما تطلب أدوات الويب.
+          </p>
+        </div>
+        <form id="settingsForm" class="settings-grid">
+          <div class="setting-card">
+            <h3>العقل المحلي</h3>
+            <label
+              >الموديل الأساسي<select
+                name="model"
+                class="model-select"
+              ></select></label
+            ><label
+              >موديل البرمجة<select
+                name="codingModel"
+                class="model-select"
+              ></select></label
+            ><label
+              >موديل الصور<select
+                name="visionModel"
+                class="model-select"
+              ></select></label
+            ><small
+              >اختر موديلًا يدعم الرؤية لتحليل الصور والشاشة. قائمة الموديلات
+              تأتي من Ollama.</small
+            >
+          </div>
+          <div class="setting-card">
+            <h3>مساحة العمل</h3>
+            <label
+              >المجلد الذي ينشئ Jack المشاريع داخله<input
+                name="workspace"
+                dir="ltr"
+                required /></label
+            ><label
+              >أسلوبك وتفضيلاتك<textarea
+                name="instructions"
+                rows="4"
+                placeholder="كيف تحب Jack يساعدك؟"
+              ></textarea>
+            </label>
+          </div>
+          <div class="setting-card">
+            <h3>الأدوات والصلاحيات</h3>
+            <label class="toggle-row"
+              ><input type="checkbox" name="autoApprove" /><span
+                >تنفيذ تلقائي للأدوات</span
+              ></label
+            >
+            <p class="hint">
+              عند التفعيل، ينفذ Jack الكتابة والأوامر والتحكم بدون تأكيد لكل
+              خطوة. أوامر النظام يمكنها الوصول خارج مجلد المشروع. يمكنك إيقاف
+              المهمة في أي وقت.
+            </p>
+          </div>
+          <div class="setting-card">
+            <h3>الأولوية لألعابك</h3>
+            <label class="toggle-row"
+              ><input type="checkbox" name="autoGaming" /><span
+                >تشغيل وضع الألعاب تلقائيًا</span
+              ></label
+            ><label
+              >أسماء ملفات الألعاب، مفصولة بفواصل<input
+                name="gameProcesses"
+                dir="ltr" /></label
+            ><small
+              >يفحص الألعاب المحددة كل 15 ثانية، يوقف المهمة ويفرّغ الموديلات.
+              عند إغلاق اللعبة يصبح Jack جاهزًا لطلبك التالي.</small
+            >
+          </div>
+          <div class="settings-footer">
+            <button class="primary">حفظ الإعدادات</button
+            ><span id="settingsMessage" role="status"></span>
+          </div>
+        </form>
+      </section>
+    </main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

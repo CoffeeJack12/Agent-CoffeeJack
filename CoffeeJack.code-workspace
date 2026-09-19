@@ -1,0 +1,12 @@
+{
+  "folders": [{ "path": "." }],
+  "settings": {
+    "files.exclude": { ".runtime": true, ".local": true, "work": true },
+    "search.exclude": {
+      ".runtime/**": true,
+      ".local/**": true,
+      "work/**": true,
+    },
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+  },
+}

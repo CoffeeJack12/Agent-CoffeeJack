@@ -1,0 +1,10 @@
+node_modules/
+.runtime/
+.local/
+.env
+.env.*
+!.env.example
+work/
+outputs/
+*.log
+.DS_Store

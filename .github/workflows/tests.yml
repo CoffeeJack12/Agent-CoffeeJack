@@ -1,0 +1,19 @@
+name: Core tests
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      # The core suite intentionally uses built-in Node modules and a fake model.
+      # Real GPU/model/browser tests are run on the local Windows installation.
+      - run: node --test tests/*.test.mjs
+      - run: node --check server/index.mjs
+      - run: node --check public/app.js

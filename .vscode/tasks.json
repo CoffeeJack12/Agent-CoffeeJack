@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "CoffeeJack: Start",
+      "type": "shell",
+      "command": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start.ps1",
+      "problemMatcher": []
+    },
+    {
+      "label": "CoffeeJack: Test",
+      "type": "shell",
+      "command": ".\\.runtime\\node.exe --test tests/*.test.mjs",
+      "problemMatcher": []
+    }
+  ]
+}
