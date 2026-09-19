@@ -25,7 +25,7 @@ test("workspace confines writes, blocks secrets and rejects junction escapes", a
   await fs.mkdir(outside);
   assert.equal(
     await workspacePath(root, "src/hello.txt", { write: true }),
-    path.join(root, "src", "hello.txt"),
+    path.join(await fs.realpath(root), "src", "hello.txt"),
   );
   for (const p of [
     "../outside/file",
@@ -223,3 +223,4 @@ test("pending tool approval is cancelled when gaming mode starts", async (t) => 
   await assert.rejects(fs.stat(path.join(dir, "projects", "test.txt")));
   await reader.cancel();
 });
+
