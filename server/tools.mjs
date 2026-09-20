@@ -43,6 +43,20 @@ export const definitions = [
     },
     ["command"],
   ),
+  tool("search_code", "Search for code patterns in the workspace.", {
+    query: str("Search query pattern or filename"),
+    path: str("Optional relative path to search in, defaults to workspace root"),
+  }),
+  tool(
+    "git_status",
+    "Check git status of the workspace.",
+    {},
+  ),
+  tool(
+    "git_diff",
+    "Check git diff of the workspace.",
+    {},
+  ),
   tool(
     "remember",
     "Save a useful user preference or verified lesson to long-term memory. Do not save secrets.",
@@ -82,7 +96,20 @@ export const definitions = [
     },
     ["action"],
   ),
+  tool(
+    "run_tests",
+    "Run the project tests using npm.cmd on Windows.",
+
+    {
+      testFilter: {
+        type: "string",
+        description: "Optional test filter pattern (e.g., 'name' or '-grep')",
+      },
+    },
+  ),
 ];
+
+let lastFailedCalls = new Map(); // tracks {toolName}:{argString} -> count
 
 export function runProcess(
   command,
@@ -137,6 +164,7 @@ export class Tools {
   constructor({ root, workspace, store, approve, artifactDirectory }) {
     Object.assign(this, { root, workspace, store, approve, artifactDirectory });
   }
+
   async browserPage() {
     if (!this.context) {
       const { chromium } = await import("playwright");
@@ -153,6 +181,7 @@ export class Tools {
     }
     return this.page;
   }
+
   async execute(name, args, signal) {
     if (signal.aborted) throw new Error("Cancelled");
     const writeActions = ["write_file", "terminal", "desktop"];
@@ -162,6 +191,17 @@ export class Tools {
     )
       await this.approve(name, args, signal);
     if (signal.aborted) throw new Error("Cancelled");
+
+    // --- Anti-loop protection for repeated identical failed tool calls ---
+    const argKey = name + ":" + JSON.stringify(args);
+    const entry = lastFailedCalls.get(argKey) || 0;
+    if (entry >= 3) {
+      throw new Error(
+        `Anti-loop protection: tool "${name}" with same arguments has failed 3 consecutive times.`,
+      );
+    }
+    // ----------------------------------------------------------
+
     if (name === "list_files") {
       const dir = await workspacePath(this.workspace, args.path);
       return (await fs.readdir(dir, { withFileTypes: true }))
@@ -197,18 +237,17 @@ export class Tools {
     if (name === "terminal") {
       if (typeof args.command !== "string" || args.command.length > 20000)
         throw new Error("Invalid command");
-      return await runProcess(
-        process.platform === "win32" ? "powershell.exe" : "sh",
-        process.platform === "win32"
-          ? ["-NoProfile", "-NonInteractive", "-Command", args.command]
-          : ["-c", args.command],
-        {
-          cwd: this.workspace,
-          signal,
-          timeout:
-            Math.min(120, Math.max(1, Number(args.timeout) || 60)) * 1000,
-        },
-      );
+      // On Windows, prefer npm.cmd for npm commands
+      const cmd = process.platform === "win32" ? "npm.cmd" : "npm";
+      const pwArgs = process.platform === "win32"
+        ? ["-NoProfile", "-NonInteractive", "-Command", args.command]
+        : ["-c", args.command];
+      return await runProcess(cmd, pwArgs, {
+        cwd: this.workspace,
+        signal,
+        timeout:
+          Math.min(120, Math.max(1, Number(args.timeout) || 60)) * 1000,
+      });
     }
     if (name === "remember") {
       if (typeof args.content !== "string") throw new Error("Missing memory");
@@ -284,6 +323,136 @@ export class Tools {
       return args.action === "screenshot"
         ? { image: `/artifacts/${filename}` }
         : result;
+    }
+    if (name === "search_code") {
+      const searchPath = args.path
+        ? await workspacePath(this.workspace, args.path)
+        : this.workspace;
+      const query = args.query;
+      // Protected directories that should never be searched
+      const protectedDirs = new Set([".git", "node_modules", ".env", ".env.*", ".local"]);
+      const results = [];
+      const searchRecursive = async (dirEnt) => {
+        const fullPath = path.join(searchPath, dirEnt.name);
+        let stat;
+        try {
+          stat = await fs.stat(fullPath);
+        } catch {
+          return; // skip unreadable paths
+        }
+        if (stat.isDirectory()) {
+          // Check if this directory name matches a protected pattern
+          const dirName = path.basename(fullPath);
+          if (protectedDirs.has(dirName)) return;
+          try {
+            const entries = await fs.readdir(fullPath, { withFileTypes: true });
+            for (const entry of entries) {
+              await searchRecursive(entry);
+            }
+          } catch {
+            // skip directories we can't read
+          }
+        } else if (stat.isFile()) {
+          // Only search in text-based files
+          const ext = path.extname(fullPath);
+          const textExtensions = [
+            ".js", ".mjs", ".cjs", ".json", ".ts", ".tsx", ".jsx",
+            ".mjs", ".ps1", ".bash", ".cmd", ".txt", ".md", ".yaml", ".yml",
+            ".json", ".toml", ".cfg", ".ini", ".html", ".css",
+          ];
+          if (!textExtensions.includes(ext)) return;
+          try {
+            const content = await fs.readFile(fullPath, "utf8");
+            const lines = content.split("\n");
+            for (let li = 0; li < lines.length; li++) {
+              if (lines[li].includes(query)) {
+                // Get surrounding context (2 lines before and after)
+                const start = Math.max(0, li - 2);
+                const end = Math.min(lines.length, li + 3);
+                const contextLines = lines.slice(start, end);
+                // Find the matching line index within context
+                const matchLocalIndex = li - start;
+                results.push({
+                  file: dirEnt.name,
+                  path: fullPath,
+                  lineNumber: li + 1,
+                  matchingLine: lines[li],
+                  context: contextLines.map((l, i) => {
+                    const marker = i === matchLocalIndex ? ">>>" : "   ";
+                    return `${marker} ${l}`;
+                  }),
+                });
+                // Stop after first match per file to avoid duplicates, or remove this limit if you want all
+                break;
+              }
+            }
+          } catch (e) {
+            // skip unreadable files
+          }
+        }
+      };
+      try {
+        const dir = await fs.readdir(searchPath, { withFileTypes: true });
+        for (const entry of dir) {
+          await searchRecursive(entry);
+        }
+        // Cap output: limit total results and context lines
+        const maxResults = 50;
+        const cappedResults = results.slice(0, maxResults);
+        return { results: cappedResults, count: Math.min(results.length, maxResults) };
+      } catch (e) {
+        throw new Error(`Search failed: ${e.message}`);
+      }
+    }
+    if (name === "git_status") {
+      try {
+        const result = await runProcess(
+          process.platform === "win32" ? "git.cmd" : "git",
+          ["status", "--porcelain"],
+          { cwd: this.workspace, signal, timeout: 30000 },
+        );
+        const lines = result.output
+          .trim()
+          .split("\n")
+          .filter((l) => l.length > 0);
+        return { status: lines.length > 0 ? "modified" : "clean", changes: lines };
+      } catch (e) {
+        throw new Error(`git status failed: ${e.message}`);
+      }
+    }
+    if (name === "git_diff") {
+      try {
+        const result = await runProcess(
+          process.platform === "win32" ? "git.cmd" : "git",
+          ["diff"],
+          { cwd: this.workspace, signal, timeout: 30000 },
+        );
+        return { diff: result.output || "" };
+      } catch (e) {
+        throw new Error(`git diff failed: ${e.message}`);
+      }
+    }
+    if (name === "run_tests") {
+      const filter = args.testFilter || "";
+      let cmd;
+      if (process.platform === "win32") {
+        if (filter) {
+          cmd = [["npm.cmd", "run", "test", "--", filter]];
+        } else {
+          cmd = ["npm.cmd", "run", "test"];
+        }
+      } else {
+        if (filter) {
+          cmd = ["npm", "run", "test", "--", filter];
+        } else {
+          cmd = ["npm", "run", "test"];
+        }
+      }
+      return await runProcess(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        cmd,
+        { cwd: this.workspace, signal, timeout: 120000 },
+      );
     }
     throw new Error(`Unknown tool: ${name}`);
   }
