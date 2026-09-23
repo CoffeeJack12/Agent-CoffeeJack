@@ -1,6 +1,6 @@
 # Architecture
 
-CoffeeJack is a loopback-only Node 24 application, with no frontend build step. The plain JavaScript/CSS frontend avoids a large development service running while the user games.
+CoffeeJack is a loopback-bound Node 24 application, with no frontend build step. The plain JavaScript/CSS frontend avoids a large development service running while the user games.
 
 ```text
 Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
@@ -17,6 +17,10 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 ## Modules
 
 - `server/index.mjs`: HTTP routing, session/Origin checks, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
+- `server/access.mjs`: optional Cloudflare Access JWT boundary; disabled without full configuration. The listener stays on loopback.
+- `server/router.mjs`: deterministic general/coding/vision selection with installed-model and capability checks.
+- `server/memory.mjs`: ranked, bounded project context and credential-pattern rejection.
+- `server/developer.mjs`: bounded project mapping, script detection and exact-context patching.
 - `server/agent.mjs`: personality, conversation context, memory, model/tool loop and execution evidence.
 - `server/ollama.mjs`: streaming model adapter, model listing and unloading.
 - `server/store.mjs`: parameterized SQLite statements with WAL and foreign keys.
@@ -33,8 +37,10 @@ Only one agent task runs at a time. Mutating tools suspend until their exact ope
 
 ## Extension points
 
-Add tool schemas and implementations to `server/tools.mjs`, preserving approval and event recording. A new inference provider needs a compatible `chat`, `models` and `unload` adapter; currently only Ollama is implemented. External API providers, MCP discovery, durable scheduled workflows, embeddings and fine-tuning are not implemented. Local shell/browser tools can access authorized services, but that is not a universal native integration.
+Add tool schemas and implementations to `server/tools.mjs`, preserving approval and event recording. A new inference provider needs a compatible `chat`, `models`, `inspect` and `unload` adapter (with `prepare` for single-model residency); currently only Ollama is implemented. External API providers, MCP discovery, durable scheduled workflows, embeddings and fine-tuning are not implemented. Local shell/browser tools can access authorized services, but that is not a universal native integration.
 
 ## Tests
 
 The automated suite covers persistence, traversal/junction escape prevention, blocked secret paths, model/tool error feedback, session/Origin checks, gaming-mode blocking, streaming messages and cancellation during approval. Hardware, real model, document, browser and desktop smoke tests are performed separately because they require Windows, installed models and interactive dependencies.
+
+Optional remote architecture and provisioning prerequisites are documented in [REMOTE-ACCESS.md](REMOTE-ACCESS.md). Browser interaction checks run separately through `scripts/ui-smoke.mjs` and in the Windows browser CI job.

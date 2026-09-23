@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID, randomBytes } from "node:crypto";
+import { accessFromEnvironment } from "./access.mjs";
 import { Store } from "./store.mjs";
 import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
@@ -15,7 +16,9 @@ export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   dataDirectory,
   ollama: providedOllama,
+  remoteAccess,
 } = {}) {
+  const access = remoteAccess ?? accessFromEnvironment();
   const data = dataDirectory ?? path.join(root, ".local");
   const artifacts = path.join(data, "artifacts");
   await fs.mkdir(artifacts, { recursive: true });
@@ -141,10 +144,16 @@ export async function createApp({
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
     const host = req.headers.host ?? "";
-    if (!/^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host))
-      return json(res, 403, { error: "Invalid host" });
+    const localHost = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host);
+    if (!localHost) {
+      if (!access || host !== access.hostname)
+        return json(res, 403, { error: "Invalid host" });
+      if (!(await access.authorize(req)))
+        return json(res, 403, { error: "Remote authentication required" });
+    }
+    const expectedOrigin = (localHost ? "http://" : "https://") + host;
     if (
-      (req.headers.origin && req.headers.origin !== `http://${host}`) ||
+      (req.headers.origin && req.headers.origin !== expectedOrigin) ||
       req.headers["sec-fetch-site"] === "cross-site"
     )
       return json(res, 403, { error: "Cross-origin request denied" });
