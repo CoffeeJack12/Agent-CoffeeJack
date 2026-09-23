@@ -12,6 +12,17 @@ import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
 import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
+import { createDefaultRegistry } from "./providers/index.mjs";
+import {
+  shouldConsultCouncil,
+  selectCouncilParticipants,
+  runCouncil,
+  councilUiSummary,
+} from "./council.mjs";
+import {
+  lessonFromCodingSuccess,
+  persistVerifiedLesson,
+} from "./lessons.mjs";
 import { workspacePath } from "./files.mjs";
 import { getPersona, validatePersona, selfModel } from "./personality.mjs";
 import {
@@ -51,6 +62,7 @@ export async function createApp({
   const boot = createSession(store, owner.id);
   let token = boot.token;
   const ollama = providedOllama ?? new Ollama(process.env.OLLAMA_URL);
+  const registry = createDefaultRegistry(ollama);
   const approvals = new Map();
   const memoryProposals = createMemoryProposalStore(store);
   let active = null,
@@ -236,6 +248,31 @@ export async function createApp({
         } catch (e) {
           modelError = e.message;
         }
+        let providers = [];
+        try {
+          await registry.refresh();
+          providers = registry.listProviders().map((p) => ({
+            ...p,
+            status: !p.enabled
+              ? "not_configured"
+              : p.available
+                ? "connected"
+                : "unavailable",
+          }));
+          const catalog = registry.listModels({
+            remoteAllowed:
+              getPreferences(store, user.id).remoteAi !== "never",
+          });
+          if (catalog.length)
+            models = catalog.map((m) => ({
+              name: m.id,
+              provider: m.provider,
+              local: m.local !== false,
+              label: `${m.id} · ${m.provider}${m.local === false ? " · Remote" : " · Local"}`,
+            }));
+        } catch {
+          /* keep ollama models */
+        }
         return json(res, 200, {
           token: identity.token,
           user: {
@@ -246,6 +283,7 @@ export async function createApp({
           },
           permissions: permissionSummary(user),
           models,
+          providers,
           modelError,
           settings: settings(),
           preferences: getPreferences(store, user.id),
@@ -402,6 +440,39 @@ export async function createApp({
         return json(res, 200, store.events(user.id));
       if (route === "/api/preferences" && req.method === "GET")
         return json(res,200,{preferences:getPreferences(store,user.id),catalog:{languages:ASSISTANT_LANGUAGES||LANGUAGES,appLanguages:APP_LANGUAGES,modes:MODES,packs:PACKS,options:PREFERENCE_OPTIONS,memoryBehaviors:MEMORY_BEHAVIORS}});
+      if (route === "/api/providers" && req.method === "GET") {
+        await registry.refresh();
+        const prefs = getPreferences(store, user.id);
+        return json(res, 200, {
+          providers: registry.listProviders().map((p) => ({
+            id: p.id,
+            name: p.name,
+            type: p.type,
+            privacyClass: p.privacyClass,
+            enabled: p.enabled,
+            available: Boolean(p.available),
+            modelCount: p.modelCount,
+            lastSuccessAt: p.lastSuccessAt || null,
+            lastFailureAt: p.lastFailureAt || null,
+            latencyMs: p.latencyMs ?? null,
+            error: p.error || null,
+            status: !p.enabled
+              ? "not_configured"
+              : p.available
+                ? "connected"
+                : "unavailable",
+          })),
+          models: registry.listModels({
+            remoteAllowed: prefs.remoteAi !== "never",
+          }),
+          preferences: {
+            councilMode: prefs.councilMode,
+            remoteAi: prefs.remoteAi,
+            councilMaxModels: prefs.councilMaxModels,
+            remoteBudget: prefs.remoteBudget,
+          },
+        });
+      }
       if (route === "/api/preferences" && req.method === "POST") {
         if(active)return json(res,409,{error:"Stop the active task before changing preferences"});
         return json(res,200,savePreferences(store,await body(req),user.id));
@@ -602,7 +673,10 @@ export async function createApp({
         emit({ type: "chat", chat });
         const conf = settings();
         try {
-          const preferences = getPreferences(store, user.id);
+          const preferences = {
+            ...getPreferences(store, user.id),
+            ...(user.role === "guest" ? { remoteAi: "never" } : {}),
+          };
           const requestedMode =
             typeof b.requestedMode === "string" && b.requestedMode
               ? b.requestedMode
@@ -623,6 +697,7 @@ export async function createApp({
               : "auto";
           const routing = await routeModel({
             ollama,
+            registry,
             settings: conf,
             text: b.text,
             mode: taskMode,
@@ -632,19 +707,109 @@ export async function createApp({
             requestedModel,
             effectiveMode: modeInfo.effectiveMode,
             gaming,
+            preferences,
           });
+          if (routing.needsRemoteApproval) {
+            // Remote Ask: require an approval-shaped gate before prepare/chat.
+            await new Promise((resolve, reject) => {
+              const id = randomUUID();
+              const finish = (allowed) => {
+                clearTimeout(timer);
+                approvals.delete(id);
+                allowed
+                  ? resolve()
+                  : reject(new Error("Remote AI use declined"));
+              };
+              const timer = setTimeout(() => finish(false), 300000);
+              approvals.set(id, {
+                id,
+                name: "remote_ai",
+                args: {
+                  provider: routing.provider,
+                  model: routing.model,
+                },
+                finish,
+                userId: user.id,
+              });
+              emit({
+                type: "approval",
+                id,
+                name: "remote_ai",
+                args: { provider: routing.provider, model: routing.model },
+              });
+            });
+          }
           emit({
             type: "routing",
             model: routing.model,
             kind: routing.kind,
             fallback: routing.fallback,
             reason: routing.reason,
+            reasonCode: routing.reasonCode,
+            provider: routing.provider || "ollama",
             requestedModel: routing.requestedModel,
             effectiveModel: routing.effectiveModel,
             requestedMode: modeInfo.requestedMode,
             effectiveMode: modeInfo.effectiveMode,
           });
-          await ollama.prepare?.(routing.model, controller.signal);
+          // Council decision (text proposals only; skip if <2 models).
+          let councilResult = null;
+          try {
+            await registry.refresh(controller.signal);
+            const available = registry.listModels({
+              remoteAllowed: preferences.remoteAi !== "never" && !gaming,
+              localOnly:
+                preferences.remoteAi === "never" ||
+                preferences.remoteBudget === "off" ||
+                gaming,
+            });
+            const decision = shouldConsultCouncil({
+              text: b.text,
+              preferences,
+              gaming,
+              effectiveMode: modeInfo.effectiveMode,
+              availableModels: available,
+            });
+            if (!decision.consult) {
+              emit({
+                type: "council",
+                ...councilUiSummary({
+                  skipped: true,
+                  reason: decision.reason,
+                }),
+              });
+            } else {
+              const participants = selectCouncilParticipants(available, {
+                max: Number(preferences.councilMaxModels || 2),
+                gaming,
+              });
+              councilResult = await runCouncil({
+                participants,
+                prompt: b.text,
+                chatFn: async ({ model, messages, signal }) => {
+                  // Local Ollama only for council text proposals in v1.
+                  const response = await ollama.chat({
+                    model,
+                    messages,
+                    tools: [],
+                    profile: { think: false, context: 4096, predict: 1024 },
+                    signal,
+                    onToken: () => {},
+                  });
+                  return { content: response.content };
+                },
+                signal: controller.signal,
+              });
+              emit({ type: "council", ...councilUiSummary(councilResult) });
+            }
+          } catch {
+            emit({
+              type: "council",
+              ...councilUiSummary({ skipped: true, reason: "error" }),
+            });
+          }
+          if (routing.provider === "ollama" || !routing.provider)
+            await ollama.prepare?.(routing.model, controller.signal);
           await runAgent({
             store,
             ollama,
@@ -662,7 +827,34 @@ export async function createApp({
             memoryProposals,
             userId: user.id,
             user,
+            councilContext: councilResult?.synthesis || "",
+            provider: routing.provider || "ollama",
+            fallbackModels: routing.fallbackModels || [],
           });
+          // Persist a verified coding lesson when tests clearly passed this turn.
+          try {
+            const events = store.events(user.id).slice(0, 20);
+            const testOk = events.find(
+              (e) =>
+                e.chat_id === chat.id &&
+                e.tool === "run_tests" &&
+                e.status === "done",
+            );
+            if (testOk) {
+              persistVerifiedLesson(
+                store,
+                lessonFromCodingSuccess({
+                  summary: `Verified fix approach for: ${b.text.slice(0, 120)}`,
+                  testEvidence: "run_tests done",
+                  userId: user.id,
+                  chatId: chat.id,
+                  project: tools.workspace,
+                }),
+              );
+            }
+          } catch {
+            /* lesson persistence is best-effort */
+          }
         } catch (e) {
           emit({
             type: "error",
@@ -728,6 +920,8 @@ export async function createApp({
     server,
     store,
     token,
+    ollama,
+    registry,
     memoryProposals,
     close: async () => {
       clearInterval(timer);
