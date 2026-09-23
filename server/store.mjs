@@ -3,6 +3,8 @@ import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
+import { projectKey, validateMemory, retrieveMemories } from "./memory.mjs";
+
 export class Store {
   constructor(directory) {
     mkdirSync(directory, { recursive: true });
@@ -13,6 +15,19 @@ export class Store {
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, role TEXT NOT NULL, content TEXT NOT NULL, created TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, kind TEXT NOT NULL, created TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, tool TEXT NOT NULL, detail TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL);`);
+    if (
+      !this.db
+        .prepare("PRAGMA table_info(memories)")
+        .all()
+        .some((column) => column.name === "project")
+    )
+      this.db.exec("ALTER TABLE memories ADD COLUMN project TEXT");
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS memories_project ON memories(project)",
+    );
+  }
+  relevantMemories(query, options) {
+    return retrieveMemories(this.db, query, options);
   }
   get(key, fallback) {
     const row = this.db
@@ -66,11 +81,21 @@ export class Store {
       )
       .all(`%${query}%`);
   }
-  remember(content, kind = "note") {
+  remember(content, kind = "note", project = null) {
+    content = validateMemory(content, kind);
+    const scope = kind === "preference" ? null : projectKey(project);
+    const existing = this.db
+      .prepare(
+        "SELECT id FROM memories WHERE content=? AND kind=? AND project IS ?",
+      )
+      .get(content, kind, scope);
+    if (existing) return existing.id;
     const id = randomUUID();
     this.db
-      .prepare("INSERT INTO memories VALUES(?,?,?,?)")
-      .run(id, content.slice(0, 8000), kind, new Date().toISOString());
+      .prepare(
+        "INSERT INTO memories(id,content,kind,created,project) VALUES(?,?,?,?,?)",
+      )
+      .run(id, content, kind, new Date().toISOString(), scope);
     return id;
   }
   forget(id) {

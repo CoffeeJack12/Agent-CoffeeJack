@@ -263,9 +263,14 @@ export class Tools {
     }
     if (name === "remember") {
       if (typeof args.content !== "string") throw new Error("Missing memory");
-      return { id: this.store.remember(args.content, args.kind) };
+      return {
+        id: this.store.remember(args.content, args.kind, this.workspace),
+      };
     }
-    if (name === "recall") return this.store.memories(String(args.query ?? ""));
+    if (name === "recall")
+      return this.store.relevantMemories(String(args.query ?? ""), {
+        project: this.workspace,
+      });
     if (name === "web_search") {
       const page = await this.browserPage();
       await page.goto(

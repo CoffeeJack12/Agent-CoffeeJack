@@ -18,8 +18,7 @@ export async function runAgent({
   emit,
 }) {
   const memories = store
-    .memories()
-    .slice(0, 25)
+    .relevantMemories(text, { project: tools.workspace })
     .map((m) => `[${m.kind}] ${m.content}`)
     .join("\n");
   const persona = getPersona(store);

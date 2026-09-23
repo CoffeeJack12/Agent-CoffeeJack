@@ -202,7 +202,7 @@ export async function createApp({
         if (typeof b.content !== "string" || !b.content.trim())
           throw new Error("Memory is empty");
         return json(res, 200, {
-          id: store.remember(b.content, b.kind ?? "note"),
+          id: store.remember(b.content, b.kind ?? "note", workspace),
         });
       }
       if (route.startsWith("/api/memories/") && req.method === "DELETE") {
