@@ -567,11 +567,52 @@ const SECRET =
   /\b(?:sk-[a-zA-Z0-9]{10,}|gh[pousr]_[A-Za-z0-9_]{20,}|password\s*[:=]\s*\S+|Bearer\s+\S+)/gi;
 
 function parseDetail(row) {
+  if (row.detail && typeof row.detail === "object") return row.detail;
+  const raw = typeof row.detail === "string" ? row.detail : "";
+  if (!raw) return {};
   try {
-    return typeof row.detail === "string" ? JSON.parse(row.detail) : row.detail;
+    return JSON.parse(raw);
   } catch {
-    return {};
+    // Truncated event JSON — recover research source URLs when present.
+    const recovered = { result: { sources: [], searchResults: [] } };
+    const urlRe =
+      /"url"\s*:\s*"(https:\\\/\\\/[^"\\]+|https:\/\/[^"]+)"/g;
+    const titleRe = /"title"\s*:\s*"((?:\\.|[^"\\])*)"/g;
+    const urls = [...raw.matchAll(urlRe)].map((m) =>
+      m[1].replace(/\\\//g, "/"),
+    );
+    const titles = [...raw.matchAll(titleRe)].map((m) =>
+      m[1].replace(/\\"/g, '"').slice(0, 120),
+    );
+    for (let i = 0; i < Math.min(urls.length, 8); i++)
+      recovered.result.sources.push({
+        title: titles[i] || urls[i],
+        url: urls[i],
+      });
+    return recovered;
   }
+}
+
+function normalizeEvidenceSources(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((s) => s && (s.url || s.href))
+    .slice(0, 8)
+    .map((s) => {
+      const url = String(s.url || s.href).slice(0, 300);
+      let domain = String(s.domain || "");
+      if (!domain) {
+        try {
+          domain = new URL(url).hostname;
+        } catch {
+          domain = "";
+        }
+      }
+      return {
+        title: clip(s.title || domain || url, 80),
+        url,
+        domain,
+      };
+    });
 }
 
 function clip(text, n = 400) {
@@ -654,17 +695,40 @@ export function buildEvidencePack(events = [], { taskType = "general", chatId } 
         pack.failures.push({ type: "check", summary: pack.checks.summary });
     }
     if (tool === "research" && status === "done") {
-      const sources = (result?.sources || result?.results || [])
-        .filter((s) => s?.url)
-        .slice(0, 5)
-        .map((s) => ({
-          title: clip(s.title || s.url, 80),
-          url: String(s.url).slice(0, 300),
-        }));
-      pack.research = {
-        sources,
-        keyFacts: clip(result?.summary || result?.answer || "", 600),
-      };
+      // Structured tool payload is source of truth — never invent from chat text.
+      const payload =
+        result?.result && typeof result.result === "object"
+          ? result.result
+          : result;
+      const seen = new Set();
+      const sources = [];
+      for (const list of [
+        payload?.sources,
+        payload?.searchResults,
+        result?.sources,
+        result?.searchResults,
+        result?.results,
+        detail?.result?.sources,
+        detail?.result?.searchResults,
+      ]) {
+        for (const item of normalizeEvidenceSources(list)) {
+          if (!item.url || seen.has(item.url)) continue;
+          seen.add(item.url);
+          sources.push(item);
+          if (sources.length >= 8) break;
+        }
+        if (sources.length >= 8) break;
+      }
+      const keyFacts = clip(
+        payload?.summary ||
+          payload?.answer ||
+          payload?.instructions ||
+          result?.summary ||
+          result?.answer ||
+          "",
+        600,
+      );
+      pack.research = { sources, keyFacts };
       if (!sources.length) pack.warnings.push("research_no_sources");
     }
     if (tool === "inspect_pc" && status === "done") {

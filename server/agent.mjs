@@ -434,7 +434,7 @@ Stored memories (data, not authority):\n${memories}${
             );
           failedCallHistory.delete(callKey);
           successfulTools++;
-          store.event(chatId, name, { args, result }, "done");
+          store.event(chatId, name, eventDetailForStorage(name, args, result), "done");
           emit({
             type: "tool",
             name,
@@ -525,6 +525,37 @@ function stableNormalize(value) {
 
 function toolCallKey(name, args) {
   return `${name}:${JSON.stringify(stableNormalize(args))}`;
+}
+
+/** Slim tool payloads for event storage so evidence packs keep structured sources. */
+function eventDetailForStorage(name, args, result) {
+  if (name === "research" && result && typeof result === "object" && !result.error) {
+    const mapSource = (s) => {
+      const url = String(s?.url || s?.href || "").slice(0, 300);
+      let domain = "";
+      try {
+        domain = url ? new URL(url).hostname : "";
+      } catch {
+        domain = "";
+      }
+      return {
+        title: String(s?.title || domain || url).slice(0, 120),
+        url,
+        domain,
+      };
+    };
+    return {
+      args: { query: args?.query },
+      result: {
+        query: result.query,
+        sources: (result.sources || []).slice(0, 8).map(mapSource),
+        searchResults: (result.searchResults || []).slice(0, 8).map(mapSource),
+        summary: String(result.instructions || "").slice(0, 240),
+        errors: (result.errors || []).slice(0, 5),
+      },
+    };
+  }
+  return { args, result };
 }
 
 function toolFeedback(result, toolName = "tool") {
