@@ -186,6 +186,12 @@ async function refreshStatus() {
     const status = await api("status");
     state.status = status;
     state.token = status.token;
+    if (status.user) {
+      $("#profileName").textContent = status.user.display_name;
+      $("#profileRole").textContent = status.user.role;
+      $("#profileAvatar").textContent =
+        status.user.display_name.trim().charAt(0).toUpperCase() || "?";
+    }
     applyAppLanguage(status.preferences?.appLanguage ?? "auto");
     if (!state.modeInitialized) {
       state.currentMode = status.preferences?.mode ?? "auto";
@@ -801,6 +807,7 @@ async function loadSettings() {
   const status = await refreshStatus();
   if (!status) return;
   await loadPreferences();
+  await loadUsers();
   const form = $("#settingsForm");
   for (const [name, host] of [
     ["model", "#modelSelectHost"],
@@ -839,6 +846,91 @@ async function loadSettings() {
     form.elements[key].checked = status.settings[key];
   form.elements.gameProcesses.value = status.settings.gameProcesses.join(", ");
 }
+async function switchUser(userId) {
+  if (state.busy) throw new Error(tr("chat.stopFirst"));
+  const result = await api("session/switch", {
+    method: "POST",
+    body: { userId },
+  });
+  state.token = result.token;
+  state.chatId = null;
+  state.modeInitialized = false;
+  state.status = null;
+  $("#messages").innerHTML = "";
+  $("#welcome").classList.remove("hidden");
+  await refreshStatus();
+  await Promise.all([history(), loadPreferences()]);
+  if (state.view === "settings") await loadUsers();
+}
+async function loadUsers() {
+  const users = await api("users");
+  const current = state.status?.user;
+  if (!current) return;
+  $("#currentUser").textContent = `${current.display_name} · ${current.role}`;
+  const owner = current.role === "owner";
+  $("#createUserForm").classList.toggle("hidden", !owner);
+  $("#usersList").innerHTML = "";
+  for (const user of users) {
+    const row = document.createElement("div");
+    row.className = "card";
+    const label = document.createElement("p");
+    label.textContent = `${user.display_name} · ${user.role} · ${user.status}`;
+    row.append(label);
+    if (owner && user.status === "active" && user.id !== current.id) {
+      const use = document.createElement("button");
+      use.type = "button";
+      use.className = "ghost";
+      use.textContent = tr("users.switch");
+      use.onclick = () => switchUser(user.id).catch(report);
+      row.append(use);
+    }
+    if (owner) {
+      const rename = document.createElement("button");
+      rename.type = "button";
+      rename.className = "ghost";
+      rename.textContent = tr("users.rename");
+      rename.onclick = async () => {
+        const displayName = prompt(tr("users.name"), user.display_name)?.trim();
+        if (!displayName || displayName === user.display_name) return;
+        await api("users/" + user.id, {
+          method: "PATCH",
+          body: { displayName },
+        });
+        await loadUsers();
+      };
+      row.append(rename);
+      if (user.status === "active" && user.id !== current.id) {
+        const disable = document.createElement("button");
+        disable.type = "button";
+        disable.className = "delete";
+        disable.textContent = tr("users.disable");
+        disable.onclick = async () => {
+          if (!confirm(tr("users.disableConfirm"))) return;
+          await api("users/" + user.id, {
+            method: "PATCH",
+            body: { status: "disabled" },
+          });
+          await loadUsers();
+        };
+        row.append(disable);
+      }
+    }
+    $("#usersList").append(row);
+  }
+}
+$("#createUserForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  await api("users", {
+    method: "POST",
+    body: {
+      displayName: form.elements.displayName.value,
+      role: form.elements.role.value,
+    },
+  });
+  form.reset();
+  await loadUsers();
+};
 $("#settingsForm").onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;

@@ -128,7 +128,14 @@ try {
   await page.locator("#newChat").click();
   await prompt.fill("approval");
   await prompt.press("Enter");
-  await page.locator("#allowTool").click();
+  // Owner permission policy may auto-allow routine workspace writes.
+  const allowTool = page.locator("#allowTool");
+  try {
+    await allowTool.waitFor({ state: "visible", timeout: 2500 });
+    await allowTool.click();
+  } catch {
+    /* auto-allowed */
+  }
   await page.locator("#stop").waitFor({ state: "hidden" });
   assert.equal(
     await fs.readFile(path.join(directory, "projects/approved.txt"), "utf8"),
@@ -200,7 +207,11 @@ try {
   await page.locator('#preferenceForm .primary').click();
   await page.waitForFunction(()=>/Saved|تم الحفظ/.test(document.querySelector('#preferenceMessage').textContent));
   await capture('settings');
-  const prefs=await page.evaluate(async()=>{const r=await fetch('/api/preferences');return (await r.json()).preferences;});
+  const prefs=await page.evaluate(async()=>{
+    const status=await (await fetch('/api/status')).json();
+    const r=await fetch('/api/preferences',{headers:{'X-CoffeeJack-Token':status.token}});
+    return (await r.json()).preferences;
+  });
   assert.equal(prefs.language,'mixed');assert.equal(prefs.address,'lord');assert.equal(prefs.mode,'empathy');
   assert.equal(
     await page.locator("#jackModeHost .cj-dropdown").evaluate((element) => element.getValue()),
@@ -228,7 +239,10 @@ try {
     /Saved|تم الحفظ/.test(document.querySelector("#preferenceMessage")?.textContent || ""),
   );
   const prefCheck = await page.evaluate(async () => {
-    const r = await fetch("/api/preferences");
+    const status = await (await fetch("/api/status")).json();
+    const r = await fetch("/api/preferences", {
+      headers: { "X-CoffeeJack-Token": status.token },
+    });
     return (await r.json()).preferences.memoryBehavior;
   });
   assert.equal(prefCheck, "ask");
@@ -249,7 +263,10 @@ try {
     document.querySelector(".memory-ask-card.resolved"),
   );
   const afterSave = await page.evaluate(async () => {
-    const r = await fetch("/api/preferences");
+    const status = await (await fetch("/api/status")).json();
+    const r = await fetch("/api/preferences", {
+      headers: { "X-CoffeeJack-Token": status.token },
+    });
     return (await r.json()).preferences;
   });
   assert.equal(afterSave.address, "lord");

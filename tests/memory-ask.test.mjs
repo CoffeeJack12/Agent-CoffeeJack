@@ -75,7 +75,7 @@ test("proposal save / discard / edit resolve correctly", async (t) => {
   assert.equal(edited.action, "edit");
   assert.equal(edited.content, "Address preference: Sir");
   assert.equal(store.memories().length, 1);
-  assert.equal(getPreferences(store).address, "master");
+  assert.equal(getPreferences(store).address, "sir");
   assert.equal(proposals.size(), 0);
 });
 

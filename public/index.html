@@ -49,8 +49,8 @@
           </div>
         </div>
         <div class="profile">
-          <div class="avatar">A</div>
-          <div>عبدالرحمن<small data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
+          <div id="profileAvatar" class="avatar">A</div>
+          <div><span id="profileName">عبدالرحمن</span><small id="profileRole" data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
           <span class="version">v0.2</span>
         </div>
       </div>
@@ -336,6 +336,21 @@
           </p>
         </div>
         <form id="preferenceForm" class="settings-grid" aria-label="Jack preferences"></form>
+        <section id="usersSection" class="setting-card">
+          <h3 data-i18n="users.title">Users</h3>
+          <p id="currentUser"></p>
+          <div id="usersList" class="card-list"></div>
+          <form id="createUserForm" class="inline-form hidden">
+            <input name="displayName" maxlength="80" required data-i18n-placeholder="users.name" placeholder="Display name" />
+            <select name="role">
+              <option value="trusted">Trusted</option>
+              <option value="standard" selected>Standard</option>
+              <option value="guest">Guest</option>
+              <option value="owner">Owner</option>
+            </select>
+            <button class="primary" data-i18n="users.create">Create user</button>
+          </form>
+        </section>
         <div class="setting-card"><h3>Branding / الهوية</h3><p>Replace approved assets in <code>public/jack/avatar.png</code>, <code>icon.png</code>, or <code>logo.png</code>. A J monogram appears until then.</p><p>Voice is not installed. Startup remains controlled by your CoffeeJack launcher.</p></div>
         <form id="settingsForm" class="settings-grid">
           <div class="setting-card">

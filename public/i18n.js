@@ -234,6 +234,13 @@ export const dictionaries = {
       "Replace approved assets in public/jack/avatar.png, icon.png, or logo.png. A J monogram appears until then.",
     "settings.voiceNote":
       "Voice is not installed. Startup remains controlled by your CoffeeJack launcher.",
+    "users.title": "Users",
+    "users.name": "Display name",
+    "users.create": "Create user",
+    "users.switch": "Switch",
+    "users.rename": "Rename",
+    "users.disable": "Disable",
+    "users.disableConfirm": "Disable this user?",
 
     // Preferences (settings form)
     "settings.appLanguage": "App language",
@@ -552,6 +559,13 @@ export const dictionaries = {
       "Replace approved assets in public/jack/avatar.png, icon.png, or logo.png. A J monogram appears until then.",
     "settings.voiceNote":
       "Voice is not installed. Startup remains controlled by your CoffeeJack launcher.",
+    "users.title": "المستخدمون",
+    "users.name": "اسم العرض",
+    "users.create": "إنشاء مستخدم",
+    "users.switch": "تبديل",
+    "users.rename": "إعادة تسمية",
+    "users.disable": "تعطيل",
+    "users.disableConfirm": "تعطيل هذا المستخدم؟",
 
     "settings.appLanguage": "لغة الواجهة",
     "settings.assistantLanguage": "لغة المساعد",

@@ -4,6 +4,7 @@ The app remains a local-first Windows agent with one active task at a time, loca
 
 ## Completed in this upgrade
 
+- Multi-user profiles: database-backed sessions, owner/trusted/standard/guest roles, scoped chats/memory/preferences/activity/approvals, owner user management and profile switching, audit events, and transactional legacy-data backfill. See [MULTI-USER.md](MULTI-USER.md).
 - Jarvis foundation: persisted conversation facts/questions, Steam continuity, direct cybersecurity tone, existing-chat bootstrap, execution plans and bounded test-claim evaluation. See [JARVIS-CORE.md](JARVIS-CORE.md) for supported cases and limits.
 
 - Execution reliability: stable anti-loop keys, fourth-failure blocking, successful-repeat reset, real Windows PowerShell and npm execution, protected recursive search and checked Git results.
@@ -16,7 +17,7 @@ The app remains a local-first Windows agent with one active task at a time, loca
 
 ## Verification and limits
 
-The built-in Node suite and separate Chromium smoke cover persistence, workspace/secret/junction protections, real tool execution, model routing, ranked memory, HTTP security, approvals, gaming cancellation, and UI interactions. The CI workflow runs both on Windows. `node --test tests/*.test.mjs` runs core tests; `npm.cmd run test:ui` runs the browser smoke with Playwright Chromium installed.
+The built-in Node suite and separate Chromium smoke cover persistence, multi-user migration and isolation, role permissions, workspace/secret/junction protections, real tool execution, model routing, ranked memory, HTTP security, approvals, gaming cancellation, and UI interactions. The CI workflow runs both on Windows. `node --test tests/*.test.mjs` runs core tests; `npm.cmd run test:ui` runs the browser smoke with Playwright Chromium installed.
 
 Only `qwen3:8b` was present during development. Model intelligence is still a limiting factor; no stronger coding or vision model was downloaded. A missing vision model produces a clear error. Routing is deterministic keyword/capability logic, not a learned classifier. Memory is lexical ranking, not semantic retrieval, and credential detection is a heuristic rather than a general secret scanner.
 

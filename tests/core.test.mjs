@@ -165,7 +165,13 @@ test("HTTP origin/token checks, memory persistence, gaming block and streaming c
     (await send("/api/memories", { content: "Arabic please" })).status,
     200,
   );
-  assert.equal((await (await fetch(base + "/api/memories")).json()).length, 1);
+  const authenticated = {
+    headers: { "X-CoffeeJack-Token": app.token },
+  };
+  assert.equal(
+    (await (await fetch(base + "/api/memories", authenticated)).json()).length,
+    1,
+  );
   await send("/api/gaming", { enabled: true });
   assert.equal(unloaded, true);
   assert.equal((await send("/api/chat", { text: "hello" })).status, 409);
@@ -174,9 +180,12 @@ test("HTTP origin/token checks, memory persistence, gaming block and streaming c
   const events = (await response.text()).trim().split("\n").map(JSON.parse);
   assert.equal(events.at(-1).type, "done");
   assert.equal(events.find((e) => e.type === "token").text, "Hello Jack");
-  const chats = await (await fetch(base + "/api/chats")).json();
+  const chats = await (await fetch(base + "/api/chats", authenticated)).json();
   assert.equal(chats.length, 1);
-  assert.equal((await fetch(base + "/api/chats/missing")).status, 404);
+  assert.equal(
+    (await fetch(base + "/api/chats/missing", authenticated)).status,
+    404,
+  );
 });
 test("pending tool approval is cancelled when gaming mode starts", async (t) => {
   const dir = await temporary(t);
@@ -194,8 +203,8 @@ test("pending tool approval is cancelled when gaming mode starts", async (t) => 
         tool_calls: [
           {
             function: {
-              name: "write_file",
-              arguments: { path: "test.txt", content: "hello" },
+              name: "terminal",
+              arguments: { command: "Remove-Item -Force test.txt" },
             },
           },
         ],

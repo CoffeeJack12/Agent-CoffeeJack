@@ -19,7 +19,9 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/task-state.mjs`: user-grounded task context and pre-emission clarification/tone guard, persisted per chat.
 - `server/planner.mjs`: bounded execution stages, tool evidence and one-repair test-claim evaluator.
 
-- `server/index.mjs`: HTTP routing, session/Origin checks, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
+- `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
+- `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions and audit events.
+- `server/permissions.mjs`: owner/trusted/standard/guest role policy and per-capability allow, deny or approval decisions.
 - `server/access.mjs`: optional Cloudflare Access JWT boundary; disabled without full configuration. The listener stays on loopback.
 - `server/router.mjs`: deterministic general/coding/vision selection with installed-model and capability checks.
 - `server/memory.mjs`: ranked, bounded project context and credential-pattern rejection.
@@ -34,7 +36,7 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 
 ## Data and lifecycle
 
-`.local/coffeejack.sqlite` stores settings, messages, editable memories and tool events. `.local/projects` is the default generated-project workspace. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
+`.local/coffeejack.sqlite` stores users, sessions, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals and activity are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. `.local/projects` is the default generated-project workspace. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
 
 Only one agent task runs at a time. Mutating tools suspend until their exact operation is approved (or auto-approval is explicitly enabled). Approval expires after five minutes, and cancellation rejects pending approvals. Enabling gaming mode aborts the active task, waits for its cleanup, closes the automation browser and unloads all resident Ollama models. Configured process names are checked every 15 seconds. The next user request reloads its selected model after gaming mode ends.
 

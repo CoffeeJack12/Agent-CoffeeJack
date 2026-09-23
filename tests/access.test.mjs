@@ -141,7 +141,11 @@ test("remote HTTP protects reads and preserves session-token and origin checks",
   assert.equal(await send(), 403);
   assert.equal(await send({}, "GET", "/"), 403);
   const auth = { "Cf-Access-Jwt-Assertion": token() };
-  assert.equal(await send(auth), 200);
+  assert.equal(await send(auth), 403);
+  assert.equal(
+    await send({ ...auth, "X-CoffeeJack-Token": app.token }),
+    200,
+  );
   assert.equal(
     await send({ ...auth, Origin: "https://attacker.example" }),
     403,
