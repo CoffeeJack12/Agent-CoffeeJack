@@ -1,5 +1,6 @@
 import { definitions } from "./tools.mjs";
 import { MODES } from "./preferences.mjs";
+import { permissionSummary as buildPermissionSummary } from "./permissions.mjs";
 
 /** Tool → capability packs required for that tool to run. */
 export const TOOL_PACKS = Object.freeze({
@@ -247,7 +248,16 @@ export function capabilitySummary(registry) {
     .join("\n")}`;
 }
 
-export function capabilityPrompt(registry, { text = "", preferences } = {}) {
+export function capabilityPrompt(
+  registry,
+  {
+    text = "",
+    preferences,
+    user,
+    userPermissions,
+    permissionSummary: suppliedPermissionSummary,
+  } = {},
+) {
   const asking = isCapabilityQuestion(text);
   const enabled = registry.filter((c) => c.enabled).map((c) => c.id);
   const pcControl =
@@ -260,7 +270,20 @@ export function capabilityPrompt(registry, { text = "", preferences } = {}) {
     enabled.includes("research") ||
     enabled.includes("web") ||
     enabled.includes("browser");
-  return `${capabilitySummary(registry)}
+  let permissions = suppliedPermissionSummary;
+  if (!permissions && userPermissions) {
+    permissions =
+      typeof userPermissions === "string"
+        ? userPermissions
+        : Object.entries(userPermissions)
+            .map(([name, decision]) => `- ${name}: ${decision?.decision ?? decision}`)
+            .join("\n");
+  }
+  if (!permissions && user) permissions = buildPermissionSummary(user);
+  const userBlock = permissions
+    ? `\nAVAILABLE TO THIS USER NOW (role policy):\n${permissions}\n`
+    : "\n";
+  return `${capabilitySummary(registry)}${userBlock}
 CAPABILITY TRUTH
 This list is the only authority for what you can do right now. Never claim "I cannot control your PC", "I cannot directly interact with your computer", or "as an AI I cannot…" when matching capabilities are enabled above.
 ${pcControl ? "PC CONTROL: You CAN control this PC through enabled tools (PowerShell/terminal, files, inspect_pc, browser, desktop when listed enabled). Say so accurately when asked. Sensitive tools may still need approval." : "PC CONTROL: Computer/terminal tools are not enabled in this session. Say that accurately."}

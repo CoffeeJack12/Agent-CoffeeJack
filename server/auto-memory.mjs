@@ -85,6 +85,26 @@ const RULES = [
   },
 ];
 
+/** Re-evaluate preference synchronization after a user edits Ask-mode text. */
+export function inferPreferenceSetting(content = "") {
+  if (typeof content !== "string" || SECRET.test(content)) return null;
+  const setting = {};
+  const trimmed = content.trim();
+  for (const rule of RULES) {
+    if (!rule.setting || !rule.re.test(content)) continue;
+    Object.assign(setting, rule.setting);
+  }
+  const address =
+    trimmed.match(/\bAddress preference\s*:\s*(Lord|Master|Sir)\b/i)?.[1] ||
+    trimmed.match(/^(Lord|Master|Sir)\.?$/i)?.[1];
+  if (address) setting.address = address.toLowerCase();
+  if (/\bPrefers?\s+(?:short|concise)(?:\s+answers?)?\b/i.test(content))
+    setting.verbosity = "concise";
+  if (/^(?:Prefers?\s+)?(?:short|concise)(?:\s+answers?)?\.?$/i.test(trimmed))
+    setting.verbosity = "concise";
+  return Object.keys(setting).length ? setting : null;
+}
+
 export function extractMemories(text = "") {
   if (SECRET.test(text)) return [];
   if (EPHEMERAL.test(text)) return [];
@@ -120,7 +140,7 @@ export function extractMemories(text = "") {
 export function applyAutomaticMemory(
   store,
   text,
-  { chatId = null, behavior = "auto", preferences } = {},
+  { chatId = null, behavior = "auto", preferences, userId = null } = {},
 ) {
   if (behavior === "off") return { saved: [], pending: [], preferences };
   const extracted = extractMemories(text);
@@ -129,11 +149,11 @@ export function applyAutomaticMemory(
   let nextPrefs = preferences;
   for (const item of extracted) {
     if (behavior === "ask") {
-      pending.push(item);
+      pending.push({ ...item, userId });
       continue;
     }
     try {
-      const committed = commitMemoryItem(store, item, chatId);
+      const committed = commitMemoryItem(store, { ...item, userId }, chatId, userId);
       saved.push({ ...item, id: committed.id });
       if (committed.preferences) nextPrefs = committed.preferences;
     } catch {
@@ -144,7 +164,7 @@ export function applyAutomaticMemory(
 }
 
 /** Persist one durable memory (+ optional preference sync). */
-export function commitMemoryItem(store, item, chatId = null) {
+export function commitMemoryItem(store, item, chatId = null, profileId = null) {
   const content =
     typeof item.content === "string" ? item.content.trim() : "";
   if (!content) throw new Error("Memory is empty");
@@ -153,8 +173,9 @@ export function commitMemoryItem(store, item, chatId = null) {
     ? item.kind
     : "note";
   validateMemory(content, kind);
+  const userId = item.userId ?? profileId ?? null;
   const similar = store
-    .memories("")
+    .memories("", userId ?? undefined)
     .filter((m) => m.kind === kind)
     .find((m) => similarText(m.content, content));
   let id;
@@ -171,10 +192,12 @@ export function commitMemoryItem(store, item, chatId = null) {
       chatId,
       confidence: item.confidence,
       category: item.type,
+      userId,
     });
   }
   let preferences = null;
-  if (item.setting) preferences = savePreferences(store, item.setting);
+  if (item.setting)
+    preferences = savePreferences(store, item.setting, profileId || userId || "owner");
   return { id, preferences };
 }
 
@@ -225,21 +248,24 @@ export function createMemoryProposalStore(store) {
       }
       if (action === "edit" || action === "save") {
         const nextContent =
-          action === "edit" && typeof content === "string"
-            ? content.trim()
-            : proposal.content;
+          typeof content === "string" ? content.trim() : proposal.content;
         if (!nextContent) throw new Error("Memory is empty");
         if (SECRET.test(nextContent))
           throw new Error("Credentials cannot be stored");
+        const contentChanged = nextContent !== proposal.content;
         const item = {
           ...proposal,
           content: nextContent,
-          setting:
-            action === "edit" && nextContent !== proposal.content
-              ? null
-              : proposal.setting,
+          setting: contentChanged
+            ? inferPreferenceSetting(nextContent)
+            : proposal.setting,
         };
-        const committed = commitMemoryItem(store, item, proposal.chatId);
+        const committed = commitMemoryItem(
+          store,
+          item,
+          proposal.chatId,
+          proposal.userId,
+        );
         proposals.delete(id);
         return {
           ok: true,

@@ -24,10 +24,10 @@ export function validatePersona(input) {
   return result;
 }
 
-export function getPersona(store) {
+export function getPersona(store, profileId = "owner") {
   const legacy = { ...DEFAULT_PERSONA, ...store.get("persona", {}) };
   if (!store.profilePreferences) return legacy;
-  const p = getPreferences(store);
+  const p = getPreferences(store, profileId);
   return {...legacy, language:p.language, humor:({off:"off",dry:"subtle",dark:"playful"})[p.humor], detail:({concise:"concise",normal:"balanced",detailed:"thorough"})[p.verbosity]};
 }
 
@@ -120,12 +120,15 @@ User: اكتب رسالة رسمية. Jack: writes the professional message, no 
 For a greeting, identity question or casual chat, respond directly without tools. Use tools when they help fulfill the actual request.`;
 }
 
-export function selfModel(store, { active = false, gaming = false } = {}) {
-  const counts = store.counts();
+export function selfModel(
+  store,
+  { active = false, gaming = false, userId } = {},
+) {
+  const counts = store.counts(userId);
   return {
     name: "Jack",
     state: gaming ? "gaming" : active ? "working" : "ready",
-    persona: getPersona(store),
+    persona: getPersona(store, userId),
     ...counts,
     lastReflection: store.get("lastReflection", null),
     kind: "functional-self-model",

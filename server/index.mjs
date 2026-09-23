@@ -5,7 +5,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { randomUUID, randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { accessFromEnvironment } from "./access.mjs";
 import { Store } from "./store.mjs";
 import { Ollama } from "./ollama.mjs";
@@ -14,6 +14,27 @@ import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
 import { workspacePath } from "./files.mjs";
 import { getPersona, validatePersona, selfModel } from "./personality.mjs";
+import {
+  applyLegacyOwnerAutoApprove,
+  authorize,
+  canManageUsers,
+  canToggleGaming,
+  permissionSummary,
+  toolCapability,
+} from "./permissions.mjs";
+import {
+  ROLES,
+  audit,
+  createSession,
+  createUser,
+  disableUser,
+  getSession,
+  getUser,
+  listUsers,
+  resolveLocalOwner,
+  touchSession,
+  updateUser,
+} from "./users.mjs";
 
 export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
@@ -26,7 +47,9 @@ export async function createApp({
   const artifacts = path.join(data, "artifacts");
   await fs.mkdir(artifacts, { recursive: true });
   const store = new Store(data);
-  const token = randomBytes(32).toString("hex");
+  const owner = resolveLocalOwner(store);
+  const boot = createSession(store, owner.id);
+  let token = boot.token;
   const ollama = providedOllama ?? new Ollama(process.env.OLLAMA_URL);
   const approvals = new Map();
   const memoryProposals = createMemoryProposalStore(store);
@@ -59,7 +82,25 @@ export async function createApp({
     store,
     artifactDirectory: artifacts,
     approve: async (name, args, signal) => {
-      if (store.get("autoApprove", false)) return;
+      const user = active?.userId
+        ? getUser(store, active.userId)
+        : resolveLocalOwner(store);
+      const capability = toolCapability(name, args);
+      let decision = authorize({
+        user,
+        capability,
+        action: name,
+        resource: args?.path ?? args?.command,
+        context: { memoryPack: true },
+      });
+      decision = applyLegacyOwnerAutoApprove(
+        decision,
+        user,
+        store.get("autoApprove", false),
+      );
+      if (decision.decision === "allow") return;
+      if (decision.decision === "deny")
+        throw new Error(`Permission denied: ${decision.reason}`);
       const id = randomUUID();
       return new Promise((resolve, reject) => {
         const finish = (allowed) => {
@@ -72,7 +113,7 @@ export async function createApp({
         };
         const cancel = () => finish(false);
         const timer = setTimeout(cancel, 300000);
-        approvals.set(id, { id, name, args, finish });
+        approvals.set(id, { id, name, args, finish, userId: user.id });
         signal.addEventListener("abort", cancel, { once: true });
         active?.emit({ type: "approval", id, name, args });
       });
@@ -140,6 +181,15 @@ export async function createApp({
     }
     return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
   };
+  const sessionIdentity = (req) => {
+    const requestToken = req.headers["x-coffeejack-token"];
+    const session = getSession(store, requestToken);
+    if (!session) return undefined;
+    touchSession(store, requestToken);
+    const user = getUser(store, session.user_id);
+    if (!user) return undefined;
+    return { token: requestToken, user, session };
+  };
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -164,13 +214,21 @@ export async function createApp({
     const url = new URL(req.url, `http://${host}`);
     const route = url.pathname;
     try {
-      if (
-        route.startsWith("/api/") &&
-        req.method !== "GET" &&
-        req.headers["x-coffeejack-token"] !== token
-      )
-        return json(res, 403, { error: "Invalid session token" });
+      let identity = route.startsWith("/api/")
+        ? sessionIdentity(req)
+        : undefined;
       if (route === "/api/status" && req.method === "GET") {
+        if (!identity) {
+          if (!localHost)
+            return json(res, 403, { error: "Invalid session token" });
+          const localSession = createSession(store, owner.id);
+          identity = {
+            token: localSession.token,
+            user: getUser(store, owner.id),
+            session: getSession(store, localSession.token),
+          };
+        }
+        const user = identity.user;
         let models = [],
           modelError = "";
         try {
@@ -179,41 +237,134 @@ export async function createApp({
           modelError = e.message;
         }
         return json(res, 200, {
-          token,
+          token: identity.token,
+          user: {
+            id: user.id,
+            display_name: user.display_name,
+            role: user.role,
+            status: user.status,
+          },
+          permissions: permissionSummary(user),
           models,
           modelError,
           settings: settings(),
-          preferences: getPreferences(store),
+          preferences: getPreferences(store, user.id),
           gaming,
           autoGaming,
           busy: Boolean(active),
-          jack: selfModel(store, { active: Boolean(active), gaming }),
-          approvals: [...approvals.values()].map(({ id, name, args }) => ({
-            id,
-            name,
-            args,
-          })),
+          jack: selfModel(store, {
+            active: Boolean(active),
+            gaming,
+            userId: user.id,
+          }),
+          approvals: [...approvals.values()]
+            .filter((pending) => pending.userId === user.id)
+            .map(({ id, name, args }) => ({ id, name, args })),
+        });
+      }
+      if (route.startsWith("/api/") && !identity)
+        return json(res, 403, { error: "Invalid session token" });
+      const user = identity?.user;
+      if (route === "/api/users" && req.method === "GET")
+        return json(
+          res,
+          200,
+          canManageUsers(user) ? listUsers(store) : [getUser(store, user.id)],
+        );
+      if (route === "/api/users" && req.method === "POST") {
+        if (!canManageUsers(user))
+          return json(res, 403, { error: "User management denied" });
+        const b = await body(req);
+        const created = createUser(store, {
+          displayName: b.displayName,
+          role: b.role,
+        });
+        audit(store, {
+          userId: user.id,
+          action: "user_created",
+          detail: { targetUserId: created.id, role: created.role },
+        });
+        return json(res, 201, created);
+      }
+      if (route.startsWith("/api/users/") && req.method === "PATCH") {
+        if (!canManageUsers(user))
+          return json(res, 403, { error: "User management denied" });
+        const id = route.split("/").pop();
+        const current = getUser(store, id);
+        if (!current) return json(res, 404, { error: "User not found" });
+        const b = await body(req);
+        const removesOwner =
+          current.role === ROLES.OWNER &&
+          (b.role !== undefined && b.role !== ROLES.OWNER ||
+            b.status === "disabled");
+        if (removesOwner) {
+          const ownerCount = listUsers(store).filter(
+            (item) =>
+              item.role === ROLES.OWNER && item.status === "active",
+          ).length;
+          if (ownerCount <= 1)
+            return json(res, 409, { error: "Cannot demote the last owner" });
+        }
+        const updated =
+          b.status === "disabled"
+            ? disableUser(store, id)
+            : updateUser(store, id, {
+                displayName: b.displayName,
+                role: b.role,
+                status: b.status,
+              });
+        audit(store, {
+          userId: user.id,
+          action: "user_updated",
+          detail: {
+            targetUserId: id,
+            role: updated.role,
+            status: updated.status,
+          },
+        });
+        return json(res, 200, updated);
+      }
+      if (route === "/api/session/switch" && req.method === "POST") {
+        if (!canManageUsers(user))
+          return json(res, 403, { error: "Profile switching denied" });
+        const b = await body(req);
+        const target = getUser(store, b.userId);
+        if (!target || target.status !== "active")
+          return json(res, 404, { error: "Active user not found" });
+        const next = createSession(store, target.id);
+        audit(store, {
+          userId: user.id,
+          action: "profile_switched",
+          detail: { targetUserId: target.id },
+        });
+        return json(res, 200, {
+          token: next.token,
+          user: target,
         });
       }
       if (route === "/api/chats" && req.method === "GET")
-        return json(res, 200, store.chats());
+        return json(res, 200, store.chats(user.id));
       if (route.startsWith("/api/chats/") && req.method === "GET") {
         const id = route.split("/").pop();
-        if (!store.chat(id)) return json(res, 404, { error: "Chat not found" });
+        if (!store.chat(id, user.id))
+          return json(res, 404, { error: "Chat not found" });
         return json(res, 200, store.messages(id));
       }
       if (route.startsWith("/api/chats/") && req.method === "DELETE") {
         const id = route.split("/").pop();
         if (active?.chatId === id)
           return json(res, 409, { error: "Stop the active chat first" });
-        store.deleteChat(id);
+        if (!store.deleteChat(id, user.id))
+          return json(res, 404, { error: "Chat not found" });
         return json(res, 200, { ok: true });
       }
       if (route === "/api/memories" && req.method === "GET") {
-        const rows = store.memories(url.searchParams.get("q") ?? "").map((m) => ({
-          ...m,
-          category: m.category || memoryCategory(m.kind, m.content),
-        }));
+        const rows = store
+          .memories(url.searchParams.get("q") ?? "", user.id)
+          .map((m) => ({
+            ...m,
+            category: m.category || memoryCategory(m.kind, m.content),
+          }));
         return json(res, 200, rows);
       }
       if (route === "/api/memories" && req.method === "POST") {
@@ -221,12 +372,15 @@ export async function createApp({
         if (typeof b.content !== "string" || !b.content.trim())
           throw new Error("Memory is empty");
         return json(res, 200, {
-          id: store.remember(b.content, b.kind ?? "note", workspace),
+          id: store.remember(b.content, b.kind ?? "note", workspace, {
+            userId: user.id,
+          }),
         });
       }
       if (route.startsWith("/api/memories/") && req.method === "DELETE") {
-        store.forget(route.split("/").pop());
-        return json(res, 200, { ok: true });
+        return json(res, 200, {
+          ok: store.forget(route.split("/").pop(), user.id),
+        });
       }
       if (route.startsWith("/api/memory-proposals/") && req.method === "POST") {
         const id = route.split("/").pop();
@@ -238,22 +392,29 @@ export async function createApp({
           (typeof b.content !== "string" || !b.content.trim())
         )
           throw new Error("Edited memory must contain text");
+        const proposal = memoryProposals.get(id);
+        if (!proposal || proposal.userId !== user.id)
+          return json(res, 404, { error: "Memory proposal expired" });
         const result = memoryProposals.resolve(id, b.action, b.content);
         return json(res, 200, result);
       }
       if (route === "/api/events" && req.method === "GET")
-        return json(res, 200, store.events());
+        return json(res, 200, store.events(user.id));
       if (route === "/api/preferences" && req.method === "GET")
-        return json(res,200,{preferences:getPreferences(store),catalog:{languages:ASSISTANT_LANGUAGES||LANGUAGES,appLanguages:APP_LANGUAGES,modes:MODES,packs:PACKS,options:PREFERENCE_OPTIONS,memoryBehaviors:MEMORY_BEHAVIORS}});
+        return json(res,200,{preferences:getPreferences(store,user.id),catalog:{languages:ASSISTANT_LANGUAGES||LANGUAGES,appLanguages:APP_LANGUAGES,modes:MODES,packs:PACKS,options:PREFERENCE_OPTIONS,memoryBehaviors:MEMORY_BEHAVIORS}});
       if (route === "/api/preferences" && req.method === "POST") {
         if(active)return json(res,409,{error:"Stop the active task before changing preferences"});
-        return json(res,200,savePreferences(store,await body(req)));
+        return json(res,200,savePreferences(store,await body(req),user.id));
       }
       if (route === "/api/persona" && req.method === "GET")
         return json(
           res,
           200,
-          selfModel(store, { active: Boolean(active), gaming }),
+          selfModel(store, {
+            active: Boolean(active),
+            gaming,
+            userId: user.id,
+          }),
         );
       if (route === "/api/persona" && req.method === "POST") {
         const input = validatePersona(await body(req));
@@ -266,8 +427,8 @@ export async function createApp({
         if(input.language)preferencePatch.language=input.language;
         if(input.humor)preferencePatch.humor=({off:"off",subtle:"dry",playful:"dark"})[input.humor];
         if(input.detail)preferencePatch.verbosity=({concise:"concise",balanced:"normal",thorough:"detailed"})[input.detail];
-        savePreferences(store,preferencePatch);
-        return json(res, 200, selfModel(store, { active: false, gaming }));
+        savePreferences(store,preferencePatch,user.id);
+        return json(res, 200, selfModel(store, { active: false, gaming, userId: user.id }));
       }
       if (route === "/api/settings" && req.method === "POST") {
         if (active)
@@ -318,10 +479,17 @@ export async function createApp({
         return json(res, 200, settings());
       }
       if (route === "/api/gaming" && req.method === "POST") {
+        if (!canToggleGaming(user))
+          return json(res, 403, { error: "Gaming mode permission denied" });
         const b = await body(req);
         if (typeof b.enabled !== "boolean") throw new Error("Invalid mode");
         autoGaming = false;
         const unloaded = await setGaming(b.enabled);
+        audit(store, {
+          userId: user.id,
+          action: "gaming_toggled",
+          detail: { enabled: b.enabled },
+        });
         return json(res, 200, { gaming, unloaded });
       }
       if (route === "/api/stop" && req.method === "POST") {
@@ -331,8 +499,15 @@ export async function createApp({
       if (route.startsWith("/api/approve/") && req.method === "POST") {
         const b = await body(req);
         const pending = approvals.get(route.split("/").pop());
-        if (!pending) return json(res, 404, { error: "Approval expired" });
-        pending.finish(b.allow === true);
+        if (!pending || pending.userId !== user.id)
+          return json(res, 404, { error: "Approval expired" });
+        const allowed = b.allow === true;
+        audit(store, {
+          userId: user.id,
+          action: allowed ? "approval_accepted" : "approval_rejected",
+          detail: { approvalId: pending.id, tool: pending.name },
+        });
+        pending.finish(allowed);
         return json(res, 200, { ok: true });
       }
       if (route === "/api/upload" && req.method === "POST") {
@@ -397,7 +572,9 @@ export async function createApp({
           return json(res, 409, {
             error: "المهمة مشغولة أو وضع الألعاب مفعّل.",
           });
-        const chat = b.chatId ? store.chat(b.chatId) : store.createChat(b.text);
+        const chat = b.chatId
+          ? store.chat(b.chatId, user.id)
+          : store.createChat(b.text, user.id);
         if (!chat) throw new Error("Chat not found");
         res.writeHead(200, {
           "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -412,14 +589,20 @@ export async function createApp({
         const finished = new Promise((resolve) => {
           finish = resolve;
         });
-        active = { controller, chatId: chat.id, emit, finished };
+        active = {
+          controller,
+          chatId: chat.id,
+          emit,
+          finished,
+          userId: user.id,
+        };
         res.on("close", () => {
           if (!res.writableEnded) controller.abort();
         });
         emit({ type: "chat", chat });
         const conf = settings();
         try {
-          const preferences = getPreferences(store);
+          const preferences = getPreferences(store, user.id);
           const requestedMode =
             typeof b.requestedMode === "string" && b.requestedMode
               ? b.requestedMode
@@ -477,6 +660,8 @@ export async function createApp({
             emit,
             requestedMode: modeInfo.requestedMode,
             memoryProposals,
+            userId: user.id,
+            user,
           });
         } catch (e) {
           emit({
