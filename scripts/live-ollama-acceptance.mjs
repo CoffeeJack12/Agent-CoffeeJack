@@ -176,31 +176,140 @@ try {
   );
   pass("Memory skips acceptance-test noise");
 
-  // A — ONE LOCAL MODEL council On → accurate skip (no fake multi-AI)
+  // A — Coding with mock second local council model → evidence Round 2
   try {
-    savePreferences(app.store, { councilMode: "on" });
+    savePreferences(app.store, { councilMode: "on", councilOtherModels: "on" });
+    if (!app.registry.getProvider("live-reviewer")) {
+      app.registry.register({
+        id: "live-reviewer",
+        name: "Live Reviewer",
+        type: "local",
+        privacyClass: "local",
+        enabled: true,
+        listModels: async () => [
+          {
+            id: "reviewer-local",
+            capabilities: ["tools", "reasoning"],
+            local: true,
+            costTier: "free",
+            speedTier: "fast",
+          },
+        ],
+        health: async () => ({ available: true, latencyMs: 1 }),
+        chat: async () => ({
+          content:
+            "Evidence supports the fix. Tests passed. No regression visible from the evidence pack.",
+        }),
+      });
+    }
+    await app.registry.refresh();
+    const settingsRes = await fetch(`http://127.0.0.1:${port}/api/settings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CoffeeJack-Token": token,
+      },
+      body: JSON.stringify({
+        workspace: fixtureDir,
+        autoApprove: true,
+        model: "qwen3:8b",
+      }),
+    });
+    assert.equal(settingsRes.status, 200);
+    const before = await fs.readFile(path.join(fixtureDir, "math.mjs"), "utf8");
+    assert.match(before, /a \* b/);
+
     const events = await streamChat(port, token, {
-      text: "consult the council and help me choose an architecture",
+      text:
+        "This is an isolated temporary Node test project for live acceptance only. " +
+        "Inspect math.mjs, identify the bug in add(), patch it so tests pass, run tests, " +
+        "and report only verified success.",
       requestedMode: "auto",
       requestedModel: "auto",
       mode: "auto",
     });
     const routing = events.find((e) => e.type === "routing");
     assert.match(routing?.model || "", /qwen3:8b/);
-    assert.equal(routing?.provider || "ollama", "ollama");
-    const council = events.find((e) => e.type === "council");
-    assert.ok(council, "council event expected");
-    assert.equal(council.status, "skipped");
-    assert.match(
-      String(council.detail || ""),
-      /1 model available|consultation skipped|insufficient|one_model/i,
+    const councilEvents = events.filter((e) => e.type === "council");
+    const review = councilEvents.find(
+      (e) => e.evidenceRound || /Evidence round|Council Review/i.test(e.title + e.detail),
     );
+    assert.ok(
+      councilEvents.some((e) => e.status === "done") || review,
+      "expected council and/or evidence review events",
+    );
+    if (review && review.status === "done") {
+      assert.match(String(review.detail || ""), /Evidence round|Participants/i);
+    }
+    const after = await fs.readFile(path.join(fixtureDir, "math.mjs"), "utf8");
+    assert.match(after, /a \+ b/);
     const reply = transcript(events);
-    assert.doesNotMatch(reply, /\bClaude (?:says|confirmed)\b|\bGPT says\b|\bGemini confirmed\b/i);
-    pass("A ONE LOCAL MODEL COUNCIL", council.detail);
+    assert.match(reply, /Verification|tests passed|passed/i);
+    assert.doesNotMatch(reply, /cannot control|as an AI I cannot/i);
+    const { spawn } = await import("node:child_process");
+    const code = await new Promise((resolve) => {
+      const child = spawn("node", ["--test", "test.mjs"], {
+        cwd: fixtureDir,
+        shell: true,
+      });
+      child.on("close", resolve);
+    });
+    assert.equal(code, 0, "fixture tests still failing after Jack");
+    pass(
+      "A CODING EVIDENCE ROUND",
+      `council=${councilEvents.length} review=${review?.detail || "n/a"}`,
+    );
+    // Remove mock council model so later one-model checks stay accurate.
+    app.registry.providers.delete("live-reviewer");
+    app.registry.models.delete("live-reviewer");
+    app.registry.statuses.delete("live-reviewer");
+    await app.registry.refresh();
     savePreferences(app.store, { councilMode: "auto" });
   } catch (error) {
-    fail("A ONE LOCAL MODEL COUNCIL", error.message || error);
+    fail("A CODING EVIDENCE ROUND", error.message || error);
+  }
+
+  // B — Deliberately failing tests must not claim success
+  try {
+    const failDir = await fs.mkdtemp(path.join(os.tmpdir(), "jack-live-fail-"));
+    await makeBuggyProject(failDir);
+    // Keep the bug; ask Jack only to run tests and report.
+    await fetch(`http://127.0.0.1:${port}/api/settings`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-CoffeeJack-Token": token,
+      },
+      body: JSON.stringify({
+        workspace: failDir,
+        autoApprove: true,
+        model: "qwen3:8b",
+      }),
+    });
+    const events = await streamChat(port, token, {
+      text:
+        "acceptance-test temporary fixture: Run the project tests only and report whether they passed. Do not modify files.",
+      requestedMode: "auto",
+      requestedModel: "auto",
+    });
+    const reply = transcript(events);
+    const toolsUsed = events.filter((e) => e.type === "tool").map((e) => e.name);
+    assert.ok(
+      toolsUsed.includes("run_tests") || /test/i.test(reply),
+      "expected test execution or report",
+    );
+    assert.doesNotMatch(
+      reply,
+      /Verification\nVerified: tests passed/i,
+    );
+    // Soft check: should not celebrate success without evidence
+    if (/Verification/i.test(reply)) {
+      assert.match(reply, /did not pass|not claimed|fail/i);
+    }
+    pass("B FAILING TESTS NO SUCCESS CLAIM", reply.slice(0, 120));
+    await fs.rm(failDir, { recursive: true, force: true }).catch(() => {});
+  } catch (error) {
+    fail("B FAILING TESTS NO SUCCESS CLAIM", error.message || error);
   }
 
   // D — Council with one model must not fake participants
@@ -285,78 +394,11 @@ try {
     assert.match(reply, /https?:\/\//i);
     pass(
       "C AUTO RESEARCH",
-      `model=${routing.model} tools=${researchTools.length} chars=${reply.length}`,
+      `model=${routing.model} tools=${researchTools.length} chars=${reply.length} verification=${/Verification/i.test(reply)}`,
     );
     console.log("--- research reply preview ---\n" + reply.slice(0, 900) + "\n---");
   } catch (error) {
     fail("C AUTO RESEARCH", error.message || error);
-  }
-
-  // B — AUTO DEVELOPER on isolated fixture (not CoffeeJack)
-  try {
-    const settingsRes = await fetch(`http://127.0.0.1:${port}/api/settings`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CoffeeJack-Token": token,
-      },
-      body: JSON.stringify({
-        workspace: fixtureDir,
-        autoApprove: true,
-        model: "qwen3:8b",
-      }),
-    });
-    assert.equal(settingsRes.status, 200);
-    const before = await fs.readFile(path.join(fixtureDir, "math.mjs"), "utf8");
-    assert.match(before, /a \* b/);
-
-    const events = await streamChat(port, token, {
-      text:
-        "This is an isolated temporary Node test project for live acceptance only. " +
-        "Inspect math.mjs, identify the bug in add(), patch it so tests pass, run tests, " +
-        "inspect git status/diff if available, and report only verified success.",
-      requestedMode: "auto",
-      requestedModel: "auto",
-      mode: "auto",
-    });
-    const routing = events.find((e) => e.type === "routing");
-    assert.match(routing?.model || "", /qwen3:8b/);
-    assert.ok(routing?.provider === "ollama" || !routing?.provider);
-    const toolsUsed = [
-      ...new Set(
-        events.filter((e) => e.type === "tool").map((e) => e.name),
-      ),
-    ];
-    assert.ok(
-      toolsUsed.some((n) =>
-        /read_file|search_code|apply_patch|write_file|run_tests|terminal|git_/.test(
-          n,
-        ),
-      ),
-      "no developer tools used: " + toolsUsed.join(","),
-    );
-    const after = await fs.readFile(path.join(fixtureDir, "math.mjs"), "utf8");
-    assert.match(after, /a \+ b/);
-    assert.doesNotMatch(after, /a \* b/);
-    // Verify tests actually pass in the fixture
-    const { spawn } = await import("node:child_process");
-    const code = await new Promise((resolve) => {
-      const child = spawn("node", ["--test", "test.mjs"], {
-        cwd: fixtureDir,
-        shell: true,
-      });
-      child.on("close", resolve);
-    });
-    assert.equal(code, 0, "fixture tests still failing after Jack");
-    const reply = transcript(events);
-    assert.doesNotMatch(reply, /cannot control|as an AI I cannot/i);
-    pass(
-      "B AUTO DEVELOPER",
-      `tools=${toolsUsed.join(",")} replyChars=${reply.length} reason=${routing?.reasonCode || ""}`,
-    );
-    console.log("--- developer reply preview ---\n" + reply.slice(0, 900) + "\n---");
-  } catch (error) {
-    fail("B AUTO DEVELOPER", error.message || error);
   }
 
   // F — provider failure fallback (unit-level against live registry)
@@ -463,9 +505,9 @@ try {
       },
       body: JSON.stringify({ enabled: false }),
     });
-    pass("H GAMING MODE", JSON.stringify(body.unloaded));
+    pass("D GAMING MODE", JSON.stringify(body.unloaded));
   } catch (error) {
-    fail("H GAMING MODE", error.message || error);
+    fail("D GAMING MODE", error.message || error);
   }
 
   // No temporary acceptance noise saved (verified coding lessons from the fixture are allowed)

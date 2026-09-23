@@ -64,6 +64,20 @@ Remote prompts are sanitized (`server/privacy.mjs`). Ask mode requires approval 
 
 Council is fully suppressed; no extra model loads or parallel provider calls.
 
+## Evidence Round 2 (automatic)
+
+After Round 1 proposals and Jack’s controlled tool execution, CoffeeJack builds a bounded **evidence pack** from tool events (tests, sources, diffs, inspection, failures).
+
+If Round 1 consulted ≥2 distinct models and evidence is meaningful (and not a decisive test failure), an automatic Round 2 runs:
+
+- Same participants critique **only** against the evidence pack
+- Max 2 rounds total
+- Failed tests skip Round 2 as decisive ground truth
+- Gaming / one-model / council off → no fake review
+- Final Verification note is grounded in tool evidence; council opinions are advisory only
+
+UI: `Council Review ✓ · Evidence round: 2 · Tests verified: yes · Participants: 2/3`
+
 ## Verified lessons
 
-Council agreement alone is **not** proof. Persistence still requires tests/sources/tool/user_statement evidence.
+Council agreement alone is **not** proof. Persistence still requires tests/sources/tool/user_statement evidence. Coding lessons require `tests.passed`.

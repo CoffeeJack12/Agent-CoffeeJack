@@ -16,7 +16,13 @@ import { createDefaultRegistry } from "./providers/index.mjs";
 import {
   buildCouncilPlan,
   runCouncil,
+  runCouncilEvidenceRound,
   councilUiSummary,
+  buildEvidencePack,
+  formatEvidencePack,
+  shouldRunEvidenceRound,
+  synthesizeFromEvidence,
+  evidenceTypesFromPack,
 } from "./council.mjs";
 import {
   lessonFromCodingSuccess,
@@ -870,21 +876,90 @@ export async function createApp({
             provider: routing.provider || "ollama",
             fallbackModels: routing.fallbackModels || [],
           });
-          // Persist a verified coding lesson when tests clearly passed this turn.
+
+          // Automatic bounded Council evidence Round 2 (tool evidence only).
+          let evidencePack = null;
+          let evidenceRound = null;
           try {
-            const events = store.events(user.id).slice(0, 20);
-            const testOk = events.find(
-              (e) =>
-                e.chat_id === chat.id &&
-                e.tool === "run_tests" &&
-                e.status === "done",
-            );
-            if (testOk) {
+            const turnEvents = store
+              .events(user.id)
+              .filter((e) => e.chat_id === chat.id);
+            evidencePack = buildEvidencePack(turnEvents, {
+              taskType: routing.kind || modeInfo.effectiveMode || "general",
+              chatId: chat.id,
+            });
+            const reviewDecision = shouldRunEvidenceRound({
+              pack: evidencePack,
+              gaming,
+              round1Result: councilResult,
+              participants: councilPlan?.participants || [],
+              preferences,
+            });
+            if (reviewDecision.run) {
+              evidenceRound = await runCouncilEvidenceRound({
+                priorRound: 1,
+                participants: councilPlan.participants,
+                prompt: b.text,
+                evidence: formatEvidencePack(evidencePack),
+                registry,
+                signal: controller.signal,
+                preferences,
+              });
+              evidenceRound.evidenceRound = true;
+              evidenceRound.evidenceTypes = evidenceTypesFromPack(evidencePack);
+              evidenceRound.testsVerified = evidencePack.tests?.passed === true;
+              evidenceRound.verification = evidencePack.tests
+                ? evidencePack.tests.passed
+                  ? "tests_passed"
+                  : "tests_failed"
+                : evidencePack.research?.sources?.length
+                  ? "sources_present"
+                  : "evidence_reviewed";
+              emit({
+                type: "council",
+                ...councilUiSummary(evidenceRound, councilPlan),
+              });
+            } else if (
+              councilResult &&
+              !councilResult.skipped &&
+              evidencePack?.meaningful
+            ) {
+              emit({
+                type: "council",
+                title: "Council Review",
+                status: "skipped",
+                detail: reviewDecision.reason,
+                evidenceRound: true,
+                evidenceTypes: evidenceTypesFromPack(evidencePack),
+                testsVerified: evidencePack.tests?.passed === true,
+              });
+            }
+
+            // Ground final note in verified evidence (wins over majority vote).
+            if (evidencePack?.meaningful) {
+              const grounded = synthesizeFromEvidence({
+                pack: evidencePack,
+                round2Result: evidenceRound,
+                taskText: b.text,
+              });
+              if (grounded) {
+                const note = `\n\n---\nVerification\n${grounded}`;
+                store.message(chat.id, "assistant", note);
+                emit({ type: "token", text: note });
+              }
+            }
+          } catch {
+            /* evidence review is best-effort */
+          }
+
+          // Persist a verified coding lesson only when tests actually passed.
+          try {
+            if (evidencePack?.tests?.passed) {
               persistVerifiedLesson(
                 store,
                 lessonFromCodingSuccess({
                   summary: `Verified fix approach for: ${b.text.slice(0, 120)}`,
-                  testEvidence: "run_tests done",
+                  testEvidence: `run_tests exit ${evidencePack.tests.exitCode} pass`,
                   userId: user.id,
                   chatId: chat.id,
                   project: tools.workspace,

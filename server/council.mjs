@@ -373,6 +373,7 @@ export async function runCouncil({
 
   const safeRound = Math.min(MAX_ROUNDS, Math.max(1, Number(round) || 1));
   const proposals = [];
+  const evidenceMode = Boolean(evidence) || safeRound > 1;
   const callChat =
     chatFn ||
     (async ({ providerId, modelId, messages, signal: sig }) => {
@@ -395,8 +396,13 @@ export async function runCouncil({
       ? timeouts.local || DEFAULT_TIMEOUT_MS.local
       : timeouts.remote || DEFAULT_TIMEOUT_MS.remote;
     const started = performance.now();
+    const system = evidenceMode
+      ? member.role === "critic" || member.role === "specialist" || member.role === "judge"
+        ? "You review ONLY against the verified evidence pack. Ask: Does evidence support the proposed fix? Any regression visible from tests/diff? Is another check necessary? For research: flag unsupported conclusions and source conflicts. Do not invent tool results. Do not claim success if tests failed. Be concise."
+        : "You are reviewing verified tool evidence. Confirm what the evidence supports and what remains unproven. Do not invent tool results. Do not override failing tests. Be concise."
+      : roleSystem(member.role);
     let messages = [
-      { role: "system", content: roleSystem(member.role) },
+      { role: "system", content: system },
       {
         role: "user",
         content: [
@@ -407,8 +413,8 @@ export async function runCouncil({
             ? `Verified evidence (from Jack tools only):\n${sanitizeForRemote(evidence, { maxChars: 4000 }).text}`
             : "",
           `Task:\n${sanitizeForRemote(prompt, { maxChars: MAX_PROMPT }).text}`,
-          safeRound > 1
-            ? "This is an evidence critique round. Focus on remaining issues given the verified evidence."
+          evidenceMode
+            ? "This is an evidence critique round. Focus only on remaining issues given the verified evidence. Tool evidence wins over model opinions."
             : "",
         ]
           .filter(Boolean)
@@ -522,19 +528,30 @@ export function councilUiSummary(result, plan = null) {
       .filter((p) => p.status === "ok")
       .map((p) => p.providerId || p.provider),
   );
+  const isReview = result.round > 1 || result.evidenceRound;
   return {
-    title: "AI Council",
+    title: isReview ? "Council Review" : "AI Council",
     status: "done",
-    detail: `${result.modelsConsulted || result.succeeded || 0} models consulted${
-      providers.size ? `, ${providers.size} providers` : ""
-    }${result.rejected ? `, ${result.rejected} failed` : ""}${
-      result.round > 1 ? ` · round ${result.round}` : ""
-    }`,
+    detail: isReview
+      ? `Evidence round: ${result.round || 2} · Participants: ${result.succeeded || 0}/${result.requested || 0}${
+          result.testsVerified != null
+            ? ` · Tests verified: ${result.testsVerified ? "yes" : "no"}`
+            : ""
+        }`
+      : `${result.modelsConsulted || result.succeeded || 0} models consulted${
+          providers.size ? `, ${providers.size} providers` : ""
+        }${result.rejected ? `, ${result.rejected} failed` : ""}${
+          result.round > 1 ? ` · round ${result.round}` : ""
+        }`,
     triggerReason: plan?.triggerReason,
     providers: providers.size,
     modelsConsulted: result.modelsConsulted || result.succeeded || 0,
     succeeded: result.succeeded,
     requested: result.requested,
+    evidenceRound: Boolean(isReview),
+    evidenceTypes: result.evidenceTypes || [],
+    testsVerified: result.testsVerified,
+    verification: result.verification || null,
     proposals: (result.proposals || []).map((p) => ({
       model: p.modelId || p.model,
       provider: p.providerId || p.provider,
@@ -544,6 +561,271 @@ export function councilUiSummary(result, plan = null) {
       summary: p.summary || "",
     })),
   };
+}
+
+const SECRET =
+  /\b(?:sk-[a-zA-Z0-9]{10,}|gh[pousr]_[A-Za-z0-9_]{20,}|password\s*[:=]\s*\S+|Bearer\s+\S+)/gi;
+
+function parseDetail(row) {
+  try {
+    return typeof row.detail === "string" ? JSON.parse(row.detail) : row.detail;
+  } catch {
+    return {};
+  }
+}
+
+function clip(text, n = 400) {
+  const s = String(text ?? "")
+    .replace(SECRET, "[redacted]")
+    .replace(/\s+/g, " ")
+    .trim();
+  return s.length > n ? s.slice(0, n) + "…" : s;
+}
+
+/**
+ * Build a bounded evidence pack from tool events for this chat turn.
+ */
+export function buildEvidencePack(events = [], { taskType = "general", chatId } = {}) {
+  const rows = (events || []).filter(
+    (e) => !chatId || e.chat_id === chatId || e.chatId === chatId,
+  );
+  const pack = {
+    taskType,
+    changedFiles: [],
+    tests: null,
+    research: null,
+    inspection: null,
+    checks: null,
+    failures: [],
+    warnings: [],
+  };
+
+  for (const row of rows) {
+    const tool = row.tool || row.name;
+    const status = row.status;
+    const detail = parseDetail(row);
+    const result = detail?.result ?? detail;
+    const args = detail?.args ?? {};
+
+    if (tool === "apply_patch" && status === "done") {
+      const file = args.path || args.file || result?.path;
+      if (file && !pack.changedFiles.includes(file))
+        pack.changedFiles.push(String(file).slice(0, 200));
+    }
+    if (tool === "write_file" && status === "done") {
+      const file = args.path || result?.path;
+      if (file && !pack.changedFiles.includes(file))
+        pack.changedFiles.push(String(file).slice(0, 200));
+    }
+    if (tool === "run_tests") {
+      const code =
+        typeof result?.code === "number"
+          ? result.code
+          : status === "done"
+            ? 0
+            : status === "error"
+              ? 1
+              : null;
+      const passed = status === "done" && code === 0;
+      pack.tests = {
+        command: clip(args.command || args.script || "run_tests", 120),
+        exitCode: code,
+        passed,
+        summary: clip(
+          result?.output || detail?.error || (passed ? "tests passed" : "tests failed"),
+          500,
+        ),
+      };
+      if (!passed)
+        pack.failures.push({
+          type: "tests",
+          summary: pack.tests.summary,
+        });
+    }
+    if (tool === "run_check") {
+      const code = typeof result?.code === "number" ? result.code : status === "done" ? 0 : 1;
+      pack.checks = {
+        command: clip(args.script || "run_check", 120),
+        exitCode: code,
+        passed: status === "done" && code === 0,
+        summary: clip(result?.output || detail?.error || "", 400),
+      };
+      if (!pack.checks.passed)
+        pack.failures.push({ type: "check", summary: pack.checks.summary });
+    }
+    if (tool === "research" && status === "done") {
+      const sources = (result?.sources || result?.results || [])
+        .filter((s) => s?.url)
+        .slice(0, 5)
+        .map((s) => ({
+          title: clip(s.title || s.url, 80),
+          url: String(s.url).slice(0, 300),
+        }));
+      pack.research = {
+        sources,
+        keyFacts: clip(result?.summary || result?.answer || "", 600),
+      };
+      if (!sources.length) pack.warnings.push("research_no_sources");
+    }
+    if (tool === "inspect_pc" && status === "done") {
+      pack.inspection = {
+        relevantFindings: clip(
+          JSON.stringify(result?.summary || result || {}).slice(0, 800),
+          600,
+        ),
+      };
+    }
+    if ((tool === "git_diff" || tool === "git_status") && status === "done") {
+      const text = clip(result?.output || result?.status || JSON.stringify(result), 400);
+      if (text && !pack.changedFiles.includes(text.slice(0, 80)))
+        pack.warnings.push(`git:${text.slice(0, 120)}`);
+    }
+    if (status === "error" && tool) {
+      pack.failures.push({
+        type: tool,
+        summary: clip(detail?.error || result?.error || "tool error", 200),
+      });
+    }
+  }
+
+  pack.changedFiles = pack.changedFiles.slice(0, 12);
+  pack.failures = pack.failures.slice(0, 8);
+  pack.warnings = pack.warnings.slice(0, 8);
+  pack.meaningful = Boolean(
+    pack.tests ||
+      pack.research?.sources?.length ||
+      pack.inspection ||
+      pack.checks ||
+      pack.changedFiles.length,
+  );
+  // Failed tests are decisive ground truth — no debate needed.
+  pack.decisiveFailure = Boolean(pack.tests && pack.tests.passed === false);
+  // Decisive success only when trivial (no coding/research review needed).
+  pack.decisiveSuccess = Boolean(
+    pack.meaningful &&
+      !pack.failures.length &&
+      !pack.tests &&
+      !pack.research &&
+      pack.changedFiles.length === 0 &&
+      pack.inspection,
+  );
+  return pack;
+}
+
+export function formatEvidencePack(pack) {
+  if (!pack) return "";
+  const lines = [`Evidence pack (verified tools only; taskType=${pack.taskType}):`];
+  if (pack.changedFiles?.length)
+    lines.push(`Changed files: ${pack.changedFiles.join(", ")}`);
+  if (pack.tests) {
+    lines.push(
+      `Tests: exit=${pack.tests.exitCode} passed=${pack.tests.passed} cmd=${pack.tests.command}`,
+    );
+    lines.push(`Test summary: ${pack.tests.summary}`);
+  }
+  if (pack.checks) {
+    lines.push(
+      `Check: exit=${pack.checks.exitCode} passed=${pack.checks.passed} ${pack.checks.summary}`,
+    );
+  }
+  if (pack.research?.sources?.length) {
+    lines.push("Research sources:");
+    for (const s of pack.research.sources)
+      lines.push(`- ${s.title}: ${s.url}`);
+    if (pack.research.keyFacts) lines.push(`Key facts: ${pack.research.keyFacts}`);
+  }
+  if (pack.inspection?.relevantFindings)
+    lines.push(`Inspection: ${pack.inspection.relevantFindings}`);
+  if (pack.failures?.length)
+    lines.push(
+      `Failures: ${pack.failures.map((f) => `${f.type}:${f.summary}`).join(" | ")}`,
+    );
+  if (pack.warnings?.length) lines.push(`Warnings: ${pack.warnings.join(" | ")}`);
+  return lines.join("\n").slice(0, 6000);
+}
+
+/**
+ * Decide whether to run automatic Council evidence Round 2.
+ */
+export function shouldRunEvidenceRound({
+  pack,
+  gaming = false,
+  round1Result = null,
+  participants = [],
+  preferences = {},
+} = {}) {
+  if (gaming) return { run: false, reason: "gaming" };
+  if (preferences.councilMode === "off")
+    return { run: false, reason: "council_off" };
+  if (!round1Result || round1Result.skipped)
+    return { run: false, reason: "no_prior_council" };
+  if ((participants?.length || 0) < 2)
+    return { run: false, reason: "one_model_available" };
+  if ((round1Result.succeeded || 0) < 1)
+    return { run: false, reason: "round1_empty" };
+  if (!pack?.meaningful) return { run: false, reason: "no_meaningful_evidence" };
+  if (pack.decisiveFailure)
+    return { run: false, reason: "failed_tests_decisive" };
+  if (pack.decisiveSuccess)
+    return { run: false, reason: "evidence_decisive" };
+  return { run: true, reason: "review_evidence" };
+}
+
+/**
+ * Ground final synthesis in tool evidence. Council critique cannot override facts.
+ */
+export function synthesizeFromEvidence({
+  pack,
+  round2Result = null,
+  taskText = "",
+} = {}) {
+  const lines = [];
+  if (pack?.tests) {
+    if (pack.tests.passed) {
+      lines.push("Verified: tests passed.");
+      lines.push(`Test evidence: ${pack.tests.summary}`);
+    } else {
+      lines.push("Verified: tests did not pass. Success is not claimed.");
+      lines.push(`Test evidence: ${pack.tests.summary}`);
+    }
+  }
+  if (pack?.research?.sources?.length) {
+    lines.push("Sources (authoritative over model opinions):");
+    for (const s of pack.research.sources.slice(0, 5))
+      lines.push(`- ${s.title}: ${s.url}`);
+  }
+  if (pack?.changedFiles?.length)
+    lines.push(`Changed files: ${pack.changedFiles.join(", ")}`);
+  if (pack?.failures?.length && !pack?.tests) {
+    lines.push(
+      `Tool failures: ${pack.failures.map((f) => f.summary).join("; ")}`,
+    );
+  }
+
+  const critiques = (round2Result?.proposals || [])
+    .filter((p) => p.status === "ok" && p.summary)
+    .map((p) => `- ${p.role}: ${p.summary}`);
+  if (critiques.length && pack?.tests?.passed !== false) {
+    lines.push("Council review (advisory; cannot override tool evidence):");
+    lines.push(...critiques.slice(0, 4));
+  } else if (critiques.length && pack?.tests?.passed === false) {
+    lines.push("Council opinions disregarded where they conflict with failing tests.");
+  }
+
+  if (!lines.length) {
+    return clip(taskText ? `No decisive verification evidence for: ${taskText.slice(0, 80)}` : "No verification evidence.", 400);
+  }
+  return lines.join("\n").slice(0, 2500);
+}
+
+export function evidenceTypesFromPack(pack) {
+  const types = [];
+  if (pack?.tests) types.push("tests");
+  if (pack?.research?.sources?.length) types.push("research");
+  if (pack?.inspection) types.push("inspection");
+  if (pack?.checks) types.push("checks");
+  if (pack?.changedFiles?.length) types.push("diff");
+  return types;
 }
 
 export { MAX_ROUNDS, ROLES, uniqueModels };

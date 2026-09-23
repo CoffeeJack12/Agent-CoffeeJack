@@ -600,7 +600,24 @@ $("#chatForm").onsubmit = async (event) => {
           const el = document.createElement("details");
           el.className = "tool-step council-step";
           const ok = item.status === "done";
-          el.innerHTML = `<summary>${ok ? "✓" : "◌"} ${escape(item.title || "AI Council")} · ${escape(item.detail || item.status || "")}</summary>`;
+          const title = item.title || "AI Council";
+          el.innerHTML = `<summary>${ok ? "✓" : "◌"} ${escape(title)} · ${escape(item.detail || item.status || "")}</summary>`;
+          if (item.evidenceTypes?.length || item.verification) {
+            const meta = document.createElement("div");
+            meta.className = "council-summary";
+            meta.textContent = [
+              item.evidenceTypes?.length
+                ? `Evidence: ${item.evidenceTypes.join(", ")}`
+                : "",
+              item.verification ? `Verification: ${item.verification}` : "",
+              item.testsVerified != null
+                ? `Tests verified: ${item.testsVerified ? "yes" : "no"}`
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" · ");
+            el.append(meta);
+          }
           if (item.proposals?.length) {
             const list = document.createElement("ul");
             for (const p of item.proposals) {
