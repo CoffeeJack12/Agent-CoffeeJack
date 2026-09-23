@@ -17,7 +17,7 @@ import {
 import { guardResponse } from "../server/task-state.mjs";
 import { advanceTask } from "../server/task-state.mjs";
 
-const fullPrefs = { ...DEFAULT_PREFERENCES, mode: "jarvis", capabilities: null };
+const fullPrefs = { ...DEFAULT_PREFERENCES, mode: "auto", capabilities: null };
 
 test("CapabilityRegistry reflects enabled packs, platform and gaming", () => {
   const registry = buildCapabilityRegistry({
@@ -178,7 +178,7 @@ async function chatFixture(t, prefs, answers, text) {
 test('can u control my PC? affirms live capabilities and does not deny control', async (t) => {
   const f = await chatFixture(
     t,
-    { mode: "jarvis" },
+    { mode: "auto" },
     [
       {
         content:

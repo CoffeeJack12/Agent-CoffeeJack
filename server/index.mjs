@@ -1,4 +1,6 @@
-import { getPreferences, savePreferences, LANGUAGES, MODES, PACKS, PREFERENCE_OPTIONS } from "./preferences.mjs";
+import { getPreferences, savePreferences, LANGUAGES, ASSISTANT_LANGUAGES, APP_LANGUAGES, MODES, PACKS, PREFERENCE_OPTIONS, MEMORY_BEHAVIORS } from "./preferences.mjs";
+import { resolveEffectiveMode } from "./auto-mode.mjs";
+import { memoryCategory } from "./auto-memory.mjs";
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -206,8 +208,13 @@ export async function createApp({
         store.deleteChat(id);
         return json(res, 200, { ok: true });
       }
-      if (route === "/api/memories" && req.method === "GET")
-        return json(res, 200, store.memories(url.searchParams.get("q") ?? ""));
+      if (route === "/api/memories" && req.method === "GET") {
+        const rows = store.memories(url.searchParams.get("q") ?? "").map((m) => ({
+          ...m,
+          category: m.category || memoryCategory(m.kind, m.content),
+        }));
+        return json(res, 200, rows);
+      }
       if (route === "/api/memories" && req.method === "POST") {
         const b = await body(req);
         if (typeof b.content !== "string" || !b.content.trim())
@@ -223,7 +230,7 @@ export async function createApp({
       if (route === "/api/events" && req.method === "GET")
         return json(res, 200, store.events());
       if (route === "/api/preferences" && req.method === "GET")
-        return json(res,200,{preferences:getPreferences(store),catalog:{languages:LANGUAGES,modes:MODES,packs:PACKS,options:PREFERENCE_OPTIONS}});
+        return json(res,200,{preferences:getPreferences(store),catalog:{languages:ASSISTANT_LANGUAGES||LANGUAGES,appLanguages:APP_LANGUAGES,modes:MODES,packs:PACKS,options:PREFERENCE_OPTIONS,memoryBehaviors:MEMORY_BEHAVIORS}});
       if (route === "/api/preferences" && req.method === "POST") {
         if(active)return json(res,409,{error:"Stop the active task before changing preferences"});
         return json(res,200,savePreferences(store,await body(req)));
@@ -398,14 +405,36 @@ export async function createApp({
         emit({ type: "chat", chat });
         const conf = settings();
         try {
+          const preferences = getPreferences(store);
+          const requestedMode =
+            typeof b.requestedMode === "string" && b.requestedMode
+              ? b.requestedMode
+              : preferences.mode;
+          const modeInfo = resolveEffectiveMode({
+            requestedMode,
+            text: b.text,
+            attachments: b.attachments ?? [],
+            history: store.messages(chat.id),
+          });
+          const requestedModel =
+            typeof b.requestedModel === "string" && b.requestedModel
+              ? b.requestedModel
+              : preferences.model || "auto";
+          const taskMode =
+            b.mode && ["general", "coding", "vision"].includes(b.mode)
+              ? b.mode
+              : "auto";
           const routing = await routeModel({
             ollama,
             settings: conf,
             text: b.text,
-            mode: b.mode && b.mode !== "auto" ? b.mode : getPreferences(store).mode === "developer" ? "coding" : "auto",
+            mode: taskMode,
             attachments: b.attachments ?? [],
             history: store.messages(chat.id),
             signal: controller.signal,
+            requestedModel,
+            effectiveMode: modeInfo.effectiveMode,
+            gaming,
           });
           emit({
             type: "routing",
@@ -413,6 +442,10 @@ export async function createApp({
             kind: routing.kind,
             fallback: routing.fallback,
             reason: routing.reason,
+            requestedModel: routing.requestedModel,
+            effectiveModel: routing.effectiveModel,
+            requestedMode: modeInfo.requestedMode,
+            effectiveMode: modeInfo.effectiveMode,
           });
           await ollama.prepare?.(routing.model, controller.signal);
           await runAgent({
@@ -428,6 +461,7 @@ export async function createApp({
             gaming,
             signal: controller.signal,
             emit,
+            requestedMode: modeInfo.requestedMode,
           });
         } catch (e) {
           emit({
@@ -453,6 +487,8 @@ export async function createApp({
           "/",
           "/app.js",
           "/branding.js",
+          "/i18n.js",
+          "/dropdown.js",
           "/jack/icon.png",
           "/jack/logo.png",
           "/jack/avatar.png",

@@ -29,7 +29,7 @@ test('language, title and mode preferences reach authoritative runtime context',
     assert.match(preferencePrompt({ ...DEFAULT_PREFERENCES, language }), pattern);
   assert.match(preferencePrompt(DEFAULT_PREFERENCES), /At your service, Master/);
  assert.match(preferencePrompt({...DEFAULT_PREFERENCES,address:'lord'}),/Lord/);
- assert.match(preferencePrompt({...DEFAULT_PREFERENCES,mode:'empathy'}),/Warm, patient/);
+ assert.match(preferencePrompt({...DEFAULT_PREFERENCES,mode:'empathy'}),/EMPATHY MODE|emotional context|minimal tool use/);
  assert.equal((limitAddress('Understood, Master. Done, Master. Ready, Master.',DEFAULT_PREFERENCES).match(/Master/g)||[]).length,1);
  assert.equal(limitAddress('```text\nMaster Master\n```',DEFAULT_PREFERENCES),'```text\nMaster Master\n```');
  assert.equal(limitAddress('أنا جاهز، Master.',DEFAULT_PREFERENCES,'','كيفك Jack؟'),'أنا جاهز.');

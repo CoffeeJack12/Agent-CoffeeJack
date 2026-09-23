@@ -1,61 +1,68 @@
 import os from "node:os";
+import { modelTaskKind } from "./auto-mode.mjs";
 
 const imagePath = /\.(png|jpe?g|webp)$/i;
-const coding =
-  /\b(code|coding|program|programming|debug|bug|repo|repository|git|tests?|javascript|typescript|python|html|css|sql|api|compile|lint|refactor|architecture|website)\b|برمج|كود|مستودع|اختبار|تصحيح|موقع|تطبيق/i;
+const TASK_MODES = ["auto", "general", "coding", "vision"];
 
 export function classifyTask({
   text = "",
   mode = "auto",
   attachments = [],
   history = [],
-}) {
-  if (!["auto", "general", "coding", "vision"].includes(mode))
-    throw new Error("Invalid task mode");
+  effectiveMode,
+} = {}) {
+  if (!TASK_MODES.includes(mode)) throw new Error("Invalid task mode");
   if (attachments.some((p) => imagePath.test(p)) || mode === "vision")
     return "vision";
   if (mode !== "auto") return mode;
-  if (
-    coding.test(text) ||
-    attachments.some((p) => /\.(m?js|tsx?|py|html|css|json|sql)$/i.test(p))
-  )
-    return "coding";
-  if (
-    /^(continue|fix it|try again|go on|كمل|تابع|صلحه)[.!؟\s]*$/i.test(
-      text.trim(),
-    )
-  ) {
-    const previous = history.filter((m) => m.role === "user").at(-1);
-    if (previous && coding.test(previous.content)) return "coding";
-  }
-  return "general";
+  return modelTaskKind({
+    effectiveMode: effectiveMode || "auto",
+    text,
+    attachments,
+    history,
+  });
 }
 
+/**
+ * Model selection.
+ * requestedModel: "auto" | concrete installed name
+ * Manual lock when requestedModel !== "auto".
+ */
 export async function routeModel({
   ollama,
   settings,
   signal,
   memoryBytes = os.totalmem(),
+  requestedModel = "auto",
+  gaming = false,
+  effectiveMode,
   ...task
 }) {
   signal?.throwIfAborted();
-  const kind = classifyTask(task);
+  const kind = classifyTask({ ...task, effectiveMode });
   const installed = (await ollama.models(signal)).filter(
     (m) => !m.remote_host && !/(?:^|[-:])cloud(?:$|:)/i.test(m.name),
   );
-  const preferred =
-    kind === "vision"
-      ? settings.visionModel
-      : kind === "coding"
-        ? settings.codingModel
-        : settings.model;
   const normalize = (name) =>
     name && (name.includes(":") ? name : name + ":latest");
+  const locked =
+    requestedModel &&
+    requestedModel !== "auto" &&
+    installed.some((m) => normalize(m.name) === normalize(requestedModel));
+  const preferred = locked
+    ? requestedModel
+    : kind === "vision"
+      ? settings.visionModel
+      : kind === "coding"
+        ? settings.codingModel || settings.model
+        : settings.model;
   const candidates = [
     ...new Set(
-      [preferred, settings.model, ...installed.map((m) => m.name)].filter(
-        Boolean,
-      ),
+      [
+        preferred,
+        settings.model,
+        ...installed.map((m) => m.name),
+      ].filter(Boolean),
     ),
   ];
   for (const candidate of candidates) {
@@ -67,27 +74,34 @@ export async function routeModel({
     const info = await ollama.inspect(entry.name, signal);
     const capabilities = info.capabilities ?? [];
     if (kind === "vision" && !capabilities.includes("vision")) continue;
-    if (kind === "coding" && !capabilities.includes("tools")) continue;
+    if (kind === "coding" && !capabilities.includes("tools") && !locked)
+      continue;
+    void gaming;
     const supportedContext = Object.entries(info.model_info ?? {})
       .filter(([key]) => key.endsWith(".context_length"))
       .map(([, value]) => Number(value))
       .filter((n) => n > 0);
     const context = Math.min(
       kind === "coding" && memoryBytes >= 24 * 1024 ** 3 ? 16384 : 8192,
-      ...supportedContext,
+      ...(supportedContext.length ? supportedContext : []),
     );
     return {
       kind,
       model: entry.name,
+      requestedModel: requestedModel || "auto",
+      effectiveModel: entry.name,
       capabilities,
       fallback:
         normalize(entry.name) !== normalize(preferred || settings.model),
-      reason:
-        kind === "vision"
+      reason: locked
+        ? "Manual model lock"
+        : kind === "vision"
           ? "Verified image-capable local model"
           : kind === "coding"
             ? "Coding workflow with local tools"
-            : "General conversation",
+            : requestedModel === "auto"
+              ? "Auto model selection"
+              : "General conversation",
       profile: {
         think:
           kind === "coding" && capabilities.includes("thinking")

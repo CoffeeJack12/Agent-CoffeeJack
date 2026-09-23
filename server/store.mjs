@@ -30,6 +30,21 @@ export class Store {
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS memories_project ON memories(project)",
     );
+    for (const column of [
+      ["updated", "TEXT"],
+      ["last_used", "TEXT"],
+      ["confidence", "REAL"],
+      ["chat_id", "TEXT"],
+      ["category", "TEXT"],
+    ]) {
+      if (
+        !this.db
+          .prepare("PRAGMA table_info(memories)")
+          .all()
+          .some((c) => c.name === column[0])
+      )
+        this.db.exec(`ALTER TABLE memories ADD COLUMN ${column[0]} ${column[1]}`);
+    }
     scrubStoredCapabilityClaims(this);
   }
   profilePreferences(profileId) {
@@ -105,7 +120,7 @@ export class Store {
       )
       .all(`%${query}%`);
   }
-  remember(content, kind = "note", project = null) {
+  remember(content, kind = "note", project = null, meta = {}) {
     content = validateMemory(content, kind);
     const scope = kind === "preference" ? null : projectKey(project);
     const existing = this.db
@@ -113,14 +128,47 @@ export class Store {
         "SELECT id FROM memories WHERE content=? AND kind=? AND project IS ?",
       )
       .get(content, kind, scope);
-    if (existing) return existing.id;
+    if (existing) {
+      this.updateMemory(existing.id, meta);
+      return existing.id;
+    }
     const id = randomUUID();
+    const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO memories(id,content,kind,created,project) VALUES(?,?,?,?,?)",
+        "INSERT INTO memories(id,content,kind,created,project,updated,last_used,confidence,chat_id,category) VALUES(?,?,?,?,?,?,?,?,?,?)",
       )
-      .run(id, content, kind, new Date().toISOString(), scope);
+      .run(
+        id,
+        content,
+        kind,
+        now,
+        scope,
+        now,
+        now,
+        meta.confidence ?? null,
+        meta.chatId ?? null,
+        meta.category ?? null,
+      );
     return id;
+  }
+  updateMemory(id, meta = {}) {
+    const row = this.db.prepare("SELECT * FROM memories WHERE id=?").get(id);
+    if (!row) return;
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        "UPDATE memories SET content=COALESCE(?,content), updated=?, last_used=?, confidence=COALESCE(?,confidence), chat_id=COALESCE(?,chat_id), category=COALESCE(?,category) WHERE id=?",
+      )
+      .run(
+        meta.content ?? null,
+        now,
+        now,
+        meta.confidence ?? null,
+        meta.chatId ?? null,
+        meta.category ?? null,
+        id,
+      );
   }
   forget(id) {
     this.db.prepare("DELETE FROM memories WHERE id=?").run(id);

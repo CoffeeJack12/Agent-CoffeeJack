@@ -1,6 +1,13 @@
 import { jackBrand, mountBranding } from "/branding.js";
 import { marked } from "/vendor/marked.esm.js";
 import DOMPurify from "/vendor/purify.es.mjs";
+import {
+  resolveAppLocale,
+  t,
+  applyDocumentLocale,
+  applyStaticI18n,
+} from "/i18n.js";
+import { createDropdown, mountDropdown } from "/dropdown.js";
 const $ = (selector) => document.querySelector(selector);
 mountBranding();
 try {
@@ -16,14 +23,72 @@ const state = {
   attachments: [],
   status: null,
   view: "chat",
+  locale: "ar",
+  currentMode: "auto",
+  requestedModel: "auto",
+  modeInitialized: false,
 };
-const titles = {
-  chat: "المحادثة",
-  memory: "الذاكرة",
-  activity: "سجل التنفيذ",
-  settings: "الإعدادات",
-  persona: "شخصية Jack",
+const dropdowns = {
+  currentMode: null,
+  taskMode: null,
+  requestedModel: null,
+  settingsModels: {},
+  persona: {},
 };
+const tr = (key, vars) => t(key, state.locale, vars);
+function modeOptions() {
+  return Object.keys(preferenceCatalog?.modes ?? {
+    auto: {},
+    hacker: {},
+    developer: {},
+    research: {},
+    empathy: {},
+    secret_agent: {},
+  }).map((value) => ({ value, label: tr(`mode.${value}.label`) }));
+}
+function applyAppLanguage(appLanguage = "auto") {
+  const locale = resolveAppLocale(appLanguage);
+  state.locale = locale.lang;
+  applyDocumentLocale(locale);
+  applyStaticI18n(document, state.locale);
+  $("#pageTitle").textContent = tr(`page.${state.view}`);
+  setComposerPlaceholder();
+  mountComposerDropdowns();
+  if (Object.keys(dropdowns.persona).length) mountPersonaDropdowns(personaValues());
+}
+function mountComposerDropdowns() {
+  const modes = modeOptions();
+  dropdowns.currentMode = mountDropdown("#jackModeHost", {
+    options: modes,
+    value: state.currentMode,
+    ariaLabel: tr("composer.currentMode"),
+    onChange: (value) => {
+      state.currentMode = value;
+    },
+  });
+  dropdowns.taskMode = mountDropdown("#taskModeHost", {
+    options: ["auto", "general", "coding", "vision"].map((value) => ({
+      value,
+      label: tr(`composer.mode.${value}`),
+    })),
+    value: dropdowns.taskMode?.getValue?.() ?? "auto",
+    ariaLabel: tr("composer.taskType"),
+  });
+  const installed = state.status?.models?.map((model) => model.name) ?? [];
+  dropdowns.requestedModel = mountDropdown("#modelHost", {
+    options: [
+      { value: "auto", label: tr("settings.autoModel") },
+      ...installed.map((value) => ({ value, label: value })),
+    ],
+    value: installed.includes(state.requestedModel)
+      ? state.requestedModel
+      : "auto",
+    ariaLabel: tr("settings.autoModel"),
+    onChange: (value) => {
+      state.requestedModel = value;
+    },
+  });
+}
 const escape = (text) =>
   String(text).replace(
     /[&<>"']/g,
@@ -80,7 +145,7 @@ function renderText(element, text) {
   for (const block of element.querySelectorAll("pre")) {
     const copy = document.createElement("button");
     copy.className = "copy-code";
-    copy.textContent = "نسخ الكود";
+    copy.textContent = tr("chat.copyCode");
     copy.onclick = () =>
       copyText(block.querySelector("code")?.textContent ?? "", copy);
     block.append(copy);
@@ -90,9 +155,9 @@ async function copyText(text, button) {
   const original = button.textContent;
   try {
     await navigator.clipboard.writeText(text);
-    button.textContent = "تم النسخ ✓";
+    button.textContent = tr("chat.copied");
   } catch {
-    button.textContent = "تعذّر النسخ";
+    button.textContent = tr("chat.copyFailed");
   }
   setTimeout(() => {
     button.textContent = original;
@@ -109,7 +174,7 @@ async function api(route, options = {}) {
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await response.json();
-  if (!response.ok) throw new Error(data.error || "تعذر تنفيذ الطلب");
+  if (!response.ok) throw new Error(data.error || tr("notice.requestFailed"));
   return data;
 }
 function notice(text = "") {
@@ -120,43 +185,47 @@ async function refreshStatus() {
   try {
     const status = await api("status");
     state.status = status;
-    if(status.preferences) $("#jackMode").value=status.preferences.mode;
     state.token = status.token;
+    applyAppLanguage(status.preferences?.appLanguage ?? "auto");
+    if (!state.modeInitialized) {
+      state.currentMode = status.preferences?.mode ?? "auto";
+      state.requestedModel = status.preferences?.model ?? "auto";
+      state.modeInitialized = true;
+      mountComposerDropdowns();
+    }
     if (status.jack) updateSelfModel(status.jack);
     const ready =
       !status.modelError &&
       status.models.some((m) => m.name === status.settings.model);
     $("#connectionDot").classList.toggle("ready", ready && !status.gaming);
     $("#connectionLabel").textContent = status.gaming
-      ? "ألعابك أولًا"
+      ? tr("connection.gamingPriority")
       : ready
-        ? "متصل محليًا"
-        : "الموديل غير جاهز";
-    $("#modelLabel").textContent = `${status.settings.model} · Local`;
-    if (status.jack?.persona?.language)
-      setComposerPlaceholder(status.jack.persona.language);
+        ? tr("connection.local")
+        : tr("connection.modelNotReady");
+    $("#modelLabel").textContent = `${status.settings.model} · ${tr("composer.modelLocal")}`;
     $("#gaming").classList.toggle("on", status.gaming);
     $("#gaming").setAttribute("aria-pressed", String(status.gaming));
     $("#gaming span").textContent = status.gaming
-      ? "وضع الألعاب مفعّل"
-      : "وضع الألعاب";
+      ? tr("gaming.modeOn")
+      : tr("gaming.mode");
     if (status.gaming)
       notice(
-        "وضع الألعاب مفعّل؛ مهام Jack متوقفة والموديلات تُفرّغ من الذاكرة.",
+        tr("gaming.notice"),
       );
     else if (status.modelError)
       notice(
-        "محرك الذكاء المحلي غير متصل. شغّل CoffeeJack من ملف Start CoffeeJack.",
+        tr("notice.engineOffline"),
       );
     else if (!ready)
       notice(
-        "الموديل المحدد غير مثبت بعد. أكمل تنزيله أو اختر موديلًا متاحًا في الإعدادات.",
+        tr("notice.modelMissing"),
       );
     else if (!state.busy) notice();
     if (status.approvals.length) showApproval(status.approvals[0]);
     return status;
   } catch (e) {
-    $("#connectionLabel").textContent = "غير متصل";
+    $("#connectionLabel").textContent = tr("connection.disconnected");
     $("#connectionDot").classList.remove("ready");
   }
 }
@@ -164,8 +233,7 @@ async function history() {
   const chats = await api("chats");
   $("#history").innerHTML = "";
   if (!chats.length)
-    $("#history").innerHTML =
-      '<div class="empty">بداية جديدة،<br>وأفكار كثيرة تنتظر.</div>';
+    $("#history").innerHTML = `<div class="empty">${escape(tr("chat.historyEmpty")).replace("\n", "<br>")}</div>`;
   for (const chat of chats) {
     const row = document.createElement("div");
     row.className =
@@ -175,7 +243,7 @@ async function history() {
     open.textContent = chat.title;
     open.title = chat.title;
     open.onclick = async () => {
-      if (state.busy) return notice("أوقف المهمة الحالية أولًا.");
+      if (state.busy) return notice(tr("chat.stopFirst"));
       state.chatId = chat.id;
       showView("chat");
       $("#messages").innerHTML = "";
@@ -187,10 +255,10 @@ async function history() {
     const del = document.createElement("button");
     del.className = "delete";
     del.textContent = "×";
-    del.title = "حذف المحادثة";
+    del.title = tr("chat.deleteChat");
     del.onclick = async () => {
       if (state.busy) return;
-      if (!confirm("حذف هذه المحادثة؟")) return;
+      if (!confirm(tr("chat.deleteConfirm"))) return;
       await api("chats/" + chat.id, { method: "DELETE" });
       if (state.chatId === chat.id) newChat();
       else history();
@@ -201,9 +269,13 @@ async function history() {
   filterHistory();
 }
 function newChat() {
-  if (state.busy) return notice("أوقف المهمة الحالية أولًا.");
+  if (state.busy) return notice(tr("chat.stopFirst"));
   state.chatId = null;
   state.attachments = [];
+  state.currentMode = state.status?.preferences?.mode ?? "auto";
+  state.requestedModel = state.status?.preferences?.model ?? "auto";
+  dropdowns.currentMode?.setValue(state.currentMode);
+  dropdowns.requestedModel?.setValue(state.requestedModel);
   drawAttachments();
   $("#messages").innerHTML = "";
   $("#welcome").classList.remove("hidden");
@@ -221,7 +293,7 @@ function addMessage(role, text = "") {
   if (role === "assistant") {
     const copy = document.createElement("button");
     copy.className = "copy-reply";
-    copy.textContent = "نسخ الرد";
+    copy.textContent = tr("chat.copyReply");
     copy.onclick = () =>
       copyText(el.querySelector(".message-content").dataset.text ?? "", copy);
     el.querySelector(".message-head").append(copy);
@@ -237,7 +309,7 @@ function showView(name) {
   state.view = name;
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $("#" + name + "View").classList.remove("hidden");
-  $("#pageTitle").textContent = titles[name];
+  $("#pageTitle").textContent = tr(`page.${name}`);
   document
     .querySelectorAll(".nav")
     .forEach((n) => n.classList.toggle("active", n.dataset.view === name));
@@ -269,15 +341,14 @@ function syncComposer() {
   syncPromptDirection();
   resizePrompt();
 }
-function setComposerPlaceholder(language) {
-  const english = language === "en";
-  $("#prompt").placeholder = english ? "Message Jack..." : "اكتب لـ Jack...";
-  $("#prompt").classList.toggle("placeholder-ltr", english);
+function setComposerPlaceholder() {
+  $("#prompt").placeholder = tr("composer.placeholder");
+  $("#prompt").classList.toggle("placeholder-ltr", state.locale === "en");
 }
 function showApproval(event) {
   const el = $("#approval");
   el.classList.remove("hidden");
-  el.innerHTML = `<h3>Jack يحتاج موافقتك: ${escape(event.name)}</h3><pre>${escape(JSON.stringify(event.args, null, 2))}</pre><button class="primary" id="allowTool">تنفيذ هذه الخطوة</button><button class="ghost" id="denyTool">رفض</button>`;
+  el.innerHTML = `<h3>${escape(tr("approval.title", { name: event.name }))}</h3><pre>${escape(JSON.stringify(event.args, null, 2))}</pre><button class="primary" id="allowTool">${escape(tr("approval.allow"))}</button><button class="ghost" id="denyTool">${escape(tr("approval.deny"))}</button>`;
   for (const [id, allow] of [
     ["allowTool", true],
     ["denyTool", false],
@@ -308,12 +379,12 @@ $("#chatForm").onsubmit = async (event) => {
   const content = answer.querySelector(".message-content");
   const thinking = document.createElement("div");
   thinking.className = "thinking";
-  thinking.innerHTML = "<i></i><i></i><i></i><span>Jack يجهّز الرد…</span>";
+  thinking.innerHTML = `<i></i><i></i><i></i><span>${escape(tr("composer.thinking"))}</span>`;
   answer.append(thinking);
   let full = "";
   let accepted = false;
   const steps = [];
-  $("#runStatus").textContent = "Jack يفكر…";
+  $("#runStatus").textContent = tr("composer.status.thinking");
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
@@ -324,7 +395,9 @@ $("#chatForm").onsubmit = async (event) => {
       body: JSON.stringify({
         text,
         chatId: state.chatId,
-        mode: $("#mode").value,
+        mode: dropdowns.taskMode?.getValue() ?? "auto",
+        requestedMode: state.currentMode,
+        requestedModel: state.requestedModel,
         attachments: state.attachments.map((a) => a.path),
       }),
     });
@@ -358,10 +431,12 @@ $("#chatForm").onsubmit = async (event) => {
         }
         if (item.type === "routing") {
           $("#modelLabel").textContent =
-            `${item.model} · ${item.kind}${item.fallback ? " · بديل محلي" : ""}`;
+            `${item.model} · ${item.kind}${item.fallback ? ` · ${tr("composer.modelFallback")}` : ""}`;
         }
         if (item.type === "round")
-          $("#runStatus").textContent = `Jack يعمل · الخطوة ${item.round}`;
+          $("#runStatus").textContent = tr("composer.status.working", {
+            round: item.round,
+          });
         if (item.type === "tool") {
           thinking.remove();
           let el;
@@ -369,7 +444,7 @@ $("#chatForm").onsubmit = async (event) => {
             el = document.createElement("details");
             el.className = "tool-step";
             el.dataset.name = item.name;
-            el.innerHTML = `<summary>◌ ${escape(item.name)} · يعمل</summary><pre>${escape(JSON.stringify(item.args, null, 2))}</pre>`;
+            el.innerHTML = `<summary>◌ ${escape(item.name)} · ${escape(tr("tool.running"))}</summary><pre>${escape(JSON.stringify(item.args, null, 2))}</pre>`;
             answer.append(el);
             steps.push(el);
           } else {
@@ -380,19 +455,41 @@ $("#chatForm").onsubmit = async (event) => {
               el.dataset.done = "1";
               el.classList.toggle("error", item.status === "error");
               el.querySelector("summary").textContent =
-                `${item.status === "error" ? "!" : "✓"} ${item.name} · ${item.status === "error" ? "تعذر التنفيذ" : "اكتمل"}`;
-              el.querySelector("pre").textContent = JSON.stringify(
-                item.result,
-                null,
-                2,
-              );
+                `${item.status === "error" ? "!" : "✓"} ${item.name} · ${item.status === "error" ? tr("tool.error") : tr("tool.done")}`;
+              const pre = el.querySelector("pre");
+              const sources =
+                item.name === "research"
+                  ? (item.result?.sources ?? item.result?.results ?? []).filter(
+                      (source) => source?.url,
+                    )
+                  : [];
+              if (item.name === "research" && item.status !== "error") {
+                el.querySelector("summary").textContent =
+                  `Research ✓ · ${sources.length} sources`;
+                pre.remove();
+                const list = document.createElement("ul");
+                list.className = "research-sources";
+                for (const source of sources.slice(0, 5)) {
+                  const row = document.createElement("li");
+                  const link = document.createElement("a");
+                  link.href = source.url;
+                  link.target = "_blank";
+                  link.rel = "noopener noreferrer";
+                  link.textContent = source.title || source.url;
+                  row.append(link);
+                  list.append(row);
+                }
+                el.append(list);
+              } else {
+                pre.textContent = JSON.stringify(item.result, null, 2);
+              }
               if (
                 item.result?.image &&
                 /^\/artifacts\/[a-z]+-\d+\.png$/.test(item.result.image)
               ) {
                 const img = document.createElement("img");
                 img.src = item.result.image;
-                img.alt = "لقطة من الأداة";
+                img.alt = tr("tool.screenshotAlt");
                 el.append(img);
               }
             }
@@ -406,7 +503,7 @@ $("#chatForm").onsubmit = async (event) => {
           content.classList.add("error-text");
         }
         if (item.type === "done")
-          $("#runStatus").textContent = "اكتمل الرد · على جهازك";
+          $("#runStatus").textContent = tr("composer.status.done");
       }
       if (
         window.innerHeight + window.scrollY >=
@@ -450,7 +547,7 @@ $("#prompt").onkeydown = (e) => {
 };
 $("#prompt").oninput = syncComposer;
 $("#chatForm").addEventListener("pointerdown", (e) => {
-  if (!e.target.closest("button, select, a")) $("#prompt").focus();
+  if (!e.target.closest("button, .cj-dropdown, a")) $("#prompt").focus();
 });
 $("#newChat").onclick = newChat;
 document.addEventListener("keydown", (e) => {
@@ -466,7 +563,7 @@ document.querySelectorAll("[data-prompt]").forEach(
   (button) =>
     (button.onclick = () => {
       $("#prompt").value = button.dataset.prompt;
-      $("#mode").value = button.dataset.mode || "auto";
+      dropdowns.taskMode?.setValue(button.dataset.mode || "auto");
       syncComposer();
       $("#prompt").focus();
     }),
@@ -507,8 +604,9 @@ $("#fileInput").onchange = async () => {
   if (!file) return;
   try {
     if (file.size > 20 * 1024 * 1024)
-      throw new Error("الحد الأعلى للملف 20 MB.");
-    if (state.attachments.length >= 5) throw new Error("الحد الأعلى 5 ملفات.");
+      throw new Error(tr("notice.uploadMaxSize"));
+    if (state.attachments.length >= 5)
+      throw new Error(tr("notice.uploadMaxCount"));
     $("#attach").disabled = true;
     const data = await new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -528,22 +626,67 @@ $("#fileInput").onchange = async () => {
   }
 };
 async function loadMemories() {
-  const memories = await api("memories");
+  const query = $("#memorySearch")?.value.trim() ?? "";
+  const memories = await api(`memories?q=${encodeURIComponent(query)}`);
   $("#memories").innerHTML = "";
   if (!memories.length)
-    $("#memories").innerHTML =
-      '<div class="empty">الذاكرة تبدأ معك. أضف أول تفضيل أو ملاحظة.</div>';
-  for (const m of memories) {
-    const el = document.createElement("div");
-    el.className = "card";
-    el.innerHTML = `<small>${escape(m.kind)} · ${new Date(m.created).toLocaleDateString("ar-SA")}</small><p>${escape(m.content)}</p><button class="delete" aria-label="حذف الذاكرة">×</button>`;
-    el.querySelector("button").onclick = async () => {
-      await api("memories/" + m.id, { method: "DELETE" });
-      loadMemories();
-    };
-    $("#memories").append(el);
+    $("#memories").innerHTML = `<div class="empty">${escape(tr("memory.empty"))}</div>`;
+  const categories = [
+    ["Preferences", "memory.preferences"],
+    ["About Me", "memory.aboutMe"],
+    ["Environment", "memory.environment"],
+    ["Projects", "memory.projects"],
+    ["Lessons", "memory.lessons"],
+  ];
+  for (const [category, key] of categories) {
+    const items = memories.filter(
+      (memory) =>
+        (memory.category || "About Me").toLowerCase() ===
+        category.toLowerCase(),
+    );
+    if (!items.length) continue;
+    const group = document.createElement("section");
+    group.className = "memory-category";
+    const heading = document.createElement("h3");
+    heading.textContent = tr(key);
+    group.append(heading);
+    for (const m of items) {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = `<small>${escape(tr(`memory.kind.${m.kind}`))} · ${new Date(m.created).toLocaleDateString(state.locale === "ar" ? "ar-SA" : "en-US")}</small><p>${escape(m.content)}</p>`;
+      const edit = document.createElement("button");
+      edit.type = "button";
+      edit.className = "ghost";
+      edit.textContent = state.locale === "ar" ? "تعديل" : "Edit";
+      edit.onclick = async () => {
+        const content = prompt(
+          state.locale === "ar" ? "عدّل الذاكرة" : "Edit memory",
+          m.content,
+        )?.trim();
+        if (!content || content === m.content) return;
+        await api("memories/" + m.id, { method: "DELETE" });
+        await api("memories", {
+          method: "POST",
+          body: { content, kind: m.kind },
+        });
+        await loadMemories();
+      };
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "delete";
+      remove.textContent = "×";
+      remove.setAttribute("aria-label", tr("memory.deleteAria"));
+      remove.onclick = async () => {
+        await api("memories/" + m.id, { method: "DELETE" });
+        await loadMemories();
+      };
+      el.append(edit, remove);
+      group.append(el);
+    }
+    $("#memories").append(group);
   }
 }
+$("#memorySearch").oninput = () => loadMemories().catch(report);
 $("#memoryForm").onsubmit = async (e) => {
   e.preventDefault();
   try {
@@ -561,11 +704,11 @@ async function loadEvents() {
   const events = await api("events");
   $("#events").innerHTML = events.length
     ? ""
-    : '<div class="empty">ما فيه خطوات تنفيذ بعد. ستظهر الأدوات ونتائجها هنا.</div>';
+    : `<div class="empty">${escape(tr("activity.empty"))}</div>`;
   for (const item of events) {
     const el = document.createElement("details");
     el.className = "card";
-    el.innerHTML = `<summary>${item.status === "done" ? "✓" : "!"} ${escape(item.tool)} <small> · ${new Date(item.created).toLocaleString("ar-SA")}</small></summary><pre>${escape(JSON.stringify(JSON.parse(item.detail), null, 2))}</pre>`;
+    el.innerHTML = `<summary>${item.status === "done" ? "✓" : "!"} ${escape(item.tool)} <small> · ${new Date(item.created).toLocaleString(state.locale === "ar" ? "ar-SA" : "en-US")}</small></summary><pre>${escape(JSON.stringify(JSON.parse(item.detail), null, 2))}</pre>`;
     $("#events").append(el);
   }
 }
@@ -575,22 +718,36 @@ async function loadSettings() {
   if (!status) return;
   await loadPreferences();
   const form = $("#settingsForm");
-  for (const select of form.querySelectorAll(".model-select")) {
-    select.innerHTML = "";
-    if (select.name !== "model") {
-      const opt = new Option("نفس الموديل الأساسي", "");
-      select.add(opt);
-    }
+  for (const [name, host] of [
+    ["model", "#modelSelectHost"],
+    ["codingModel", "#codingModelHost"],
+    ["visionModel", "#visionModelHost"],
+  ]) {
     const names = [
       ...new Set(
         [
           ...status.models.map((m) => m.name),
-          status.settings[select.name],
+          status.settings[name],
         ].filter(Boolean),
       ),
     ];
-    for (const name of names) select.add(new Option(name, name));
-    select.value = status.settings[select.name];
+    dropdowns.settingsModels[name] = mountDropdown(host, {
+      name,
+      options: [
+        ...(name === "model"
+          ? []
+          : [{ value: "", label: tr("settings.sameAsPrimary") }]),
+        ...names.map((value) => ({ value, label: value })),
+      ],
+      value: status.settings[name],
+      ariaLabel: tr(
+        name === "model"
+          ? "settings.primaryModel"
+          : name === "codingModel"
+            ? "settings.codingModel"
+            : "settings.visionModel",
+      ),
+    });
   }
   for (const key of ["workspace", "instructions"])
     form.elements[key].value = status.settings[key];
@@ -605,9 +762,9 @@ $("#settingsForm").onsubmit = async (e) => {
     await api("settings", {
       method: "POST",
       body: {
-        model: f.elements.model.value,
-        codingModel: f.elements.codingModel.value,
-        visionModel: f.elements.visionModel.value,
+        model: dropdowns.settingsModels.model.getValue(),
+        codingModel: dropdowns.settingsModels.codingModel.getValue(),
+        visionModel: dropdowns.settingsModels.visionModel.getValue(),
         workspace: f.elements.workspace.value,
         instructions: f.elements.instructions.value,
         autoApprove: f.elements.autoApprove.checked,
@@ -618,7 +775,7 @@ $("#settingsForm").onsubmit = async (e) => {
           .filter(Boolean),
       },
     });
-    $("#settingsMessage").textContent = "تم حفظ الإعدادات.";
+    $("#settingsMessage").textContent = tr("settings.saved");
     await refreshStatus();
   } catch (err) {
     $("#settingsMessage").textContent = err.message;
@@ -673,13 +830,63 @@ const presets = {
   calm: { humor: "subtle", detail: "balanced" },
 };
 function personaValues() {
-  const form = $("#personaForm");
   return Object.fromEntries(
     ["language", "dialect", "humor", "detail"].map((key) => [
       key,
-      form.elements[key].value,
+      dropdowns.persona[key]?.getValue() ?? "auto",
     ]),
   );
+}
+function mountPersonaDropdowns(values = {}) {
+  const definitions = {
+    language: {
+      host: "#personaLanguageHost",
+      aria: "persona.replyLanguage",
+      options: ["auto", "ar", "en"].map((value) => ({
+        value,
+        label:
+          value === "auto"
+            ? tr("lang.autoAssistant")
+            : tr(`lang.${value}`),
+      })),
+    },
+    dialect: {
+      host: "#personaDialectHost",
+      aria: "persona.dialect",
+      options: ["jeddah", "standard"].map((value) => ({
+        value,
+        label: tr(`persona.dialect.${value}`),
+      })),
+    },
+    humor: {
+      host: "#personaHumorHost",
+      aria: "persona.humor",
+      options: ["playful", "subtle", "off"].map((value) => ({
+        value,
+        label: tr(`persona.humor.${value}`),
+      })),
+    },
+    detail: {
+      host: "#personaDetailHost",
+      aria: "persona.detail",
+      options: ["concise", "balanced", "thorough"].map((value) => ({
+        value,
+        label: tr(`persona.detail.${value}`),
+      })),
+    },
+  };
+  for (const [key, definition] of Object.entries(definitions)) {
+    dropdowns.persona[key] = mountDropdown(definition.host, {
+      name: key,
+      options: definition.options,
+      value: values[key] ?? dropdowns.persona[key]?.getValue(),
+      ariaLabel: tr(definition.aria),
+      onChange: () => {
+        previewPersona();
+        $("#personaMessage").textContent = tr("persona.savePrompt");
+      },
+    });
+  }
 }
 function previewPersona() {
   const values = personaValues();
@@ -719,66 +926,50 @@ function previewPersona() {
   }
 }
 function updateSelfModel(jack) {
-  const formatter = new Intl.NumberFormat("ar-SA");
+  const formatter = new Intl.NumberFormat(state.locale === "ar" ? "ar-SA" : "en-US");
   $("#memoryCount").textContent = formatter.format(jack.memories);
   $("#conversationCount").textContent = formatter.format(jack.conversations);
   $("#toolCount").textContent = formatter.format(jack.completedTools);
-  const labels = {
-    ready: "جاهز",
-    working: "يعمل على طلبك",
-    gaming: "الأولوية للعبة",
-  };
-  $("#selfState").textContent = labels[jack.state] || "جاهز";
+  $("#selfState").textContent = tr(
+    `persona.self.state.${jack.state === "gaming" ? "gaming" : jack.state === "working" ? "working" : "ready"}`,
+  );
   $("#jackPresence").textContent =
     jack.state === "gaming"
-      ? "Jack على وضع الألعاب"
+      ? tr("welcome.presence.gaming")
       : jack.state === "working"
-        ? "Jack يعمل على طلبك"
-        : "Jack هنا";
-  $("#personalityShortcut").textContent = {
-    playful: "حاد، ساخر وقت اللزوم",
-    subtle: "هادي، وفيه حدّة خفيفة",
-    off: "مركّز على النتيجة",
-  }[jack.persona.humor];
+        ? tr("welcome.presence.working")
+        : tr("welcome.presence.here");
+  $("#personalityShortcut").textContent = tr(
+    `persona.shortcut.${jack.persona.humor}`,
+  );
   const r = jack.lastReflection;
   if (r) {
-    const result =
-      {
-        completed: "اكتمل الرد",
-        cancelled: "توقّف بطلبك",
-        error: "توقّف بسبب خطأ",
-        "step-limit": "وصل إلى حد الخطوات",
-      }[r.outcome] || r.outcome;
-    $("#lastReflection").textContent =
-      `آخر طلب: ${result} · ${r.successfulTools} أداة نجحت · ${r.failedTools} أخطاء أدوات · ${r.durationSeconds} ثانية. هذه نتائج تنفيذ فعلية، وليست أفكارًا داخلية.`;
+    const outcome = r.outcome === "step-limit" ? "stepLimit" : r.outcome;
+    const result = tr(`persona.self.outcome.${outcome}`);
+    $("#lastReflection").textContent = tr("persona.self.reflection", {
+      result,
+      successfulTools: r.successfulTools,
+      failedTools: r.failedTools,
+      durationSeconds: r.durationSeconds,
+    });
   } else
-    $("#lastReflection").textContent = "تظهر هنا نتيجة آخر طلب بعد تنفيذه.";
+    $("#lastReflection").textContent = tr("persona.self.reflectionEmpty");
 }
 async function loadPersona() {
   const jack = await api("persona");
-  if(preferenceCatalog){const language=$("#personaForm").elements.language;language.innerHTML="";for(const [id,label]of Object.entries(preferenceCatalog.languages))language.add(new Option(label,id));}
-  for (const [key, value] of Object.entries(jack.persona))
-    if ($("#personaForm").elements[key])
-      $("#personaForm").elements[key].value = value;
+  mountPersonaDropdowns(jack.persona);
   $("#personaMessage").textContent = "";
   updateSelfModel(jack);
-  setComposerPlaceholder(jack.persona.language);
   previewPersona();
 }
-$("#personaForm").onchange = () => {
-  previewPersona();
-  $("#personaMessage").textContent =
-    "احفظ لتطبيق التغييرات على الردود القادمة.";
-};
 for (const button of document.querySelectorAll("[data-persona-preset]"))
   button.onclick = () => {
     for (const [key, value] of Object.entries(
       presets[button.dataset.personaPreset],
     ))
-      $("#personaForm").elements[key].value = value;
+      dropdowns.persona[key]?.setValue(value);
     previewPersona();
-    $("#personaMessage").textContent =
-      "احفظ لتطبيق التغييرات على الردود القادمة.";
+    $("#personaMessage").textContent = tr("persona.savePrompt");
   };
 $("#personaForm").onsubmit = async (event) => {
   event.preventDefault();
@@ -788,38 +979,208 @@ $("#personaForm").onsubmit = async (event) => {
       body: personaValues(),
     });
     updateSelfModel(jack);
-    setComposerPlaceholder(jack.persona.language);
-    $("#personaMessage").textContent = "انحفظت. هذا أسلوبي من الآن ✓";
+    $("#personaMessage").textContent = tr("persona.saved");
   } catch (error) {
     $("#personaMessage").textContent = error.message;
   }
 };
 let preferenceCatalog;
 async function loadPreferences() {
- const data=await api('preferences');preferenceCatalog=data.catalog;
- const form=$('#preferenceForm');form.innerHTML='';
- const sections=[['General / عام',['language','address','name','customAddress']],['Personality / الشخصية',['tone','verbosity','humor','initiative']],['Modes / الأنماط',['mode']]];
- const labels={language:'Language / اللغة',address:'Address me as / اللقب',name:'Name / الاسم',customAddress:'Custom address / لقب مخصص',tone:'Tone / النبرة',verbosity:'Verbosity / التفصيل',humor:'Humor / المزاح',initiative:'Initiative / المبادرة',mode:'Default mode / النمط الافتراضي'};
- for(const [heading,keys] of sections){
-  const card=document.createElement('div');card.className='setting-card';const h=document.createElement('h3');h.textContent=heading;card.append(h);
-  for(const key of keys){const label=document.createElement('label');label.textContent=labels[key];
-   const input=document.createElement(['name','customAddress'].includes(key)?'input':'select');input.name=key;
-   if(input.tagName==='SELECT')for(const value of data.catalog.options[key]){const title=key==='language'?data.catalog.languages[value]:key==='mode'?data.catalog.modes[value].label:value[0].toUpperCase()+value.slice(1);input.add(new Option(title,value));}
-   else {input.maxLength=40;input.dir='auto';}
-   input.value=data.preferences[key];label.append(input);card.append(label);
+  const data = await api("preferences");
+  preferenceCatalog = data.catalog;
+  const form = $("#preferenceForm");
+  form.innerHTML = "";
+  const sections = [
+    [
+      "settings.section.general",
+      [
+        "appLanguage",
+        "language",
+        "memoryBehavior",
+        "model",
+        "address",
+        "name",
+        "customAddress",
+      ],
+    ],
+    [
+      "settings.section.personality",
+      ["tone", "verbosity", "humor", "initiative"],
+    ],
+    ["settings.section.modes", ["mode"]],
+  ];
+  const labelKeys = {
+    appLanguage: "settings.appLanguage",
+    language: "settings.assistantLanguage",
+    memoryBehavior: "settings.memoryBehavior",
+    model: "settings.autoModel",
+    address: "settings.address",
+    name: "settings.name",
+    customAddress: "settings.customAddress",
+    tone: "settings.tone",
+    verbosity: "settings.verbosity",
+    humor: "settings.humorPref",
+    initiative: "settings.initiative",
+    mode: "settings.defaultMode",
+  };
+  const preferenceDropdowns = {};
+  let custom = data.preferences.capabilities !== null;
+  let drawPacks = () => {};
+  const optionsFor = (key) => {
+    if (key === "appLanguage")
+      return data.catalog.options[key].map((value) => ({
+        value,
+        label: tr(`lang.${value}`),
+      }));
+    if (key === "language")
+      return data.catalog.options[key].map((value) => ({
+        value,
+        label:
+          value === "auto" ? tr("lang.autoAssistant") : tr(`lang.${value}`),
+      }));
+    if (key === "mode") return modeOptions();
+    if (key === "model") {
+      const installed = state.status?.models?.map((item) => item.name) ?? [];
+      return [
+        { value: "auto", label: tr("settings.autoModel") },
+        ...installed.map((value) => ({ value, label: value })),
+      ];
+    }
+    return data.catalog.options[key].map((value) => ({
+      value,
+      label: tr(
+        key === "memoryBehavior"
+          ? `memoryBehavior.${value}`
+          : key === "address"
+            ? `address.${value}`
+            : key === "tone"
+              ? `tone.${value}`
+              : key === "verbosity"
+                ? `verbosity.${value}`
+                : key === "humor"
+                  ? `humorPref.${value}`
+                  : `initiative.${value}`,
+      ),
+    }));
+  };
+  for (const [headingKey, keys] of sections) {
+    const card = document.createElement("div");
+    card.className = "setting-card";
+    const heading = document.createElement("h3");
+    heading.textContent = tr(headingKey);
+    card.append(heading);
+    for (const key of keys) {
+      const label = document.createElement("label");
+      const caption = document.createElement("span");
+      caption.textContent = tr(labelKeys[key]);
+      label.append(caption);
+      if (["name", "customAddress"].includes(key)) {
+        const input = document.createElement("input");
+        input.name = key;
+        input.maxLength = 40;
+        input.dir = "auto";
+        input.value = data.preferences[key];
+        label.append(input);
+      } else {
+        const host = document.createElement("div");
+        host.className = "dropdown-host";
+        label.append(host);
+        preferenceDropdowns[key] = createDropdown({
+          name: key,
+          options: optionsFor(key),
+          value: data.preferences[key],
+          ariaLabel: tr(labelKeys[key]),
+          onChange: async (value) => {
+            if (key === "mode") drawPacks();
+            if (key === "appLanguage") {
+              applyAppLanguage(value);
+              try {
+                await api("preferences", {
+                  method: "POST",
+                  body: { appLanguage: value },
+                });
+                if (state.status?.preferences)
+                  state.status.preferences.appLanguage = value;
+                await refreshStatus();
+                await loadPreferences();
+              } catch (error) {
+                report(error);
+              }
+            }
+          },
+        });
+        host.append(preferenceDropdowns[key]);
+      }
+      card.append(label);
+    }
+    if (keys.includes("mode")) {
+      const hint = document.createElement("p");
+      hint.id = "modeDescription";
+      hint.className = "hint";
+      card.append(hint);
+    }
+    form.append(card);
   }
-  if(keys.includes('mode')){const hint=document.createElement('p');hint.id='modeDescription';hint.className='hint';card.append(hint);}
+  const card = document.createElement("div");
+  card.className = "setting-card";
+  card.innerHTML = `<h3>${escape(tr("settings.section.capabilities"))}</h3><p class="hint">${escape(tr("settings.capabilitiesHint"))}</p><div id="capabilityChoices"></div><button type="button" id="resetCapabilities" class="ghost">${escape(tr("settings.resetCapabilities"))}</button>`;
   form.append(card);
- }
- const card=document.createElement('div');card.className='setting-card';card.innerHTML='<h3>Capabilities / القدرات</h3><p class="hint">Tool choices apply in the backend. Terminal and browser are powerful tools; approvals still apply.</p><div id="capabilityChoices"></div><button type="button" id="resetCapabilities" class="ghost">Use mode defaults / إعدادات النمط</button>';form.append(card);
- let custom=data.preferences.capabilities!==null;
- const drawPacks=()=>{const mode=form.elements.mode.value;$('#modeDescription').textContent=data.catalog.modes[mode].description;const packs=custom?data.preferences.capabilities:data.catalog.modes[mode].packs;$('#capabilityChoices').innerHTML='';for(const [key,title] of Object.entries(data.catalog.packs)){const label=document.createElement('label');label.className='toggle-row';const input=document.createElement('input');input.type='checkbox';input.name='pack';input.value=key;input.checked=packs.includes(key);input.onchange=()=>{custom=true;data.preferences.capabilities=[...form.querySelectorAll('[name="pack"]:checked')].map(n=>n.value);};label.append(input,document.createTextNode(title));$('#capabilityChoices').append(label);}};
- form.elements.mode.onchange=drawPacks;$('#resetCapabilities').onclick=()=>{custom=false;drawPacks();};drawPacks();
- const footer=document.createElement('div');footer.className='settings-footer';footer.innerHTML='<button class="primary">Save preferences / حفظ التفضيلات</button><span id="preferenceMessage" role="status"></span>';form.append(footer);
- form.onsubmit=async event=>{event.preventDefault();try{const values={};for(const [,keys] of sections)for(const key of keys)values[key]=form.elements[key].value;values.capabilities=custom?[...form.querySelectorAll('[name="pack"]:checked')].map(n=>n.value):null;await api('preferences',{method:'POST',body:values});$('#preferenceMessage').textContent='Saved / تم الحفظ';await refreshStatus();}catch(error){$('#preferenceMessage').textContent=error.message;}};
- const selector=$('#jackMode');selector.innerHTML='';for(const [id,mode]of Object.entries(data.catalog.modes))selector.add(new Option(mode.label,id));selector.value=data.preferences.mode;
+  drawPacks = () => {
+    const mode = preferenceDropdowns.mode.getValue();
+    $("#modeDescription").textContent = tr(`mode.${mode}.description`);
+    const packs = custom
+      ? data.preferences.capabilities
+      : data.catalog.modes[mode].packs;
+    $("#capabilityChoices").innerHTML = "";
+    for (const key of Object.keys(data.catalog.packs)) {
+      const label = document.createElement("label");
+      label.className = "toggle-row";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.name = "pack";
+      input.value = key;
+      input.checked = packs.includes(key);
+      input.onchange = () => {
+        custom = true;
+        data.preferences.capabilities = [
+          ...form.querySelectorAll('[name="pack"]:checked'),
+        ].map((node) => node.value);
+      };
+      label.append(input, document.createTextNode(tr(`pack.${key}`)));
+      $("#capabilityChoices").append(label);
+    }
+  };
+  $("#resetCapabilities").onclick = () => {
+    custom = false;
+    drawPacks();
+  };
+  drawPacks();
+  const footer = document.createElement("div");
+  footer.className = "settings-footer";
+  footer.innerHTML = `<button class="primary">${escape(tr("settings.savePreferences"))}</button><span id="preferenceMessage" role="status"></span>`;
+  form.append(footer);
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    try {
+      const values = {};
+      for (const [, keys] of sections)
+        for (const key of keys)
+          values[key] =
+            preferenceDropdowns[key]?.getValue() ?? form.elements[key].value;
+      values.capabilities = custom
+        ? [...form.querySelectorAll('[name="pack"]:checked')].map(
+            (node) => node.value,
+          )
+        : null;
+      await api("preferences", { method: "POST", body: values });
+      $("#preferenceMessage").textContent = tr("settings.preferencesSaved");
+      if (state.status) state.status.preferences = { ...data.preferences, ...values };
+      await refreshStatus();
+    } catch (error) {
+      $("#preferenceMessage").textContent = error.message;
+    }
+  };
 }
-$('#jackMode').onchange=async event=>{try{await api('preferences',{method:'POST',body:{mode:event.target.value}});await refreshStatus();}catch(error){report(error);event.target.value=state.status?.preferences?.mode??'jarvis';}};
 
 await refreshStatus();
 await loadPreferences().catch(report);

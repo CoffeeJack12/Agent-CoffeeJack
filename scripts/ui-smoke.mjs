@@ -43,6 +43,7 @@ try {
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     permissions: ["clipboard-read", "clipboard-write"],
+    locale: "ar-SA",
   });
   const page = await context.newPage();
   const errors = [];
@@ -134,18 +135,82 @@ try {
     "verified",
   );
   await page.locator('[data-view="settings"]').click();
-  await page.locator('select[name="model"]').waitFor({ state: "visible" });
-  assert.equal(await page.locator(".model-select").count(), 3);
-  await page.locator('#preferenceForm select[name="language"]').selectOption('mixed');
-  await page.locator('#preferenceForm select[name="address"]').selectOption('lord');
-  await page.locator('#preferenceForm select[name="mode"]').selectOption('empathy');
+  await page.locator("#modelSelectHost .cj-dropdown").waitFor({ state: "visible" });
+  assert.equal(
+    await page.locator(
+      "#modelSelectHost .cj-dropdown, #codingModelHost .cj-dropdown, #visionModelHost .cj-dropdown",
+    ).count(),
+    3,
+  );
+  const chooseDropdown = async (root, value) => {
+    const dropdown = page.locator(root);
+    await dropdown.locator(".cj-dropdown__trigger").click();
+    await dropdown
+      .locator(`.cj-dropdown__option[data-value="${value}"]`)
+      .click();
+  };
+  const preferenceDropdown = (name) =>
+    `#preferenceForm .cj-dropdown:has(input[name="${name}"])`;
+
+  const languageDropdown = page.locator(preferenceDropdown("appLanguage"));
+  await languageDropdown.locator(".cj-dropdown__trigger").click();
+  const hoveredOption = languageDropdown.locator(
+    '.cj-dropdown__option[data-value="en"]',
+  );
+  await hoveredOption.hover();
+  const hoverColors = await hoveredOption.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { background: style.backgroundColor, color: style.color };
+  });
+  assert.notEqual(hoverColors.background, "rgb(255, 255, 255)");
+  assert.notEqual(hoverColors.color, "rgb(255, 255, 255, 0)");
+  await hoveredOption.click();
+  await page.waitForFunction(
+    () =>
+      document.documentElement.lang === "en" &&
+      document.documentElement.dir === "ltr" &&
+      document.querySelector('[data-view="chat"]').textContent.includes("Chat"),
+  );
+  await page.reload();
+  await page.waitForFunction(
+    () =>
+      document.querySelector("#connectionDot").classList.contains("ready") &&
+      document.documentElement.lang === "en",
+  );
+  assert.equal(await page.locator("html").getAttribute("dir"), "ltr");
+  await page.locator('[data-view="settings"]').click();
+  await page.locator(preferenceDropdown("appLanguage")).waitFor();
+  await chooseDropdown(preferenceDropdown("appLanguage"), "ar");
+  await page.waitForFunction(
+    () =>
+      document.documentElement.lang === "ar" &&
+      document.documentElement.dir === "rtl",
+  );
+
+  for (const host of ["#jackModeHost", preferenceDropdown("mode")]) {
+    const values = await page
+      .locator(`${host} .cj-dropdown__option`)
+      .evaluateAll((options) => options.map((option) => option.dataset.value));
+    assert.ok(!values.includes("jarvis"));
+  }
+  await chooseDropdown(preferenceDropdown("language"), "mixed");
+  await chooseDropdown(preferenceDropdown("address"), "lord");
+  await chooseDropdown(preferenceDropdown("mode"), "empathy");
   assert.equal(await page.locator('#preferenceForm input[value="terminal"]').isChecked(),false);
   await page.locator('#preferenceForm .primary').click();
-  await page.waitForFunction(()=>document.querySelector('#preferenceMessage').textContent.includes('Saved'));
+  await page.waitForFunction(()=>/Saved|تم الحفظ/.test(document.querySelector('#preferenceMessage').textContent));
   await capture('settings');
   const prefs=await page.evaluate(async()=>{const r=await fetch('/api/preferences');return (await r.json()).preferences;});
   assert.equal(prefs.language,'mixed');assert.equal(prefs.address,'lord');assert.equal(prefs.mode,'empathy');
-  assert.equal(await page.locator('#jackMode').inputValue(),'empathy');
+  assert.equal(
+    await page.locator("#jackModeHost .cj-dropdown").evaluate((element) => element.getValue()),
+    "auto",
+  );
+  await page.locator("#newChat").click();
+  assert.equal(
+    await page.locator("#jackModeHost .cj-dropdown").evaluate((element) => element.getValue()),
+    "empathy",
+  );
   await page.locator('[data-view="chat"]').click();
   await page.locator("#gaming").click();
   await page.waitForFunction(() =>
