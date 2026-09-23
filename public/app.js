@@ -291,6 +291,8 @@ function showApproval(event) {
 $("#chatForm").onsubmit = async (event) => {
   event.preventDefault();
   const draft = $("#prompt").value;
+  const draftAttachments = [...state.attachments];
+  let failed = false;
   const text = draft.trim();
   if (!text || state.busy) return;
   state.busy = true;
@@ -350,6 +352,10 @@ $("#chatForm").onsubmit = async (event) => {
           full += item.text;
           renderText(content, full);
         }
+        if (item.type === "routing") {
+          $("#modelLabel").textContent =
+            `${item.model} · ${item.kind}${item.fallback ? " · بديل محلي" : ""}`;
+        }
         if (item.type === "round")
           $("#runStatus").textContent = `Jack يعمل · الخطوة ${item.round}`;
         if (item.type === "tool") {
@@ -390,6 +396,7 @@ $("#chatForm").onsubmit = async (event) => {
         }
         if (item.type === "approval") showApproval(item);
         if (item.type === "error") {
+          failed = true;
           notice(item.error);
           if (!full) content.textContent = item.error;
           content.classList.add("error-text");
@@ -404,6 +411,7 @@ $("#chatForm").onsubmit = async (event) => {
         scrollBottom();
     }
   } catch (e) {
+    failed = true;
     report(e);
     if (!full) content.textContent = e.message;
     if (!accepted) {
@@ -414,6 +422,11 @@ $("#chatForm").onsubmit = async (event) => {
       if (!$("#prompt").value) $("#prompt").value = draft;
     }
   } finally {
+    if (failed && !$("#prompt").value) {
+      $("#prompt").value = draft;
+      state.attachments = draftAttachments;
+      drawAttachments();
+    }
     thinking.remove();
     state.busy = false;
     $("#runStatus").textContent = "";
@@ -629,6 +642,14 @@ $("#themeToggle").setAttribute(
   "aria-pressed",
   String(document.body.dataset.theme === "light"),
 );
+function scrollBottom() {
+  window.scrollTo({
+    top: document.documentElement.scrollHeight,
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "instant"
+      : "smooth",
+  });
+}
 $("#jumpBottom").onclick = scrollBottom;
 window.addEventListener(
   "scroll",
@@ -667,23 +688,20 @@ function previewPersona() {
     ? {
         playful:
           "Send the first error. The code picked drama; we pick the cause, then we break it properly.",
-        subtle:
-          "First error. One bug at a time—no speeches.",
+        subtle: "First error. One bug at a time—no speeches.",
         off: "Send the first error and the relevant code. I’ll isolate the cause, patch it, and test.",
       }
     : values.dialect === "standard"
       ? {
           playful:
             "أرسل أول رسالة خطأ. الكود قرر المسرح؛ إحنا نقرر السبب وبعدها نكسر المشكلة.",
-          subtle:
-            "أول رسالة خطأ. خطوة واحدة. بلا خطب.",
+          subtle: "أول رسالة خطأ. خطوة واحدة. بلا خطب.",
           off: "أرسل أول رسالة خطأ والجزء المرتبط بها من الكود. أحدد السبب، أصلحه، ثم أختبر.",
         }
       : {
           playful:
             "هات أول رسالة خطأ. الكود اختار الدراما؛ إحنا نمسك السبب ونخلّصه. قهوتك اختيارية.",
-          subtle:
-            "خلّينا نشوف أول رسالة خطأ. خطوة خطوة، من غير تمثيل.",
+          subtle: "خلّينا نشوف أول رسالة خطأ. خطوة خطوة، من غير تمثيل.",
           off: "أرسل أول رسالة خطأ والكود المرتبط بها. أحدد السبب، أعدّله، وأختبر.",
         };
   $("#personaPreview").textContent = examples[values.humor];

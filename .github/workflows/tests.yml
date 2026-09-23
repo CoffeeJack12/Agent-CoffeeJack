@@ -17,3 +17,14 @@ jobs:
       - run: node --test tests/*.test.mjs
       - run: node --check server/index.mjs
       - run: node --check public/app.js
+
+  browser:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: npm.cmd install --ignore-scripts --omit=dev
+      - run: npx.cmd playwright install chromium
+      - run: node scripts/ui-smoke.mjs

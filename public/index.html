@@ -12,7 +12,7 @@
     <aside class="sidebar">
       <a class="brand" href="/"
         ><img src="/favicon.svg" alt="" /><span
-          >CoffeeJack<small>YOUR LOCAL COMPANION</small></span
+          >JACK<small>COFFEEJACK / LOCAL INTELLIGENCE</small></span
         ></a
       >
       <button id="newChat" class="new-chat">
@@ -80,21 +80,25 @@
       <section id="chatView" class="view chat-view">
         <div id="welcome" class="welcome">
           <div class="welcome-kicker">
-            <span class="small-line"></span> A SHARP MIND. A SOFT SPOT FOR
-            COFFEE.
+            <span class="small-line"></span> LOCAL INTELLIGENCE. YOUR COMMAND.
           </div>
           <div class="jack-mark">
-            <img src="/favicon.svg" alt="Jack" /><span class="spark">✦</span>
+            <span
+              class="jack-placeholder"
+              role="img"
+              aria-label="Jack — placeholder identity"
+              >J</span
+            >
           </div>
           <div class="presence">
             <i></i><span id="jackPresence">Jack هنا</span
             ><span class="presence-separator">·</span
-            ><button id="personalityShortcut">خفيف دم، جاد وقت الجد</button>
+            ><button id="personalityShortcut">هادئ. حاد. جاهز للشغل.</button>
           </div>
-          <h2>أفكارك الكبيرة.<br /><span>نبدأها بفنجان.</span></h2>
+          <h2>فكّر أبعد.<br /><span>خلّ التنفيذ عليّ.</span></h2>
           <p>
-            أنا Jack. أساعدك تفكّر، تبني، وتخلّص اللي عليك.<br />والنكتة؟ تجي في
-            وقتها. غالبًا.
+            أنا Jack. أفحص، أبني، وأتحقق من النتيجة.<br />عقلك الإضافي. على
+            جهازك. وتحت سيطرتك.
           </p>
           <div class="suggestions">
             <button
@@ -188,6 +192,7 @@
               </button>
               <select id="mode" aria-label="نوع المهمة">
                 <option value="auto">تلقائي</option>
+                <option value="general">محادثة</option>
                 <option value="coding">برمجة</option>
                 <option value="vision">صور</option>
               </select>
@@ -195,6 +200,9 @@
               <span id="runStatus" class="composer-status"></span>
             </div>
           </form>
+          <p class="composer-footnote">
+            محلي أولًا · الأدوات تحت سيطرتك · Enter للإرسال
+          </p>
         </div>
         <input
           type="file"
