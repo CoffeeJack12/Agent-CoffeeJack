@@ -1,3 +1,4 @@
+import { getPreferences, savePreferences, LANGUAGES, MODES, PACKS, PREFERENCE_OPTIONS } from "./preferences.mjs";
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -179,6 +180,7 @@ export async function createApp({
           models,
           modelError,
           settings: settings(),
+          preferences: getPreferences(store),
           gaming,
           autoGaming,
           busy: Boolean(active),
@@ -220,6 +222,12 @@ export async function createApp({
       }
       if (route === "/api/events" && req.method === "GET")
         return json(res, 200, store.events());
+      if (route === "/api/preferences" && req.method === "GET")
+        return json(res,200,{preferences:getPreferences(store),catalog:{languages:LANGUAGES,modes:MODES,packs:PACKS,options:PREFERENCE_OPTIONS}});
+      if (route === "/api/preferences" && req.method === "POST") {
+        if(active)return json(res,409,{error:"Stop the active task before changing preferences"});
+        return json(res,200,savePreferences(store,await body(req)));
+      }
       if (route === "/api/persona" && req.method === "GET")
         return json(
           res,
@@ -233,6 +241,11 @@ export async function createApp({
             error: "أوقف المهمة الحالية قبل تعديل شخصية Jack.",
           });
         store.set("persona", { ...getPersona(store), ...input });
+        const preferencePatch={};
+        if(input.language)preferencePatch.language=input.language;
+        if(input.humor)preferencePatch.humor=({off:"off",subtle:"dry",playful:"dark"})[input.humor];
+        if(input.detail)preferencePatch.verbosity=({concise:"concise",balanced:"normal",thorough:"detailed"})[input.detail];
+        savePreferences(store,preferencePatch);
         return json(res, 200, selfModel(store, { active: false, gaming }));
       }
       if (route === "/api/settings" && req.method === "POST") {
@@ -389,7 +402,7 @@ export async function createApp({
             ollama,
             settings: conf,
             text: b.text,
-            mode: b.mode ?? "auto",
+            mode: b.mode && b.mode !== "auto" ? b.mode : getPreferences(store).mode === "developer" ? "coding" : "auto",
             attachments: b.attachments ?? [],
             history: store.messages(chat.id),
             signal: controller.signal,
@@ -438,6 +451,10 @@ export async function createApp({
         [
           "/",
           "/app.js",
+          "/branding.js",
+          "/jack/icon.png",
+          "/jack/logo.png",
+          "/jack/avatar.png",
           "/style.css",
           "/polish.css",
           "/favicon.svg",

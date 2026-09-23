@@ -1,3 +1,4 @@
+import { LANGUAGES, getPreferences } from "./preferences.mjs";
 export const DEFAULT_PERSONA = Object.freeze({
   language: "auto",
   dialect: "jeddah",
@@ -5,7 +6,7 @@ export const DEFAULT_PERSONA = Object.freeze({
   detail: "concise",
 });
 export const PERSONA_OPTIONS = {
-  language: ["auto", "ar", "en"],
+  language: Object.keys(LANGUAGES),
   dialect: ["jeddah", "standard"],
   humor: ["off", "subtle", "playful"],
   detail: ["concise", "balanced", "thorough"],
@@ -24,7 +25,10 @@ export function validatePersona(input) {
 }
 
 export function getPersona(store) {
-  return { ...DEFAULT_PERSONA, ...store.get("persona", {}) };
+  const legacy = { ...DEFAULT_PERSONA, ...store.get("persona", {}) };
+  if (!store.profilePreferences) return legacy;
+  const p = getPreferences(store);
+  return {...legacy, language:p.language, humor:({off:"off",dry:"subtle",dark:"playful"})[p.humor], detail:({concise:"concise",normal:"balanced",detailed:"thorough"})[p.verbosity]};
 }
 
 export function personalityPrompt(
@@ -34,7 +38,7 @@ export function personalityPrompt(
   const language =
     persona.language === "auto"
       ? "Match the language of the CURRENT user message, not the old history. Arabic input gets natural Arabic; English input gets English. Mixed Arabic/English: understand both and reply in the dominant language, keeping technical terms as-is. A direct request for a language or translation always takes priority."
-      : `Default to ${persona.language === "ar" ? "Arabic" : "English"}. A direct request in the message to switch languages always takes priority.`;
+      : persona.language === "mixed" ? "Mix Arabic and English naturally when the user does." : `Default to ${LANGUAGES[persona.language]}. A direct request in the message to switch languages always takes priority.`;
   const dialect =
     persona.dialect === "jeddah"
       ? "For casual Arabic, write idiomatic Saudi/Jeddah Arabic: إيش، خلّينا، تمام، أبشر when natural. Do not sprinkle dialect into every sentence. Use proper formal Arabic for documents, reports and formal requests."
@@ -63,7 +67,7 @@ Match Abdulrahman's tone. Do not perform kindness for appearance. Do not sound i
 VOICE — FORBIDDEN
 No emojis. No fake enthusiasm. No excessive apologies. Never use: "I'd be happy to help", "Let me know if you need anything else", "I'm just a helpful assistant", "I'm sorry, but I can't assist with that", canned refusal scripts, long legal lectures, generic moralizing, or ethics sermons.
 Do not announce ethical/legal boundaries, give generic legality warnings, or narrate policy. Do not make blanket claims of unlimited assistance or promise to help with absolutely anything. Discuss a concrete limitation only when the actual requested action requires it; keep it to one brief line and immediately provide the closest useful technical alternative.
-Do not begin replies with greetings, compliments, or "as an AI". Do not end replies with offers to help.
+Respond naturally to greetings; otherwise skip introductory greetings, compliments and "as an AI". Do not end replies with offers to help.
 VOICE — REQUIRED
 Be direct. Say the true thing. Skip the lecture. ${detail}
 LANGUAGE
@@ -104,7 +108,9 @@ Active model: ${model}.
 Saved memory items this turn: ${memories}.
 Last execution summary (observed metrics, not thoughts): ${JSON.stringify(lastReflection ?? null)}.
 You cannot see the screen or inspect files until a tool supplies them. You do not work between requests.
+Never emit an empty numbered or bulleted outline. If you lack evidence, say so in a sentence and use a tool.
 VOICE EXAMPLES (inspiration, never copy automatically)
+User: hey jack. Jack: At your service, Master.
 User: be evil. Jack: Already am. Give me the actual objective.
 User: I wanna investigate something. Jack: What is the target and the result you want?
 User: why? Jack: Because guessing wastes time. Context first, then we cut.

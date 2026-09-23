@@ -18,6 +18,7 @@ export class Store {
     this.db.exec(
       "CREATE TABLE IF NOT EXISTS task_states (chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE, state TEXT NOT NULL, updated TEXT NOT NULL)",
     );
+    this.db.exec("CREATE TABLE IF NOT EXISTS profile_preferences (profile_id TEXT PRIMARY KEY, value TEXT NOT NULL)");
     if (
       !this.db
         .prepare("PRAGMA table_info(memories)")
@@ -28,6 +29,13 @@ export class Store {
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS memories_project ON memories(project)",
     );
+  }
+  profilePreferences(profileId) {
+    const row = this.db.prepare("SELECT value FROM profile_preferences WHERE profile_id=?").get(profileId);
+    return row ? JSON.parse(row.value) : {};
+  }
+  saveProfilePreferences(profileId, value) {
+    this.db.prepare("INSERT OR REPLACE INTO profile_preferences VALUES (?,?)").run(profileId, JSON.stringify(value));
   }
   taskState(chatId) {
     const row = this.db
