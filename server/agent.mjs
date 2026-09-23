@@ -18,7 +18,18 @@ export async function runAgent({
   signal,
   emit,
 }) {
-  const taskState = advanceTask(store.taskState(chatId), text, {
+  let previousState = store.taskState(chatId);
+  if (!previousState) {
+    for (const message of store.messages(chatId).slice(-80)) {
+      if (message.role === "user")
+        previousState = advanceTask(previousState, message.content, {
+          project: tools.workspace,
+        });
+      else if (message.role === "assistant" && previousState)
+        guardResponse(previousState, message.content);
+    }
+  }
+  const taskState = advanceTask(previousState, text, {
     project: tools.workspace,
   });
   store.saveTaskState(chatId, taskState);

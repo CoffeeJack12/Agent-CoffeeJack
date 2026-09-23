@@ -112,3 +112,111 @@ test("agent intercepts the exact repeated Steam question before any token is emi
   store.deleteChat(chatId);
   assert.equal(store.taskState(chatId), null);
 });
+
+test("Steam clarification removes generic disclaimers and unlimited-assistance promises", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jack-tone-"));
+  const store = new Store(dir);
+  t.after(async () => {
+    store.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const chatId = store.createChat("tone regression").id;
+  const replies = [
+    "What are we targeting—your machine, a lab/CTF, or an external system?",
+    "Which game is it?",
+    "I don't have limits when it comes to helping you achieve your goals, as long as they are within ethical and legal boundaries. What are we targeting—your machine, a lab/CTF, or an external system?",
+  ];
+  let n = 0;
+  const delivered = [];
+  for (const text of [
+    "I wanna hack a game",
+    "a game on my device",
+    "from steam",
+  ]) {
+    let answer = "";
+    await runAgent({
+      store,
+      chatId,
+      text,
+      model: "test",
+      tools: { workspace: dir },
+      signal: new AbortController().signal,
+      emit: (event) => {
+        if (event.type === "token") answer += event.text;
+      },
+      ollama: {
+        chat: async ({ onToken }) => {
+          const content = replies[n++];
+          onToken(content);
+          return { role: "assistant", content, tokens: 10 };
+        },
+      },
+    });
+    delivered.push(answer);
+  }
+  const state = store.taskState(chatId);
+  assert.equal(state.facts.targetLocation.value, "user's own device");
+  assert.equal(state.facts.distribution.value, "Steam");
+  assert.doesNotMatch(
+    delivered[2],
+    /ethical|legal boundaries|no limits|don't have limits|your machine|external system|lab\/CTF/i,
+  );
+  assert.match(delivered[2], /what.*modify|which game/i);
+});
+
+test("tone guard retains useful technical content and specific brief boundaries", () => {
+  const state = advanceTask(null, "a game on my device from Steam");
+  const result = guardResponse(
+    state,
+    "I can help with absolutely anything. Which game is it?",
+  );
+  assert.equal(result.text, "Which game is it?");
+  const technical =
+    "I can't help steal other players' credentials. I can help inspect your own game's save-file format.";
+  assert.equal(guardResponse(state, technical).text, technical);
+  const code = '```js\nconst example = "I have no limits.";\n```';
+  assert.equal(guardResponse(state, code).text, code);
+});
+
+test("existing conversations bootstrap known facts before the first post-upgrade reply", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jack-state-upgrade-"));
+  const store = new Store(dir);
+  t.after(async () => {
+    store.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const chatId = store.createChat("existing game conversation").id;
+  store.message(chatId, "user", "I wanna hack a game");
+  store.message(
+    chatId,
+    "assistant",
+    "What are we targeting—your machine, a lab/CTF, or an external system?",
+  );
+  store.message(chatId, "user", "a game on my device");
+  let output = "";
+  await runAgent({
+    store,
+    chatId,
+    text: "from steam",
+    model: "test",
+    tools: { workspace: dir },
+    signal: new AbortController().signal,
+    emit: (e) => {
+      if (e.type === "token") output += e.text;
+    },
+    ollama: {
+      chat: async () => ({
+        role: "assistant",
+        content:
+          "What are we targeting—your machine, a lab/CTF, or an external system?",
+        tokens: 10,
+      }),
+    },
+  });
+  assert.equal(store.taskState(chatId).facts.distribution.value, "Steam");
+  assert.equal(
+    store.taskState(chatId).facts.targetLocation.value,
+    "user's own device",
+  );
+  assert.doesNotMatch(output, /your machine|lab\/CTF|external system/);
+});

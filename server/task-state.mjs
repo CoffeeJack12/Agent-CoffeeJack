@@ -209,8 +209,26 @@ export function stateContext(state) {
 
 export function guardResponse(state, candidate, languageText = "") {
   let text = candidate;
-  const questions = candidate.match(/[^.!?؟\n]*[?؟]/g) ?? [];
   const rejected = [];
+  // Remove first-person boilerplate promises/disclaimers, never specific technical
+  // boundaries, quoted source material or code. The prompt remains the primary control.
+  if (!text.includes("\x60\x60\x60")) {
+    for (const sentence of text.match(/[^.!?؟\n]+[.!?؟]?/g) ?? []) {
+      const value = sentence.trim();
+      const boilerplate =
+        /^(?:I(?:['’]m| am| can| will| do| don| have| must)|As an AI|My (?:help|assistance))/i.test(
+          value,
+        ) &&
+        /ethical (?:and|or) legal boundaries|legal (?:and|or) ethical boundaries|(?:have|know) no limits|don['’]t have limits|help (?:you )?with (?:absolutely )?anything/i.test(
+          value,
+        );
+      if (boilerplate) {
+        text = text.replace(sentence, "");
+        rejected.push(value);
+      }
+    }
+  }
+  const questions = text.match(/[^.!?؟\n]*[?؟]/g) ?? [];
   for (const question of questions) {
     const slots = questionSlots(question);
     const repeats = state.questions.some(
@@ -225,7 +243,12 @@ export function guardResponse(state, candidate, languageText = "") {
       slots.includes("targetLocation") &&
       state.facts.targetLocation &&
       /machine|device|pc|lab|external|جهاز/i.test(question);
-    if (repeats || known || locationLoop) {
+    const genericOwnership =
+      state.facts.targetLocation &&
+      /^\s*is (?:the|this) (?:target|system|device|machine) (?:yours|owned by you)/i.test(
+        question,
+      );
+    if (repeats || known || locationLoop || genericOwnership) {
       text = text.replace(question, "");
       rejected.push(question.trim());
     }
@@ -249,7 +272,7 @@ export function guardResponse(state, candidate, languageText = "") {
         !state.questions.some((q) => !q.answered && q.slots.includes(slot)),
     );
     text = text.trim();
-    if (missing) text = labels[missing];
+    if (missing && !text) text = labels[missing];
     else if (!text)
       text = arabic
         ? "السياق السابق محفوظ. أحتاج التفصيل الناقص فقط حتى أتابع."
