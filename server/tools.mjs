@@ -4,6 +4,14 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { workspacePath, readDocument } from "./files.mjs";
+import {
+  artifactRelativePath,
+  ensureScopedArtifactDir,
+  isSafeArtifactName,
+  registerArtifact,
+  resolveArtifactAbsolute,
+  getArtifactByName,
+} from "./artifacts.mjs";
 
 import { projectMap, projectScripts, patchText } from "./developer.mjs";
 
@@ -213,8 +221,78 @@ export function runProcess(
 }
 
 export class Tools {
-  constructor({ root, workspace, store, approve, artifactDirectory }) {
-    Object.assign(this, { root, workspace, store, approve, artifactDirectory });
+  constructor({
+    root,
+    workspace,
+    store,
+    approve,
+    artifactDirectory,
+    artifactBase,
+  }) {
+    Object.assign(this, {
+      root,
+      workspace,
+      store,
+      approve,
+      // Legacy flat dir kept for tests that inject a single directory.
+      artifactDirectory,
+      artifactBase: artifactBase || artifactDirectory,
+      artifactContext: null,
+    });
+  }
+
+  setArtifactContext(ctx) {
+    this.artifactContext = ctx
+      ? {
+          userId: ctx.userId,
+          workspaceId: ctx.workspaceId,
+          chatId: ctx.chatId || null,
+        }
+      : null;
+  }
+
+  /**
+   * Allocate a confined file path and register ownership metadata.
+   * Returns { absolute, url, name }.
+   */
+  async allocateArtifact(name) {
+    if (!isSafeArtifactName(name)) throw new Error("Invalid artifact name");
+    const ctx = this.artifactContext;
+    if (ctx?.userId && ctx?.workspaceId && this.artifactBase && this.store) {
+      const dir = await ensureScopedArtifactDir(
+        this.artifactBase,
+        ctx.userId,
+        ctx.workspaceId,
+      );
+      const absolute = path.join(dir, name);
+      if (getArtifactByName(this.store, name))
+        throw new Error("Artifact name already registered");
+      registerArtifact(this.store, {
+        name,
+        userId: ctx.userId,
+        workspaceId: ctx.workspaceId,
+        chatId: ctx.chatId,
+        relativePath: artifactRelativePath(ctx.userId, ctx.workspaceId, name),
+      });
+      return { absolute, url: `/artifacts/${name}`, name };
+    }
+    // Fallback for unit tests without multi-user context.
+    const dir = this.artifactDirectory || this.artifactBase;
+    if (!dir) throw new Error("Artifact storage not configured");
+    await fs.mkdir(dir, { recursive: true });
+    const absolute = path.join(dir, name);
+    return { absolute, url: `/artifacts/${name}`, name };
+  }
+
+  async resolveArtifactFile(imageUrlOrName) {
+    const name = path.basename(String(imageUrlOrName || ""));
+    if (!isSafeArtifactName(name)) throw new Error("Invalid artifact name");
+    if (this.store && this.artifactBase) {
+      const row = getArtifactByName(this.store, name);
+      if (row) return resolveArtifactAbsolute(this.artifactBase, row);
+    }
+    const dir = this.artifactDirectory || this.artifactBase;
+    return path.join(dir, name);
   }
 
   async browserPage() {
@@ -350,10 +428,9 @@ export class Tools {
         await page.locator(args.selector).first().fill(args.text);
       else if (args.action === "screenshot") {
         const name = `browser-${Date.now()}.png`;
-        await page.screenshot({
-          path: path.join(this.artifactDirectory, name),
-        });
-        return { image: `/artifacts/${name}`, url: page.url() };
+        const slot = await this.allocateArtifact(name);
+        await page.screenshot({ path: slot.absolute });
+        return { image: slot.url, url: page.url() };
       } else if (args.action !== "read")
         throw new Error("Unknown browser action");
       return {
@@ -366,10 +443,11 @@ export class Tools {
       if (process.platform !== "win32")
         throw new Error("Desktop tools require Windows");
       const filename = `desktop-${Date.now()}.png`;
+      const slot = await this.allocateArtifact(filename);
       const payload = Buffer.from(
         JSON.stringify({
           ...args,
-          screenshot: path.join(this.artifactDirectory, filename),
+          screenshot: slot.absolute,
         }),
         "utf8",
       ).toString("base64");
@@ -389,7 +467,7 @@ export class Tools {
       );
       if (result.code !== 0) throw new Error(result.output);
       return args.action === "screenshot"
-        ? { image: `/artifacts/${filename}` }
+        ? { image: slot.url }
         : result;
     }
     if (name === "search_code") {

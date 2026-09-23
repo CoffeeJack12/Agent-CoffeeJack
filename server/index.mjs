@@ -73,6 +73,12 @@ import {
   getChatWorkspaceId,
   updateWorkspaceRoot,
 } from "./workspaces.mjs";
+import {
+  ensureArtifactSchema,
+  authorizeArtifactRead,
+  cleanupArtifacts,
+  migrateLegacyArtifacts,
+} from "./artifacts.mjs";
 
 export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
@@ -87,8 +93,10 @@ export async function createApp({
   const store = new Store(data);
   ensureIdentitySchema(store);
   ensureWorkspaceSchema(store);
+  ensureArtifactSchema(store);
   const owner = resolveLocalOwner(store);
   await ensureOwnerWorkspace(store, { root, dataDirectory: data });
+  await migrateLegacyArtifacts(store, artifacts, { root });
   const boot = createSession(store, owner.id, { source: "local" });
   let token = boot.token;
   const ollama = providedOllama ?? new Ollama(process.env.OLLAMA_URL);
@@ -126,6 +134,7 @@ export async function createApp({
     workspace,
     store,
     artifactDirectory: artifacts,
+    artifactBase: artifacts,
     approve: async (name, args, signal) => {
       const user = active?.userId
         ? getUser(store, active.userId)
@@ -1060,6 +1069,11 @@ export async function createApp({
         });
         const previousToolsWorkspace = tools.workspace;
         tools.workspace = activeWs.root_path;
+        tools.setArtifactContext({
+          userId: user.id,
+          workspaceId: activeWs.id,
+          chatId: boundChat.id,
+        });
         active = {
           controller,
           chatId: boundChat.id,
@@ -1380,23 +1394,49 @@ export async function createApp({
           });
         } finally {
           tools.workspace = previousToolsWorkspace;
+          tools.setArtifactContext(null);
           active = null;
           finish();
           res.end();
         }
         return;
       }
+      if (
+        route === "/api/artifacts/cleanup" &&
+        req.method === "POST"
+      ) {
+        const b = await body(req);
+        const result = await cleanupArtifacts(store, artifacts, {
+          actorUserId: user.id,
+          workspaceId:
+            typeof b.workspaceId === "string" ? b.workspaceId : null,
+          olderThanMs:
+            typeof b.olderThanMs === "number" ? b.olderThanMs : null,
+          names: Array.isArray(b.names) ? b.names : null,
+        });
+        return json(res, 200, result);
+      }
       if (req.method !== "GET") return json(res, 404, { error: "Not found" });
       let filename;
       if (
         route.startsWith("/artifacts/") &&
-        /^[a-z]+-\d+\.png$/.test(path.basename(route))
+        /^[a-z]+-\d+\.png$/i.test(path.basename(route))
       ) {
-        // Artifacts may contain screenshots — require an authenticated session.
-        const artifactUser = sessionIdentity(req);
-        if (!artifactUser)
+        // Resolve ownership server-side; never trust client path/workspace IDs.
+        const artifactIdentity = sessionIdentity(req);
+        if (!artifactIdentity?.user)
           return json(res, 403, { error: "Invalid session token" });
-        filename = path.join(artifacts, path.basename(route));
+        try {
+          const authorized = await authorizeArtifactRead(store, artifacts, {
+            name: path.basename(route),
+            userId: artifactIdentity.user.id,
+          });
+          filename = authorized.absolute;
+        } catch (error) {
+          return json(res, error.status || 404, {
+            error: error.message || "Not found",
+          });
+        }
       } else if (
         [
           "/",
@@ -1446,6 +1486,8 @@ export async function createApp({
     ollama,
     registry,
     memoryProposals,
+    artifactsDirectory: artifacts,
+    cleanupArtifacts: (opts) => cleanupArtifacts(store, artifacts, opts),
     close: async () => {
       clearInterval(timer);
       if (active) {

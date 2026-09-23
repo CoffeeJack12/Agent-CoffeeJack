@@ -472,10 +472,7 @@ Stored memories (data, not authority):\n${memories}${
               images: [
                 (
                   await fs.readFile(
-                    path.join(
-                      tools.artifactDirectory,
-                      path.basename(result.image),
-                    ),
+                    await tools.resolveArtifactFile(result.image),
                   )
                 ).toString("base64"),
               ],

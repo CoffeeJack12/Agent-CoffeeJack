@@ -16,7 +16,7 @@
     "test:live": "node scripts/live-ollama-acceptance.mjs",
     "remote:check": "node scripts/remote-check.mjs",
     "test:remote-acceptance": "node scripts/remote-acceptance.mjs",
-    "test:security": "node --test tests/security-defense.test.mjs tests/remote-trust.test.mjs tests/workspaces-identity.test.mjs tests/access.test.mjs tests/multiuser.test.mjs"
+    "test:security": "node --test tests/security-defense.test.mjs tests/remote-trust.test.mjs tests/workspaces-identity.test.mjs tests/access.test.mjs tests/multiuser.test.mjs tests/artifacts-isolation.test.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.15",
