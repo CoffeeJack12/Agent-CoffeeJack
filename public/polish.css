@@ -1579,3 +1579,14 @@ body[data-theme="light"] {
 .council-step summary {
   font-weight: 600;
 }
+.council-summary {
+  font-size: 0.82rem;
+  opacity: 0.8;
+  margin-top: 4px;
+}
+.provider-row small {
+  display: block;
+  opacity: 0.7;
+  font-size: 0.78rem;
+  margin-top: 2px;
+}

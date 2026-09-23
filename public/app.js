@@ -175,10 +175,10 @@ function renderProviders(providers) {
   const list = providers?.length
     ? providers
     : [
-        { id: "ollama", name: "Ollama", status: "unavailable" },
-        { id: "openai", name: "OpenAI", status: "not_configured" },
-        { id: "anthropic", name: "Anthropic", status: "not_configured" },
-        { id: "google", name: "Google", status: "not_configured" },
+        { id: "ollama", name: "Ollama", status: "unavailable", type: "local" },
+        { id: "openai", name: "OpenAI", status: "not_configured", type: "remote" },
+        { id: "anthropic", name: "Anthropic", status: "not_configured", type: "remote" },
+        { id: "google", name: "Google", status: "not_configured", type: "remote" },
       ];
   for (const provider of list) {
     const row = document.createElement("div");
@@ -196,8 +196,30 @@ function renderProviders(providers) {
         : status === "unavailable"
           ? tr("providers.unavailable")
           : tr("providers.notConfigured");
-    row.innerHTML = `<strong>${escape(provider.name || provider.id)}</strong><span>${escape(label)}${provider.type ? ` · ${escape(provider.type)}` : ""}</span>`;
+    const typeLabel =
+      provider.type === "local"
+        ? tr("providers.local")
+        : provider.type === "remote"
+          ? tr("providers.remote")
+          : provider.type || "";
+    const models =
+      provider.modelCount != null
+        ? ` · ${provider.modelCount} ${tr("providers.models")}`
+        : "";
+    const latency =
+      provider.latencyMs != null ? ` · ${provider.latencyMs}ms` : "";
+    row.innerHTML = `<div><strong>${escape(provider.name || provider.id)}</strong><small>${escape(typeLabel)}${escape(models)}${escape(latency)}</small></div><span>${escape(label)}</span>`;
     host.append(row);
+  }
+  let refresh = host.parentElement?.querySelector("[data-providers-refresh]");
+  if (!refresh && host.parentElement) {
+    refresh = document.createElement("button");
+    refresh.type = "button";
+    refresh.className = "secondary";
+    refresh.dataset.providersRefresh = "1";
+    refresh.textContent = tr("providers.refresh");
+    refresh.onclick = () => refreshStatus().catch(report);
+    host.parentElement.append(refresh);
   }
 }
 async function api(route, options = {}) {
@@ -561,11 +583,17 @@ $("#chatForm").onsubmit = async (event) => {
             item.effectiveModel
               ? `Auto → ${item.effectiveModel}`
               : item.model;
-          $("#modelLabel").textContent =
-            `${auto}${provider}${item.fallback ? ` · ${tr("composer.modelFallback")}` : ""}`;
+          const fallbackNote = item.fallback
+            ? item.requestedModel &&
+              item.requestedModel !== "auto" &&
+              item.requestedModel !== item.effectiveModel
+              ? ` · Fallback from ${item.requestedModel}`
+              : ` · ${tr("composer.modelFallback")}`
+            : "";
+          $("#modelLabel").textContent = `${auto}${provider}${fallbackNote}`;
           const log = document.createElement("div");
           log.className = "exec-meta";
-          log.textContent = `Mode: ${item.effectiveMode || "-"} · Model: ${item.effectiveModel || item.model} · Provider: ${item.provider || "ollama"}`;
+          log.textContent = `Mode: ${item.effectiveMode || "-"} · Model: ${item.effectiveModel || item.model} · Provider: ${item.provider || "ollama"}${item.reasonCode ? ` · ${item.reasonCode}` : ""}`;
           answer.append(log);
         }
         if (item.type === "council") {
@@ -577,7 +605,15 @@ $("#chatForm").onsubmit = async (event) => {
             const list = document.createElement("ul");
             for (const p of item.proposals) {
               const row = document.createElement("li");
-              row.textContent = `${p.role}: ${p.provider}/${p.model} · ${p.status}`;
+              const latency =
+                p.latencyMs != null ? ` · ${p.latencyMs}ms` : "";
+              row.textContent = `${(p.role || "").toUpperCase()}: ${p.provider}/${p.model} · ${p.status}${latency}`;
+              if (p.summary) {
+                const note = document.createElement("div");
+                note.className = "council-summary";
+                note.textContent = p.summary.slice(0, 280);
+                row.append(note);
+              }
               list.append(row);
             }
             el.append(list);
@@ -1254,7 +1290,13 @@ async function loadPreferences() {
     ["settings.section.modes", ["mode"]],
     [
       "settings.section.aiProviders",
-      ["councilMode", "remoteAi", "councilMaxModels", "remoteBudget"],
+      [
+        "councilMode",
+        "remoteAi",
+        "councilMaxModels",
+        "remoteBudget",
+        "councilOtherModels",
+      ],
     ],
   ];
   const labelKeys = {
@@ -1274,6 +1316,7 @@ async function loadPreferences() {
     remoteAi: "settings.remoteAi",
     councilMaxModels: "settings.councilMaxModels",
     remoteBudget: "settings.remoteBudget",
+    councilOtherModels: "settings.councilOtherModels",
   };
   const preferenceDropdowns = {};
   let custom = data.preferences.capabilities !== null;
@@ -1304,7 +1347,7 @@ async function loadPreferences() {
       ];
     }
     if (
-      ["councilMode", "remoteAi", "councilMaxModels", "remoteBudget"].includes(
+      ["councilMode", "remoteAi", "councilMaxModels", "remoteBudget", "councilOtherModels"].includes(
         key,
       )
     )
