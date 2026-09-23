@@ -1348,3 +1348,21 @@ body[data-theme="light"] {
     white-space: nowrap;
   }
 }
+
+/* Compact conversation and reusable identity */
+.messages { display:flex; flex-direction:column; gap:18px; }
+.message.user { width:fit-content; max-width:min(85%,760px); align-self:flex-start; margin:0; padding:8px 14px; border:1px solid #443652; border-bottom:0; border-radius:18px; box-shadow:none; background:#1a1622; }
+.message.user .message-head { display:none; }
+.message.assistant { width:100%; padding:8px 0 18px; background:transparent; border:0; border-bottom:0; }
+.message.user .message-content { font-size:15px; line-height:1.55; overflow-wrap:anywhere; }
+.message.user .message-content > p { margin:0; }
+.jack-brand { display:inline-flex; width:30px; height:30px; flex-shrink:0; align-items:center; justify-content:center; color:#d7c6ff; background:#251933; border:1px solid #624286; border-radius:10px; font-size:17px; font-weight:700; overflow:hidden; vertical-align:middle; }
+.jack-brand img { width:100%; height:100%; object-fit:contain; }
+.jack-brand [hidden] { display:none; }
+.jack-brand.jack-placeholder { width:100px; height:100px; font-size:58px; border-radius:28px; }
+.message-head .jack-brand { margin-inline-end:8px; }
+#preferenceForm { margin-block-end:20px; }
+#capabilityChoices { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; }
+.composer-toolbar { flex-wrap:wrap; }
+#jackMode { max-width:140px; }
+@media(max-width:600px){.message.user {max-width:92%; padding:9px 13px;} .composer-toolbar {gap:6px;} .model-label {max-width:100px;overflow:hidden;text-overflow:ellipsis;} }

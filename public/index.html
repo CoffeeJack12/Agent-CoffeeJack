@@ -11,7 +11,7 @@
   <body>
     <aside class="sidebar">
       <a class="brand" href="/"
-        ><img src="/favicon.svg" alt="" /><span
+        ><span data-jack-slot="logo"></span><span
           >JACK<small>COFFEEJACK / LOCAL INTELLIGENCE</small></span
         ></a
       >
@@ -83,12 +83,7 @@
             <span class="small-line"></span> LOCAL INTELLIGENCE. YOUR COMMAND.
           </div>
           <div class="jack-mark">
-            <span
-              class="jack-placeholder"
-              role="img"
-              aria-label="Jack — placeholder identity"
-              >J</span
-            >
+            <span data-jack-slot="icon" data-hero></span>
           </div>
           <div class="presence">
             <i></i><span id="jackPresence">Jack هنا</span
@@ -190,6 +185,7 @@
                   />
                 </svg>
               </button>
+              <select id="jackMode" aria-label="Jack mode"><option value="jarvis">Jarvis</option></select>
               <select id="mode" aria-label="نوع المهمة">
                 <option value="auto">تلقائي</option>
                 <option value="general">محادثة</option>
@@ -219,7 +215,7 @@
             <p>ذكي، حاد، وعملي. مزح أسود لما يناسب، ونتائج بدون تمثيل.</p>
           </div>
           <div class="persona-avatar" aria-hidden="true">
-            <img src="/favicon.svg" alt="" /><span>✦</span>
+            <span data-jack-slot="avatar"></span><span>✦</span>
           </div>
         </div>
         <div class="persona-tabs" role="group" aria-label="أنماط الشخصية">
@@ -270,7 +266,7 @@
               يا Jack، الكود خرب.
             </div>
             <div class="preview-answer">
-              <img src="/favicon.svg" alt="Jack" />
+              <span data-jack-slot="avatar"></span>
               <p id="personaPreview"></p>
             </div>
             <small>مثال على النبرة، مو رد مولّد. يضبط أسلوبه حسب الموقف.</small>
@@ -346,6 +342,8 @@
             فقط عندما تطلب أدوات الويب.
           </p>
         </div>
+        <form id="preferenceForm" class="settings-grid" aria-label="Jack preferences"></form>
+        <div class="setting-card"><h3>Branding / الهوية</h3><p>Replace approved assets in <code>public/jack/avatar.png</code>, <code>icon.png</code>, or <code>logo.png</code>. A J monogram appears until then.</p><p>Voice is not installed. Startup remains controlled by your CoffeeJack launcher.</p></div>
         <form id="settingsForm" class="settings-grid">
           <div class="setting-card">
             <h3>العقل المحلي</h3>

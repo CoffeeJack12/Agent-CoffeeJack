@@ -97,6 +97,11 @@ try {
   await prompt.press("Enter");
   await page.locator(".message-content strong").waitFor();
   await page.locator("#stop").waitFor({ state: "hidden" });
+  assert.equal(await page.locator(".message.user .message-head").count(),0);
+  assert.equal(await page.locator(".message.assistant .jack-brand").count(),1);
+  assert.equal(await page.locator(".message.user").innerText(),"hello");
+  assert.ok(await page.locator(".message.user").evaluate(el=>el.getBoundingClientRect().width<el.parentElement.getBoundingClientRect().width*.85));
+  await capture("conversation");
   assert.equal(await page.locator(".copy-code").count(), 1);
   await page.locator(".copy-code").click();
   assert.match(
@@ -131,6 +136,16 @@ try {
   await page.locator('[data-view="settings"]').click();
   await page.locator('select[name="model"]').waitFor({ state: "visible" });
   assert.equal(await page.locator(".model-select").count(), 3);
+  await page.locator('#preferenceForm select[name="language"]').selectOption('mixed');
+  await page.locator('#preferenceForm select[name="address"]').selectOption('lord');
+  await page.locator('#preferenceForm select[name="mode"]').selectOption('empathy');
+  assert.equal(await page.locator('#preferenceForm input[value="terminal"]').isChecked(),false);
+  await page.locator('#preferenceForm .primary').click();
+  await page.waitForFunction(()=>document.querySelector('#preferenceMessage').textContent.includes('Saved'));
+  await capture('settings');
+  const prefs=await page.evaluate(async()=>{const r=await fetch('/api/preferences');return (await r.json()).preferences;});
+  assert.equal(prefs.language,'mixed');assert.equal(prefs.address,'lord');assert.equal(prefs.mode,'empathy');
+  assert.equal(await page.locator('#jackMode').inputValue(),'empathy');
   await page.locator('[data-view="chat"]').click();
   await page.locator("#gaming").click();
   await page.waitForFunction(() =>

@@ -1,6 +1,8 @@
+import { jackBrand, mountBranding } from "/branding.js";
 import { marked } from "/vendor/marked.esm.js";
 import DOMPurify from "/vendor/purify.es.mjs";
 const $ = (selector) => document.querySelector(selector);
+mountBranding();
 try {
   document.body.dataset.theme =
     localStorage.getItem("coffeejack-theme") || "dark";
@@ -118,6 +120,7 @@ async function refreshStatus() {
   try {
     const status = await api("status");
     state.status = status;
+    if(status.preferences) $("#jackMode").value=status.preferences.mode;
     state.token = status.token;
     if (status.jack) updateSelfModel(status.jack);
     const ready =
@@ -213,7 +216,8 @@ function addMessage(role, text = "") {
   $("#welcome").classList.add("hidden");
   const el = document.createElement("article");
   el.className = "message " + role;
-  el.innerHTML = `<div class="message-head">${role === "assistant" ? '<img src="/favicon.svg" alt=""> Jack' : "◌ أنت"}</div><div class="message-content" dir="auto"></div>`;
+  el.innerHTML = `${role === "assistant" ? '<div class="message-head"> Jack</div>' : ""}<div class="message-content" dir="auto"></div>`;
+  if (role === "assistant") el.querySelector(".message-head").prepend(jackBrand());
   if (role === "assistant") {
     const copy = document.createElement("button");
     copy.className = "copy-reply";
@@ -569,6 +573,7 @@ $("#refreshEvents").onclick = () => loadEvents().catch(report);
 async function loadSettings() {
   const status = await refreshStatus();
   if (!status) return;
+  await loadPreferences();
   const form = $("#settingsForm");
   for (const select of form.querySelectorAll(".model-select")) {
     select.innerHTML = "";
@@ -751,6 +756,7 @@ function updateSelfModel(jack) {
 }
 async function loadPersona() {
   const jack = await api("persona");
+  if(preferenceCatalog){const language=$("#personaForm").elements.language;language.innerHTML="";for(const [id,label]of Object.entries(preferenceCatalog.languages))language.add(new Option(label,id));}
   for (const [key, value] of Object.entries(jack.persona))
     if ($("#personaForm").elements[key])
       $("#personaForm").elements[key].value = value;
@@ -788,7 +794,35 @@ $("#personaForm").onsubmit = async (event) => {
     $("#personaMessage").textContent = error.message;
   }
 };
+let preferenceCatalog;
+async function loadPreferences() {
+ const data=await api('preferences');preferenceCatalog=data.catalog;
+ const form=$('#preferenceForm');form.innerHTML='';
+ const sections=[['General / عام',['language','address','name','customAddress']],['Personality / الشخصية',['tone','verbosity','humor','initiative']],['Modes / الأنماط',['mode']]];
+ const labels={language:'Language / اللغة',address:'Address me as / اللقب',name:'Name / الاسم',customAddress:'Custom address / لقب مخصص',tone:'Tone / النبرة',verbosity:'Verbosity / التفصيل',humor:'Humor / المزاح',initiative:'Initiative / المبادرة',mode:'Default mode / النمط الافتراضي'};
+ for(const [heading,keys] of sections){
+  const card=document.createElement('div');card.className='setting-card';const h=document.createElement('h3');h.textContent=heading;card.append(h);
+  for(const key of keys){const label=document.createElement('label');label.textContent=labels[key];
+   const input=document.createElement(['name','customAddress'].includes(key)?'input':'select');input.name=key;
+   if(input.tagName==='SELECT')for(const value of data.catalog.options[key]){const title=key==='language'?data.catalog.languages[value]:key==='mode'?data.catalog.modes[value].label:value[0].toUpperCase()+value.slice(1);input.add(new Option(title,value));}
+   else {input.maxLength=40;input.dir='auto';}
+   input.value=data.preferences[key];label.append(input);card.append(label);
+  }
+  if(keys.includes('mode')){const hint=document.createElement('p');hint.id='modeDescription';hint.className='hint';card.append(hint);}
+  form.append(card);
+ }
+ const card=document.createElement('div');card.className='setting-card';card.innerHTML='<h3>Capabilities / القدرات</h3><p class="hint">Tool choices apply in the backend. Terminal and browser are powerful tools; approvals still apply.</p><div id="capabilityChoices"></div><button type="button" id="resetCapabilities" class="ghost">Use mode defaults / إعدادات النمط</button>';form.append(card);
+ let custom=data.preferences.capabilities!==null;
+ const drawPacks=()=>{const mode=form.elements.mode.value;$('#modeDescription').textContent=data.catalog.modes[mode].description;const packs=custom?data.preferences.capabilities:data.catalog.modes[mode].packs;$('#capabilityChoices').innerHTML='';for(const [key,title] of Object.entries(data.catalog.packs)){const label=document.createElement('label');label.className='toggle-row';const input=document.createElement('input');input.type='checkbox';input.name='pack';input.value=key;input.checked=packs.includes(key);input.onchange=()=>{custom=true;data.preferences.capabilities=[...form.querySelectorAll('[name="pack"]:checked')].map(n=>n.value);};label.append(input,document.createTextNode(title));$('#capabilityChoices').append(label);}};
+ form.elements.mode.onchange=drawPacks;$('#resetCapabilities').onclick=()=>{custom=false;drawPacks();};drawPacks();
+ const footer=document.createElement('div');footer.className='settings-footer';footer.innerHTML='<button class="primary">Save preferences / حفظ التفضيلات</button><span id="preferenceMessage" role="status"></span>';form.append(footer);
+ form.onsubmit=async event=>{event.preventDefault();try{const values={};for(const [,keys] of sections)for(const key of keys)values[key]=form.elements[key].value;values.capabilities=custom?[...form.querySelectorAll('[name="pack"]:checked')].map(n=>n.value):null;await api('preferences',{method:'POST',body:values});$('#preferenceMessage').textContent='Saved / تم الحفظ';await refreshStatus();}catch(error){$('#preferenceMessage').textContent=error.message;}};
+ const selector=$('#jackMode');selector.innerHTML='';for(const [id,mode]of Object.entries(data.catalog.modes))selector.add(new Option(mode.label,id));selector.value=data.preferences.mode;
+}
+$('#jackMode').onchange=async event=>{try{await api('preferences',{method:'POST',body:{mode:event.target.value}});await refreshStatus();}catch(error){report(error);event.target.value=state.status?.preferences?.mode??'jarvis';}};
+
 await refreshStatus();
+await loadPreferences().catch(report);
 await history().catch(report);
 syncComposer();
 setInterval(refreshStatus, 15000);
