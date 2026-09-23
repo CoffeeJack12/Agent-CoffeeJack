@@ -108,12 +108,19 @@ export function createAccessGuard(
           return false;
         const key = (await keys()).find((key) => key.kid === header.kid);
         if (!key) return false;
-        return verify(
+        const ok = verify(
           "RSA-SHA256",
           Buffer.from(parts[0] + "." + parts[1]),
           createPublicKey({ key, format: "jwk" }),
           Buffer.from(parts[2], "base64url"),
         );
+        if (!ok) return false;
+        return {
+          email: claims.email.trim().toLowerCase(),
+          subject: String(claims.sub || claims.email).trim(),
+          issuer: claims.iss,
+          audience: claims.aud,
+        };
       } catch {
         return false;
       }

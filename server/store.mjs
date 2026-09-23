@@ -101,16 +101,26 @@ export class Store {
       .prepare("SELECT * FROM chats WHERE user_id=? ORDER BY created DESC")
       .all(userId);
   }
-  createChat(title, userId = resolveLocalOwner(this).id) {
+  createChat(title, userId = resolveLocalOwner(this).id, workspaceId = null) {
     const c = {
       id: randomUUID(),
       title: title.slice(0, 80),
       created: new Date().toISOString(),
       user_id: userId,
+      workspace_id: workspaceId || null,
     };
+    try {
+      const cols = this.db.prepare("PRAGMA table_info(chats)").all();
+      if (!cols.some((col) => col.name === "workspace_id"))
+        this.db.exec("ALTER TABLE chats ADD COLUMN workspace_id TEXT");
+    } catch {
+      /* ignore */
+    }
     this.db
-      .prepare("INSERT INTO chats(id,title,created,user_id) VALUES (?,?,?,?)")
-      .run(c.id, c.title, c.created, c.user_id);
+      .prepare(
+        "INSERT INTO chats(id,title,created,user_id,workspace_id) VALUES (?,?,?,?,?)",
+      )
+      .run(c.id, c.title, c.created, c.user_id, c.workspace_id);
     return c;
   }
   chat(id, userId) {

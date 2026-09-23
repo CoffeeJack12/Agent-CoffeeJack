@@ -48,9 +48,29 @@ import {
   getUser,
   listUsers,
   resolveLocalOwner,
+  revokeSession,
   touchSession,
   updateUser,
 } from "./users.mjs";
+import {
+  ensureIdentitySchema,
+  findIdentitiesForUser,
+  linkExternalIdentity,
+  resolveExternalIdentity,
+  IDENTITY_PROVIDER,
+} from "./identity.mjs";
+import {
+  ensureWorkspaceSchema,
+  ensureOwnerWorkspace,
+  ensureUserWorkspace,
+  listWorkspacesForUser,
+  resolveActiveWorkspace,
+  setChatWorkspace,
+  userCanAccessWorkspace,
+  getWorkspace,
+  getChatWorkspaceId,
+  updateWorkspaceRoot,
+} from "./workspaces.mjs";
 
 export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
@@ -63,8 +83,11 @@ export async function createApp({
   const artifacts = path.join(data, "artifacts");
   await fs.mkdir(artifacts, { recursive: true });
   const store = new Store(data);
+  ensureIdentitySchema(store);
+  ensureWorkspaceSchema(store);
   const owner = resolveLocalOwner(store);
-  const boot = createSession(store, owner.id);
+  await ensureOwnerWorkspace(store, { root, dataDirectory: data });
+  const boot = createSession(store, owner.id, { source: "local" });
   let token = boot.token;
   const ollama = providedOllama ?? new Ollama(process.env.OLLAMA_URL);
   const registry = createDefaultRegistry(ollama);
@@ -74,8 +97,11 @@ export async function createApp({
     gaming = false,
     autoGaming = false,
     gameScanBusy = false;
+  // Legacy global workspace setting remains owner's CoffeeJack workspace path.
   let workspace = store.get("workspace", path.join(data, "projects"));
   await fs.mkdir(workspace, { recursive: true });
+  const ownerWs = listWorkspacesForUser(store, owner.id)[0];
+  if (ownerWs?.root_path) workspace = ownerWs.root_path;
   const settings = () => ({
     model: store.get("model", process.env.COFFEEJACK_MODEL ?? "qwen3:8b"),
     codingModel: store.get("codingModel", ""),
@@ -103,12 +129,18 @@ export async function createApp({
         ? getUser(store, active.userId)
         : resolveLocalOwner(store);
       const capability = toolCapability(name, args);
+      const workspaceMeta = active?.workspaceId
+        ? getWorkspace(store, active.workspaceId)
+        : null;
       let decision = authorize({
         user,
         capability,
         action: name,
-        resource: args?.path ?? args?.command,
-        context: { memoryPack: true },
+        resource: workspaceMeta || args?.path || args?.command,
+        context: {
+          memoryPack: true,
+          workspaceId: active?.workspaceId || null,
+        },
       });
       decision = applyLegacyOwnerAutoApprove(
         decision,
@@ -216,12 +248,21 @@ export async function createApp({
     );
     const host = req.headers.host ?? "";
     const localHost = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host);
+    let remoteIdentity = null;
     if (!localHost) {
       if (!access || host !== access.hostname)
         return json(res, 403, { error: "Invalid host" });
-      if (!(await access.authorize(req)))
+      const verified = await access.authorize(req);
+      if (!verified) {
+        audit(store, {
+          action: "remote_login_denied",
+          detail: { reason: "invalid_token", host },
+        });
         return json(res, 403, { error: "Remote authentication required" });
+      }
+      remoteIdentity = verified;
     }
+    // Spoofed CF headers on local loopback are ignored — localHost wins.
     const expectedOrigin = (localHost ? "http://" : "https://") + host;
     if (
       (req.headers.origin && req.headers.origin !== expectedOrigin) ||
@@ -234,18 +275,104 @@ export async function createApp({
       let identity = route.startsWith("/api/")
         ? sessionIdentity(req)
         : undefined;
+      // Remote: Cloudflare-verified identity must map to the session user.
+      // Never let a stolen local session token impersonate another CF subject.
+      if (!localHost && remoteIdentity && route.startsWith("/api/")) {
+        const ownerEmails = (
+          process.env.CF_ACCESS_OWNER_EMAIL ||
+          process.env.CF_ACCESS_ALLOWED_EMAILS ||
+          ""
+        )
+          .split(",")
+          .map((e) => e.trim())
+          .filter(Boolean);
+        const mapped = resolveExternalIdentity(store, remoteIdentity, {
+          ownerAutoLinkEmails: ownerEmails.slice(0, 1),
+          autoCreateRole:
+            route === "/api/status" &&
+            !identity &&
+            process.env.CF_ACCESS_AUTO_CREATE_ROLE === "standard"
+              ? "standard"
+              : null,
+        });
+        if (mapped.status === "pending") {
+          if (identity?.token) revokeSession(store, identity.token);
+          audit(store, {
+            action: "remote_login_denied",
+            detail: { reason: "unmapped_identity" },
+          });
+          if (route === "/api/status")
+            return json(res, 403, {
+              error: "Access pending",
+              code: "pending_identity",
+              email: mapped.email || remoteIdentity.email || null,
+            });
+          return json(res, 403, { error: "Remote authentication required" });
+        }
+        if (mapped.status !== "mapped" || !mapped.user) {
+          if (identity?.token) revokeSession(store, identity.token);
+          audit(store, {
+            action: "remote_login_denied",
+            detail: { reason: mapped.reason || "denied" },
+          });
+          return json(res, 403, { error: "Remote authentication required" });
+        }
+        if (identity && identity.user.id !== mapped.user.id) {
+          if (identity.token) revokeSession(store, identity.token);
+          audit(store, {
+            userId: identity.user.id,
+            action: "remote_login_denied",
+            detail: { reason: "identity_mismatch" },
+          });
+          return json(res, 403, { error: "Remote authentication required" });
+        }
+        if (!identity && route === "/api/status") {
+          const remoteSession = createSession(store, mapped.user.id, {
+            source: "remote",
+          });
+          audit(store, {
+            userId: mapped.user.id,
+            action: "remote_login",
+            detail: { provider: IDENTITY_PROVIDER },
+          });
+          identity = {
+            token: remoteSession.token,
+            user: mapped.user,
+            session: getSession(store, remoteSession.token),
+          };
+        } else if (!identity) {
+          return json(res, 403, { error: "Invalid session token" });
+        }
+      }
       if (route === "/api/status" && req.method === "GET") {
         if (!identity) {
-          if (!localHost)
-            return json(res, 403, { error: "Invalid session token" });
-          const localSession = createSession(store, owner.id);
-          identity = {
-            token: localSession.token,
-            user: getUser(store, owner.id),
-            session: getSession(store, localSession.token),
-          };
+          if (!localHost) {
+            // Unreachable when CF configured: remote branch above handles it.
+            return json(res, 403, { error: "Remote authentication required" });
+          } else {
+            const localSession = createSession(store, owner.id, {
+              source: "local",
+            });
+            identity = {
+              token: localSession.token,
+              user: getUser(store, owner.id),
+              session: getSession(store, localSession.token),
+            };
+          }
         }
         const user = identity.user;
+        if (user.role !== "owner")
+          await ensureUserWorkspace(store, user.id, data);
+        const workspaces = listWorkspacesForUser(store, user.id).map((w) => ({
+          id: w.id,
+          name: w.name,
+          status: w.status,
+          owner: w.owner_user_id === user.id,
+        }));
+        const activeWs = await resolveActiveWorkspace(store, user, {
+          dataDirectory: data,
+          root,
+        });
         let models = [],
           modelError = "";
         try {
@@ -278,6 +405,7 @@ export async function createApp({
         } catch {
           /* keep ollama models */
         }
+        const identities = findIdentitiesForUser(store, user.id);
         return json(res, 200, {
           token: identity.token,
           user: {
@@ -286,11 +414,25 @@ export async function createApp({
             role: user.role,
             status: user.status,
           },
+          identitySource: localHost ? "local" : "cloudflare",
+          identities: identities.map((i) => ({
+            provider: i.provider,
+            email: i.normalized_email,
+            linked: true,
+          })),
           permissions: permissionSummary(user),
           models,
           providers,
           modelError,
-          settings: settings(),
+          settings: {
+            ...settings(),
+            workspace: activeWs.root_path,
+          },
+          workspaces,
+          activeWorkspace: {
+            id: activeWs.id,
+            name: activeWs.name,
+          },
           preferences: getPreferences(store, user.id),
           gaming,
           autoGaming,
@@ -308,12 +450,22 @@ export async function createApp({
       if (route.startsWith("/api/") && !identity)
         return json(res, 403, { error: "Invalid session token" });
       const user = identity?.user;
-      if (route === "/api/users" && req.method === "GET")
+      if (route === "/api/users" && req.method === "GET") {
+        const users = canManageUsers(user)
+          ? listUsers(store)
+          : [getUser(store, user.id)];
         return json(
           res,
           200,
-          canManageUsers(user) ? listUsers(store) : [getUser(store, user.id)],
+          users.map((u) => ({
+            ...u,
+            identities: findIdentitiesForUser(store, u.id).map((i) => ({
+              provider: i.provider,
+              email: i.normalized_email,
+            })),
+          })),
         );
+      }
       if (route === "/api/users" && req.method === "POST") {
         if (!canManageUsers(user))
           return json(res, 403, { error: "User management denied" });
@@ -322,6 +474,7 @@ export async function createApp({
           displayName: b.displayName,
           role: b.role,
         });
+        await ensureUserWorkspace(store, created.id, data);
         audit(store, {
           userId: user.id,
           action: "user_created",
@@ -368,13 +521,20 @@ export async function createApp({
         return json(res, 200, updated);
       }
       if (route === "/api/session/switch" && req.method === "POST") {
+        if (!localHost)
+          return json(res, 403, {
+            error: "Profile switching is local-only",
+          });
         if (!canManageUsers(user))
           return json(res, 403, { error: "Profile switching denied" });
         const b = await body(req);
         const target = getUser(store, b.userId);
         if (!target || target.status !== "active")
           return json(res, 404, { error: "Active user not found" });
-        const next = createSession(store, target.id);
+        const next = createSession(store, target.id, { source: "local" });
+        if (target.role === "owner")
+          await ensureOwnerWorkspace(store, { root, dataDirectory: data });
+        else await ensureUserWorkspace(store, target.id, data);
         audit(store, {
           userId: user.id,
           action: "profile_switched",
@@ -383,6 +543,55 @@ export async function createApp({
         return json(res, 200, {
           token: next.token,
           user: target,
+        });
+      }
+      if (route === "/api/session/logout" && req.method === "POST") {
+        if (identity?.token) revokeSession(store, identity.token);
+        return json(res, 200, { ok: true });
+      }
+      if (route === "/api/identity/link" && req.method === "POST") {
+        if (!canManageUsers(user))
+          return json(res, 403, { error: "Identity linking denied" });
+        const b = await body(req);
+        const linked = linkExternalIdentity(store, {
+          provider: b.provider || IDENTITY_PROVIDER,
+          subject: b.subject || b.email,
+          email: b.email,
+          userId: b.userId || user.id,
+          actorUserId: user.id,
+        });
+        return json(res, 200, {
+          id: linked.id,
+          provider: linked.provider,
+          email: linked.normalized_email,
+        });
+      }
+      if (route === "/api/workspaces" && req.method === "GET") {
+        return json(res, 200, {
+          workspaces: listWorkspacesForUser(store, user.id).map((w) => ({
+            id: w.id,
+            name: w.name,
+            status: w.status,
+            owner: w.owner_user_id === user.id,
+          })),
+        });
+      }
+      if (route === "/api/workspaces/active" && req.method === "POST") {
+        const b = await body(req);
+        if (!userCanAccessWorkspace(store, user.id, b.workspaceId)) {
+          audit(store, {
+            userId: user.id,
+            action: "workspace_access_denied",
+            detail: { workspaceId: b.workspaceId },
+          });
+          return json(res, 403, { error: "Workspace access denied" });
+        }
+        if (b.chatId)
+          setChatWorkspace(store, b.chatId, b.workspaceId, user.id);
+        store.set(`activeWorkspace:${user.id}`, b.workspaceId);
+        const ws = getWorkspace(store, b.workspaceId);
+        return json(res, 200, {
+          activeWorkspace: { id: ws.id, name: ws.name },
         });
       }
       if (route === "/api/chats" && req.method === "GET")
@@ -534,6 +743,10 @@ export async function createApp({
         )
           throw new Error("Invalid game executable names");
         if ("workspace" in b) {
+          if (user.role !== "owner")
+            return json(res, 403, {
+              error: "Only owner can change the primary workspace path",
+            });
           if (typeof b.workspace !== "string" || !path.isAbsolute(b.workspace))
             throw new Error("Workspace must be an absolute path");
           const stat = await fs.stat(b.workspace);
@@ -542,6 +755,9 @@ export async function createApp({
           workspace = await fs.realpath(b.workspace);
           tools.workspace = workspace;
           store.set("workspace", workspace);
+          const ownerWorkspace = listWorkspacesForUser(store, owner.id)[0];
+          if (ownerWorkspace)
+            updateWorkspaceRoot(store, ownerWorkspace.id, workspace);
         }
         for (const key of [
           "model",
@@ -617,9 +833,16 @@ export async function createApp({
         const buffer = Buffer.from(b.data, "base64");
         if (buffer.length > 20 * 1024 * 1024) throw new Error("20 MB maximum");
         const name = `${randomUUID()}-${path.basename(b.name).replace(/[^a-zA-Z0-9_.-]/g, "_")}`;
-        const destination = await workspacePath(workspace, `uploads/${name}`, {
-          write: true,
+        const uploadWs = await resolveActiveWorkspace(store, user, {
+          chatId: b.chatId || null,
+          dataDirectory: data,
+          root,
         });
+        const destination = await workspacePath(
+          uploadWs.root_path,
+          `uploads/${name}`,
+          { write: true },
+        );
         await fs.mkdir(path.dirname(destination), { recursive: true });
         await fs.writeFile(destination, buffer);
         return json(res, 200, { path: `uploads/${name}`, name: b.name });
@@ -651,8 +874,25 @@ export async function createApp({
           });
         const chat = b.chatId
           ? store.chat(b.chatId, user.id)
-          : store.createChat(b.text, user.id);
-        if (!chat) throw new Error("Chat not found");
+          : null;
+        if (b.chatId && !chat) throw new Error("Chat not found");
+        const activeWs = await resolveActiveWorkspace(store, user, {
+          chatId: chat?.id || null,
+          dataDirectory: data,
+          root,
+        });
+        if (!userCanAccessWorkspace(store, user.id, activeWs.id)) {
+          audit(store, {
+            userId: user.id,
+            action: "workspace_access_denied",
+            detail: { workspaceId: activeWs.id },
+          });
+          throw new Error("Workspace access denied");
+        }
+        const boundChat =
+          chat || store.createChat(b.text, user.id, activeWs.id);
+        if (!getChatWorkspaceId(store, boundChat.id))
+          setChatWorkspace(store, boundChat.id, activeWs.id, user.id);
         res.writeHead(200, {
           "Content-Type": "application/x-ndjson; charset=utf-8",
           "Cache-Control": "no-store",
@@ -666,17 +906,24 @@ export async function createApp({
         const finished = new Promise((resolve) => {
           finish = resolve;
         });
+        const previousToolsWorkspace = tools.workspace;
+        tools.workspace = activeWs.root_path;
         active = {
           controller,
-          chatId: chat.id,
+          chatId: boundChat.id,
           emit,
           finished,
           userId: user.id,
+          workspaceId: activeWs.id,
         };
         res.on("close", () => {
           if (!res.writableEnded) controller.abort();
         });
-        emit({ type: "chat", chat });
+        emit({
+          type: "chat",
+          chat: boundChat,
+          workspace: { id: activeWs.id, name: activeWs.name },
+        });
         const conf = settings();
         try {
           const preferences = {
@@ -691,7 +938,7 @@ export async function createApp({
             requestedMode,
             text: b.text,
             attachments: b.attachments ?? [],
-            history: store.messages(chat.id),
+            history: store.messages(boundChat.id),
           });
           const requestedModel =
             typeof b.requestedModel === "string" && b.requestedModel
@@ -708,7 +955,7 @@ export async function createApp({
             text: b.text,
             mode: taskMode,
             attachments: b.attachments ?? [],
-            history: store.messages(chat.id),
+            history: store.messages(boundChat.id),
             signal: controller.signal,
             requestedModel,
             effectiveMode: modeInfo.effectiveMode,
@@ -859,7 +1106,7 @@ export async function createApp({
             ollama,
             providerRegistry: registry,
             tools,
-            chatId: chat.id,
+            chatId: boundChat.id,
             text: b.text,
             attachments: b.attachments,
             model: routing.model,
@@ -883,10 +1130,10 @@ export async function createApp({
           try {
             const turnEvents = store
               .events(user.id)
-              .filter((e) => e.chat_id === chat.id);
+              .filter((e) => e.chat_id === boundChat.id);
             evidencePack = buildEvidencePack(turnEvents, {
               taskType: routing.kind || modeInfo.effectiveMode || "general",
-              chatId: chat.id,
+              chatId: boundChat.id,
             });
             const reviewDecision = shouldRunEvidenceRound({
               pack: evidencePack,
@@ -944,7 +1191,7 @@ export async function createApp({
               });
               if (grounded) {
                 const note = `\n\n---\nVerification\n${grounded}`;
-                store.message(chat.id, "assistant", note);
+                store.message(boundChat.id, "assistant", note);
                 emit({ type: "token", text: note });
               }
             }
@@ -961,7 +1208,7 @@ export async function createApp({
                   summary: `Verified fix approach for: ${b.text.slice(0, 120)}`,
                   testEvidence: `run_tests exit ${evidencePack.tests.exitCode} pass`,
                   userId: user.id,
-                  chatId: chat.id,
+                  chatId: boundChat.id,
                   project: tools.workspace,
                 }),
               );
@@ -980,6 +1227,7 @@ export async function createApp({
             error: controller.signal.aborted ? "تم إيقاف المهمة." : e.message,
           });
         } finally {
+          tools.workspace = previousToolsWorkspace;
           active = null;
           finish();
           res.end();

@@ -227,28 +227,65 @@ export function disableUser(store, id) {
   return user;
 }
 
-export function createSession(store, userId) {
+export function createSession(store, userId, { source = "local", ttlMs } = {}) {
   const user = getUser(store, userId);
   if (!user || user.status !== "active") throw new Error("User is not active");
   const token = randomBytes(32).toString("base64url");
   const now = new Date().toISOString();
+  const ttl =
+    ttlMs ??
+    (source === "remote" ? 24 * 60 * 60 * 1000 : 7 * 24 * 60 * 60 * 1000);
+  const expires = new Date(Date.now() + ttl).toISOString();
+  // Soft-migrate session columns.
+  try {
+    const cols = store.db.prepare("PRAGMA table_info(sessions)").all();
+    if (!cols.some((c) => c.name === "expires_at"))
+      store.db.exec("ALTER TABLE sessions ADD COLUMN expires_at TEXT");
+    if (!cols.some((c) => c.name === "source"))
+      store.db.exec("ALTER TABLE sessions ADD COLUMN source TEXT");
+  } catch {
+    /* ignore */
+  }
   store.db
     .prepare(
-      "INSERT INTO sessions(token,user_id,created,last_seen,revoked) VALUES(?,?,?,?,NULL)",
+      "INSERT INTO sessions(token,user_id,created,last_seen,revoked,expires_at,source) VALUES(?,?,?,?,NULL,?,?)",
     )
-    .run(token, user.id, now, now);
-  return { token, userId: user.id, created: now, lastSeen: now };
+    .run(token, user.id, now, now, expires, source);
+  return {
+    token,
+    userId: user.id,
+    created: now,
+    lastSeen: now,
+    expiresAt: expires,
+    source,
+  };
 }
 
 export function getSession(store, token) {
   if (typeof token !== "string" || !token) return undefined;
-  return store.db
+  try {
+    const cols = store.db.prepare("PRAGMA table_info(sessions)").all();
+    if (!cols.some((c) => c.name === "expires_at"))
+      store.db.exec("ALTER TABLE sessions ADD COLUMN expires_at TEXT");
+    if (!cols.some((c) => c.name === "source"))
+      store.db.exec("ALTER TABLE sessions ADD COLUMN source TEXT");
+  } catch {
+    /* ignore */
+  }
+  const row = store.db
     .prepare(
-      `SELECT s.token,s.user_id,s.created,s.last_seen,u.display_name,u.role,u.status
+      `SELECT s.token,s.user_id,s.created,s.last_seen,s.expires_at,s.source,
+              u.display_name,u.role,u.status
        FROM sessions s JOIN users u ON u.id=s.user_id
        WHERE s.token=? AND s.revoked IS NULL AND u.status='active'`,
     )
     .get(token);
+  if (!row) return undefined;
+  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) {
+    revokeSession(store, token);
+    return undefined;
+  }
+  return row;
 }
 
 export function touchSession(store, token) {
