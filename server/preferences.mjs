@@ -133,8 +133,23 @@ export function validatePreferences(input) {
   return out;
 }
 
+import { resolveLocalOwner } from "./users.mjs";
+
+function preferenceKey(store, profileId = "owner") {
+  if (profileId && profileId !== "owner") return profileId;
+  try {
+    return resolveLocalOwner(store).id;
+  } catch {
+    return "owner";
+  }
+}
+
 export function getPreferences(store, profileId = "owner") {
-  const legacy = profileId === "owner" ? store.get("persona", {}) : {};
+  const key = preferenceKey(store, profileId);
+  const legacy =
+    profileId === "owner" || key === resolveLocalOwnerSafe(store)
+      ? store.get("persona", {})
+      : {};
   const migrated = { ...DEFAULT_PREFERENCES };
   if (legacy.language && ASSISTANT_LANGUAGES[legacy.language])
     migrated.language = legacy.language;
@@ -146,21 +161,30 @@ export function getPreferences(store, profileId = "owner") {
       ({ concise: "concise", balanced: "normal", thorough: "detailed" })[
         legacy.detail
       ] ?? "concise";
-  const saved = store.profilePreferences(profileId);
+  const saved = store.profilePreferences(key);
   if (saved.mode === "jarvis") saved.mode = "auto";
   const next = { ...migrated, ...saved, mode: migrateMode(saved.mode ?? migrated.mode) };
   if (saved.mode === "jarvis")
-    store.saveProfilePreferences(profileId, { ...next, mode: "auto" });
+    store.saveProfilePreferences(key, { ...next, mode: "auto" });
   return next;
 }
 
+function resolveLocalOwnerSafe(store) {
+  try {
+    return resolveLocalOwner(store).id;
+  } catch {
+    return null;
+  }
+}
+
 export function savePreferences(store, input, profileId = "owner") {
+  const key = preferenceKey(store, profileId);
   const next = {
-    ...getPreferences(store, profileId),
+    ...getPreferences(store, key),
     ...validatePreferences(input),
   };
   next.mode = migrateMode(next.mode);
-  store.saveProfilePreferences(profileId, next);
+  store.saveProfilePreferences(key, next);
   return next;
 }
 

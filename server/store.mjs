@@ -5,6 +5,7 @@ import { randomUUID } from "node:crypto";
 
 import { projectKey, validateMemory, retrieveMemories } from "./memory.mjs";
 import { scrubStoredCapabilityClaims } from "./capabilities.mjs";
+import { migrateToMultiUser, resolveLocalOwner } from "./users.mjs";
 
 export class Store {
   constructor(directory) {
@@ -46,9 +47,22 @@ export class Store {
         this.db.exec(`ALTER TABLE memories ADD COLUMN ${column[0]} ${column[1]}`);
     }
     scrubStoredCapabilityClaims(this);
+    migrateToMultiUser(this);
   }
   profilePreferences(profileId) {
-    const row = this.db.prepare("SELECT value FROM profile_preferences WHERE profile_id=?").get(profileId);
+    let row = this.db.prepare("SELECT value FROM profile_preferences WHERE profile_id=?").get(profileId);
+    if (!row && profileId !== "owner") {
+      const owner = resolveLocalOwner(this);
+      if (profileId === owner.id)
+        row = this.db
+          .prepare("SELECT value FROM profile_preferences WHERE profile_id='owner'")
+          .get();
+    } else if (!row && profileId === "owner") {
+      const owner = resolveLocalOwner(this);
+      row = this.db
+        .prepare("SELECT value FROM profile_preferences WHERE profile_id=?")
+        .get(owner.id);
+    }
     return row ? JSON.parse(row.value) : {};
   }
   saveProfilePreferences(profileId, value) {
@@ -66,7 +80,10 @@ export class Store {
       .run(chatId, JSON.stringify(state), new Date().toISOString());
   }
   relevantMemories(query, options) {
-    return retrieveMemories(this.db, query, options);
+    return retrieveMemories(this.db, query, {
+      ...options,
+      userId: options?.userId ?? resolveLocalOwner(this).id,
+    });
   }
   get(key, fallback) {
     const row = this.db
@@ -79,21 +96,28 @@ export class Store {
       .prepare("INSERT OR REPLACE INTO settings VALUES (?,?)")
       .run(key, JSON.stringify(value));
   }
-  chats() {
-    return this.db.prepare("SELECT * FROM chats ORDER BY created DESC").all();
+  chats(userId = resolveLocalOwner(this).id) {
+    return this.db
+      .prepare("SELECT * FROM chats WHERE user_id=? ORDER BY created DESC")
+      .all(userId);
   }
-  createChat(title) {
+  createChat(title, userId = resolveLocalOwner(this).id) {
     const c = {
       id: randomUUID(),
       title: title.slice(0, 80),
       created: new Date().toISOString(),
+      user_id: userId,
     };
     this.db
-      .prepare("INSERT INTO chats VALUES (?,?,?)")
-      .run(c.id, c.title, c.created);
+      .prepare("INSERT INTO chats(id,title,created,user_id) VALUES (?,?,?,?)")
+      .run(c.id, c.title, c.created, c.user_id);
     return c;
   }
-  chat(id) {
+  chat(id, userId) {
+    if (userId !== undefined)
+      return this.db
+        .prepare("SELECT * FROM chats WHERE id=? AND user_id=?")
+        .get(id, userId);
     return this.db.prepare("SELECT * FROM chats WHERE id=?").get(id);
   }
   messages(id) {
@@ -110,24 +134,31 @@ export class Store {
       )
       .run(id, role, content, new Date().toISOString());
   }
-  deleteChat(id) {
-    this.db.prepare("DELETE FROM chats WHERE id=?").run(id);
+  deleteChat(id, userId) {
+    if (userId !== undefined)
+      return (
+        this.db
+          .prepare("DELETE FROM chats WHERE id=? AND user_id=?")
+          .run(id, userId).changes > 0
+      );
+    return this.db.prepare("DELETE FROM chats WHERE id=?").run(id).changes > 0;
   }
-  memories(query = "") {
+  memories(query = "", userId = resolveLocalOwner(this).id) {
     return this.db
       .prepare(
-        "SELECT * FROM memories WHERE content LIKE ? ORDER BY created DESC LIMIT 100",
+        "SELECT * FROM memories WHERE user_id=? AND content LIKE ? ORDER BY created DESC LIMIT 100",
       )
-      .all(`%${query}%`);
+      .all(userId, `%${query}%`);
   }
   remember(content, kind = "note", project = null, meta = {}) {
     content = validateMemory(content, kind);
     const scope = kind === "preference" ? null : projectKey(project);
+    const userId = meta.userId ?? resolveLocalOwner(this).id;
     const existing = this.db
       .prepare(
-        "SELECT id FROM memories WHERE content=? AND kind=? AND project IS ?",
+        "SELECT id FROM memories WHERE user_id=? AND content=? AND kind=? AND project IS ?",
       )
-      .get(content, kind, scope);
+      .get(userId, content, kind, scope);
     if (existing) {
       this.updateMemory(existing.id, meta);
       return existing.id;
@@ -136,7 +167,7 @@ export class Store {
     const now = new Date().toISOString();
     this.db
       .prepare(
-        "INSERT INTO memories(id,content,kind,created,project,updated,last_used,confidence,chat_id,category) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO memories(id,content,kind,created,project,updated,last_used,confidence,chat_id,category,user_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
       )
       .run(
         id,
@@ -149,6 +180,7 @@ export class Store {
         meta.confidence ?? null,
         meta.chatId ?? null,
         meta.category ?? null,
+        userId,
       );
     return id;
   }
@@ -170,13 +202,21 @@ export class Store {
         id,
       );
   }
-  forget(id) {
-    this.db.prepare("DELETE FROM memories WHERE id=?").run(id);
+  forget(id, userId = resolveLocalOwner(this).id) {
+    return (
+      this.db
+        .prepare("DELETE FROM memories WHERE id=? AND user_id=?")
+        .run(id, userId).changes > 0
+    );
   }
   event(chatId, tool, detail, status) {
+    const chatUser = chatId
+      ? this.db.prepare("SELECT user_id FROM chats WHERE id=?").get(chatId)
+      : null;
+    const userId = chatUser?.user_id ?? resolveLocalOwner(this).id;
     this.db
       .prepare(
-        "INSERT INTO events(chat_id,tool,detail,status,created) VALUES(?,?,?,?,?)",
+        "INSERT INTO events(chat_id,tool,detail,status,created,user_id) VALUES(?,?,?,?,?,?)",
       )
       .run(
         chatId ?? null,
@@ -184,23 +224,37 @@ export class Store {
         JSON.stringify(detail).slice(0, 20000),
         status,
         new Date().toISOString(),
+        userId,
       );
   }
-  events() {
+  events(userId = resolveLocalOwner(this).id) {
     return this.db
-      .prepare("SELECT * FROM events ORDER BY id DESC LIMIT 100")
-      .all();
+      .prepare(
+        `SELECT e.* FROM events e
+         LEFT JOIN chats c ON c.id=e.chat_id
+         WHERE e.user_id=? OR c.user_id=?
+         ORDER BY e.id DESC LIMIT 100`,
+      )
+      .all(userId, userId);
   }
   close() {
     this.db.close();
   }
-  counts() {
+  counts(userId) {
+    const where = userId === undefined ? "" : " WHERE user_id=?";
+    const params = userId === undefined ? [] : [userId];
     return {
-      memories: this.db.prepare("SELECT COUNT(*) AS n FROM memories").get().n,
-      conversations: this.db.prepare("SELECT COUNT(*) AS n FROM chats").get().n,
+      memories: this.db
+        .prepare(`SELECT COUNT(*) AS n FROM memories${where}`)
+        .get(...params).n,
+      conversations: this.db
+        .prepare(`SELECT COUNT(*) AS n FROM chats${where}`)
+        .get(...params).n,
       completedTools: this.db
-        .prepare("SELECT COUNT(*) AS n FROM events WHERE status='done'")
-        .get().n,
+        .prepare(
+          `SELECT COUNT(*) AS n FROM events WHERE status='done'${userId === undefined ? "" : " AND user_id=?"}`,
+        )
+        .get(...params).n,
     };
   }
 }

@@ -41,7 +41,7 @@ export function memoryTerms(text) {
 export function retrieveMemories(
   db,
   query,
-  { project, limit = 8, maxChars = 4000 } = {},
+  { project, limit = 8, maxChars = 4000, userId } = {},
 ) {
   const terms = memoryTerms(query);
   const scope = projectKey(project);
@@ -52,14 +52,16 @@ export function retrieveMemories(
       )
       .join(" + ") || "0";
   const patterns = terms.map((term) => `%${term.replace(/[\\%_]/g, "\\$&")}%`);
+  const userFilter = userId === undefined ? "" : "user_id = ? AND ";
+  const userParams = userId === undefined ? [] : [userId];
   const candidates = db
     .prepare(
       `SELECT *, (${score}) AS relevance FROM memories
-    WHERE project IS NULL OR project = ?
+    WHERE ${userFilter}(project IS NULL OR project = ?)
     ORDER BY relevance DESC, CASE WHEN project = ? THEN 1 ELSE 0 END DESC,
     CASE WHEN kind = 'preference' THEN 1 ELSE 0 END DESC, created DESC LIMIT 80`,
     )
-    .all(...patterns, scope, scope);
+    .all(...patterns, ...userParams, scope, scope);
   const selected = [];
   let used = 0;
   for (const memory of candidates) {
