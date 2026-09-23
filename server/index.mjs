@@ -14,8 +14,7 @@ import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
 import { createDefaultRegistry } from "./providers/index.mjs";
 import {
-  shouldConsultCouncil,
-  selectCouncilParticipants,
+  buildCouncilPlan,
   runCouncil,
   councilUiSummary,
 } from "./council.mjs";
@@ -470,6 +469,7 @@ export async function createApp({
             remoteAi: prefs.remoteAi,
             councilMaxModels: prefs.councilMaxModels,
             remoteBudget: prefs.remoteBudget,
+            councilOtherModels: prefs.councilOtherModels,
           },
         });
       }
@@ -752,8 +752,9 @@ export async function createApp({
             requestedMode: modeInfo.requestedMode,
             effectiveMode: modeInfo.effectiveMode,
           });
-          // Council decision (text proposals only; skip if <2 models).
+          // Provider-native Council (text proposals only; Jack sole tool executor).
           let councilResult = null;
+          let councilPlan = null;
           try {
             await registry.refresh(controller.signal);
             const available = registry.listModels({
@@ -763,44 +764,81 @@ export async function createApp({
                 preferences.remoteBudget === "off" ||
                 gaming,
             });
-            const decision = shouldConsultCouncil({
+            const locked =
+              requestedModel && requestedModel !== "auto"
+                ? requestedModel
+                : null;
+            councilPlan = buildCouncilPlan({
               text: b.text,
               preferences,
               gaming,
               effectiveMode: modeInfo.effectiveMode,
+              taskKind: routing.kind,
               availableModels: available,
+              lockedModel: locked,
+              effectiveModel: routing.effectiveModel,
+              healthLookup: (providerId, modelId) =>
+                registry.getModelHealth(providerId, modelId),
             });
-            if (!decision.consult) {
+            if (!councilPlan.enabled) {
               emit({
                 type: "council",
-                ...councilUiSummary({
-                  skipped: true,
-                  reason: decision.reason,
-                }),
+                ...councilUiSummary(
+                  { skipped: true, reason: councilPlan.triggerReason },
+                  councilPlan,
+                ),
               });
             } else {
-              const participants = selectCouncilParticipants(available, {
-                max: Number(preferences.councilMaxModels || 2),
-                gaming,
-              });
-              councilResult = await runCouncil({
-                participants,
-                prompt: b.text,
-                chatFn: async ({ model, messages, signal }) => {
-                  // Local Ollama only for council text proposals in v1.
-                  const response = await ollama.chat({
-                    model,
-                    messages,
-                    tools: [],
-                    profile: { think: false, context: 4096, predict: 1024 },
-                    signal,
-                    onToken: () => {},
+              const needsRemoteCouncil =
+                preferences.remoteAi === "ask" &&
+                councilPlan.participants.some((p) => !p.local);
+              if (needsRemoteCouncil && !routing.needsRemoteApproval) {
+                await new Promise((resolve, reject) => {
+                  const id = randomUUID();
+                  const finishAsk = (allowed) => {
+                    clearTimeout(timer);
+                    approvals.delete(id);
+                    allowed
+                      ? resolve()
+                      : reject(new Error("Remote AI use declined"));
+                  };
+                  const timer = setTimeout(() => finishAsk(false), 300000);
+                  approvals.set(id, {
+                    id,
+                    name: "remote_ai",
+                    args: {
+                      purpose: "council",
+                      models: councilPlan.participants
+                        .filter((p) => !p.local)
+                        .map((p) => `${p.providerId}/${p.modelId}`),
+                    },
+                    finish: finishAsk,
+                    userId: user.id,
                   });
-                  return { content: response.content };
-                },
+                  emit({
+                    type: "approval",
+                    id,
+                    name: "remote_ai",
+                    args: {
+                      purpose: "council",
+                      models: councilPlan.participants
+                        .filter((p) => !p.local)
+                        .map((p) => `${p.providerId}/${p.modelId}`),
+                    },
+                  });
+                });
+              }
+              councilResult = await runCouncil({
+                participants: councilPlan.participants,
+                prompt: b.text,
+                registry,
                 signal: controller.signal,
+                preferences,
               });
-              emit({ type: "council", ...councilUiSummary(councilResult) });
+              emit({
+                type: "council",
+                ...councilUiSummary(councilResult, councilPlan),
+              });
             }
           } catch {
             emit({
@@ -813,6 +851,7 @@ export async function createApp({
           await runAgent({
             store,
             ollama,
+            providerRegistry: registry,
             tools,
             chatId: chat.id,
             text: b.text,
@@ -850,6 +889,11 @@ export async function createApp({
                   chatId: chat.id,
                   project: tools.workspace,
                 }),
+              );
+              registry.recordQuality?.(
+                routing.provider || "ollama",
+                routing.model,
+                2,
               );
             }
           } catch {
