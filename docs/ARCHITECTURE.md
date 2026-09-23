@@ -27,9 +27,10 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/access.mjs`: optional Cloudflare Access JWT boundary; disabled without full configuration. The listener stays on loopback.
 - `server/router.mjs`: smart Auto Model selection via ProviderRegistry (with legacy Ollama-only path), reason codes, remote Ask approval flag and fallback model lists.
 - `server/providers/`: ProviderRegistry and adapters (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys only).
-- `server/council.mjs`: bounded multi-model consultation (text proposals; Jack sole tool executor).
+- `server/council.mjs`: provider-native multi-model consultation (distinct participants, budgets, timeouts, partial failure, max 2 evidence rounds; Jack sole tool executor).
 - `server/lessons.mjs`: verified lesson candidates with evidence gates and per-user scope.
 - `server/privacy.mjs`: credential/session redaction before remote prompts.
+- `server/providers/`: ProviderRegistry with adapter chat routing, model health/cooldown/quality signals (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys).
 - `server/memory.mjs`: ranked, bounded project context and credential-pattern rejection.
 - `server/developer.mjs`: bounded project mapping, script detection and exact-context patching.
 - `server/agent.mjs`: personality, conversation context, memory, model/tool loop and execution evidence.

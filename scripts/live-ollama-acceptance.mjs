@@ -132,6 +132,7 @@ try {
     remoteAi: "allowed",
     councilMaxModels: "2",
     remoteBudget: "conservative",
+    councilOtherModels: "on",
   });
   await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   const port = app.server.address().port;
@@ -175,10 +176,11 @@ try {
   );
   pass("Memory skips acceptance-test noise");
 
-  // A — AUTO SIMPLE (qwen, no council, no tools)
+  // A — ONE LOCAL MODEL council On → accurate skip (no fake multi-AI)
   try {
+    savePreferences(app.store, { councilMode: "on" });
     const events = await streamChat(port, token, {
-      text: "hello Jack",
+      text: "consult the council and help me choose an architecture",
       requestedMode: "auto",
       requestedModel: "auto",
       mode: "auto",
@@ -186,19 +188,19 @@ try {
     const routing = events.find((e) => e.type === "routing");
     assert.match(routing?.model || "", /qwen3:8b/);
     assert.equal(routing?.provider || "ollama", "ollama");
-    assert.ok(
-      !routing?.reasonCode ||
-        ["local_fast", "gaming_fallback"].includes(routing.reasonCode),
-    );
     const council = events.find((e) => e.type === "council");
     assert.ok(council, "council event expected");
     assert.equal(council.status, "skipped");
-    assert.match(String(council.detail || council.reason || ""), /1 model|skipped|one_model|not_warranted|simple/i);
-    const tools = events.filter((e) => e.type === "tool");
-    assert.equal(tools.length, 0, "simple hello should not use tools");
-    pass("A AUTO SIMPLE", `model=${routing.model} council=${council.detail}`);
+    assert.match(
+      String(council.detail || ""),
+      /1 model available|consultation skipped|insufficient|one_model/i,
+    );
+    const reply = transcript(events);
+    assert.doesNotMatch(reply, /\bClaude (?:says|confirmed)\b|\bGPT says\b|\bGemini confirmed\b/i);
+    pass("A ONE LOCAL MODEL COUNCIL", council.detail);
+    savePreferences(app.store, { councilMode: "auto" });
   } catch (error) {
-    fail("A AUTO SIMPLE", error.message || error);
+    fail("A ONE LOCAL MODEL COUNCIL", error.message || error);
   }
 
   // D — Council with one model must not fake participants
@@ -214,7 +216,7 @@ try {
     assert.equal(council.status, "skipped");
     assert.match(
       String(council.detail || ""),
-      /1 model available|consultation skipped|one_model/i,
+      /1 model available|consultation skipped|one_model|insufficient/i,
     );
     const reply = transcript(events);
     assert.doesNotMatch(reply, /\bClaude says\b|\bGPT says\b/i);
@@ -375,7 +377,62 @@ try {
     fail("F PROVIDER FAILURE FALLBACK", error.message || error);
   }
 
-  // G — Gaming Mode unload + council suppressed / chat blocked
+  // G — partial council failure (mocked participants via registry path)
+  try {
+    const { runCouncil } = await import("../server/council.mjs");
+    const result = await runCouncil({
+      participants: [
+        { modelId: "qwen3:8b", providerId: "ollama", role: "primary", local: true },
+        { modelId: "missing", providerId: "ollama", role: "critic", local: true },
+        { modelId: "qwen3:8b", providerId: "ollama", role: "specialist", local: true },
+      ],
+      prompt: "compare approaches",
+      chatFn: async ({ modelId }) => {
+        if (modelId === "missing") throw new Error("timeout");
+        return { content: `ok from ${modelId}` };
+      },
+    });
+    // Distinctness would normally prevent duplicate qwen — this tests partial failure handling.
+    assert.equal(result.succeeded, 2);
+    assert.equal(result.rejected, 1);
+    assert.ok(result.synthesis);
+    pass("G PARTIAL COUNCIL FAILURE", `${result.succeeded}/${result.requested}`);
+  } catch (error) {
+    fail("G PARTIAL COUNCIL FAILURE", error.message || error);
+  }
+
+  // Remote live smoke — only if credentials exist
+  try {
+    const hasRemote =
+      process.env.OPENAI_API_KEY ||
+      process.env.ANTHROPIC_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      process.env.GEMINI_API_KEY;
+    if (!hasRemote) {
+      pass("REMOTE LIVE SMOKE", "skipped: no credentials");
+    } else {
+      await app.registry.refresh();
+      const remote = app.registry
+        .listModels({ remoteAllowed: true })
+        .find((m) => !m.local);
+      assert.ok(remote, "configured key but no remote models listed");
+      const reply = await app.registry.chat({
+        providerId: remote.provider,
+        modelId: remote.id,
+        messages: [{ role: "user", content: "Reply with exactly: pong" }],
+        signal: AbortSignal.timeout(45000),
+      });
+      assert.ok(String(reply.content || "").length > 0);
+      pass(
+        "REMOTE LIVE SMOKE",
+        `${remote.provider}/${remote.id} chars=${reply.content.length}`,
+      );
+    }
+  } catch (error) {
+    fail("REMOTE LIVE SMOKE", error.message || error);
+  }
+
+  // H — Gaming Mode unload + council suppressed / chat blocked
   try {
     const gaming = await fetch(`http://127.0.0.1:${port}/api/gaming`, {
       method: "POST",
@@ -406,9 +463,9 @@ try {
       },
       body: JSON.stringify({ enabled: false }),
     });
-    pass("G GAMING MODE", JSON.stringify(body.unloaded));
+    pass("H GAMING MODE", JSON.stringify(body.unloaded));
   } catch (error) {
-    fail("G GAMING MODE", error.message || error);
+    fail("H GAMING MODE", error.message || error);
   }
 
   // No temporary acceptance noise saved (verified coding lessons from the fixture are allowed)

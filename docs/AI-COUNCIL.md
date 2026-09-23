@@ -1,51 +1,69 @@
 # AI Council
 
-Bounded multi-model consultation. Models **propose text only**; Jack remains the sole tool executor. No parallel uncontrolled terminal agents.
+Bounded multi-model consultation through **ProviderRegistry**. Models propose text only; Jack remains the sole tool executor. No parallel uncontrolled terminal agents.
 
-## Modes (per user)
+## Provider-native participants
 
-| Mode | Behavior |
+Council membership is dynamic from configured, available models:
+
+- Local Ollama models that are actually installed
+- Remote OpenAI / Anthropic / Google / OpenAI-compatible models **only when keys are configured**
+
+Never invents Claude/GPT/Gemini participants.
+
+## Distinctness
+
+- Prefer different **providers**, then different **models**
+- Never present the same model ID as three independent AIs
+- One suitable model → `1 model available — consultation skipped`
+
+## Roles
+
+Assigned intelligently when enough distinct models exist:
+
+| Role | Typical use |
 | --- | --- |
-| **Auto** (default) | Consult when complexity/explicit request warrants it |
-| **On** | Prefer consultation for meaningful complex work |
-| **Off** | Single-model only |
+| PRIMARY | Strongest suitable model for the task |
+| CRITIC | Different capable model |
+| SPECIALIST | Optional domain/reasoning review |
+| JUDGE | Optional when max ≥ 4 |
 
-## When it runs
+## Modes & settings (per user)
 
-Triggers include: explicit “ask the council / second opinion”, complex architecture/debugging/research synthesis, repeated failed approaches.
+| Setting | Values | Default |
+| --- | --- | --- |
+| AI Council | Auto / On / Off | Auto |
+| Max models | 2 / 3 / 4 | 2 |
+| Remote AI | Allowed / Ask / Never | Allowed |
+| Remote budget | Off / Conservative / Balanced / Performance | Conservative |
+| Council may use other models | On / Off | On |
 
-Skipped for: greetings, simple Q&A, basic edits, Empathy (unless explicit), Gaming Mode, or fewer than two suitable models.
+Manual model lock keeps **execution** on that model. Council may still consult others only if “Council may use other models” is On and privacy allows.
 
 ## Budget
 
-- Council max models: 2 / 3 / 4
-- Remote budget policy controls how eagerly remote participants are preferred
-- With only local models, council still works if ≥2 suitable locals exist
+- **Off**: local only
+- **Conservative**: at most one remote participant
+- **Balanced**: limited multi-provider remotes
+- **Performance**: strongest suitable within max participants 
 
-## No fake council
+## Execution
 
-If only `qwen3:8b` is available, CoffeeJack reports **1 model available — consultation skipped**. It never invents Claude/GPT participants.
+```text
+buildCouncilPlan → ProviderRegistry.chat per participant → normalize → synthesize
+→ Jack executes tools → optional evidence round (max 2) → final answer
+```
 
-## Flow
+Timeouts: remote ~45s, local ~90s. Partial failures continue if ≥1 proposal succeeds.
 
-1. Orchestrator decides consultation is useful  
-2. Select ≤ N participants (roles: primary / critic / specialist)  
-3. Collect proposals  
-4. Normalize + synthesize for the agent system prompt  
-5. Jack executes tools once, with evidence  
-6. Optionally store a **verified** lesson (see below)
+## Privacy
 
-UI shows Council status and participant roles/status — not hidden chain-of-thought.
+Remote prompts are sanitized (`server/privacy.mjs`). Ask mode requires approval before first remote Council call. Guests stay local-only.
+
+## Gaming Mode
+
+Council is fully suppressed; no extra model loads or parallel provider calls.
 
 ## Verified lessons
 
-`server/lessons.mjs` persists durable technical lessons only with verification:
-
-| Type | Evidence |
-| --- | --- |
-| `tests` | Test/tool pass evidence |
-| `sources` | URL-backed research |
-| `tool` | Tool evidence |
-| `user_statement` | Workflow preference stated by the user |
-
-Council agreement alone is not proof. Secrets are rejected. Scopes: **private** (user), **project**, never promote personal prefs to SYSTEM.
+Council agreement alone is **not** proof. Persistence still requires tests/sources/tool/user_statement evidence.

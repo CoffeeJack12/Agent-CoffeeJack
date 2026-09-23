@@ -5,8 +5,8 @@ The app remains a local-first Windows agent with one active task at a time, loca
 ## Completed in this upgrade
 
 - Multi-user profiles: database-backed sessions, owner/trusted/standard/guest roles, scoped chats/memory/preferences/activity/approvals, owner user management and profile switching, audit events, and transactional legacy-data backfill. See [MULTI-USER.md](MULTI-USER.md).
-- AI Provider Registry: Ollama + optional OpenAI/Anthropic/Google/OpenAI-compatible adapters, model capability catalog, smart Auto Model router with reason codes and fallback chains, Remote AI Allowed/Ask/Never, per-user council/budget prefs, privacy sanitizer for remote prompts. Works with zero remote keys; `qwen3:8b` remains local fallback. See [AI-PROVIDERS.md](AI-PROVIDERS.md).
-- AI Council: bounded multi-model text consultation (no fake providers, Gaming suppresses, Jack sole tool executor) and verified lessons pipeline. See [AI-COUNCIL.md](AI-COUNCIL.md).
+- AI Provider Registry: Ollama + optional OpenAI/Anthropic/Google/OpenAI-compatible adapters, model capability catalog, smart Auto Model router with reason codes, health/cooldown, fallback chains, Remote AI Allowed/Ask/Never, per-user council/budget/`councilOtherModels` prefs, privacy sanitizer. Works with zero remote keys; `qwen3:8b` remains local fallback. See [AI-PROVIDERS.md](AI-PROVIDERS.md).
+- AI Council: **provider-native** multi-model consultation (distinct providers/models, no fakes, Gaming suppresses, Jack sole tool executor, timeouts/partial failure, max 2 rounds) and verified lessons pipeline. See [AI-COUNCIL.md](AI-COUNCIL.md).
 - Jarvis foundation: persisted conversation facts/questions, Steam continuity, direct cybersecurity tone, existing-chat bootstrap, execution plans and bounded test-claim evaluation. See [JARVIS-CORE.md](JARVIS-CORE.md) for supported cases and limits.
 
 - Execution reliability: stable anti-loop keys, fourth-failure blocking, successful-repeat reset, real Windows PowerShell and npm execution, protected recursive search and checked Git results.
