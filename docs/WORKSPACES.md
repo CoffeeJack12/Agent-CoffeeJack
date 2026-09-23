@@ -36,7 +36,7 @@ Workspace ownership does not bypass role policy. Guests still cannot write freel
 
 ## Local profile switch
 
-Switching profiles (local owner-only) clears client chat/workspace UI state and issues a new session token. Remote clients cannot call profile switch to impersonate another user.
+Switching profiles (local owner-only) clears client chat/workspace UI state and issues a new session token. Remote clients cannot call profile switch to impersonate another user. Tunnel Host must remain the public hostname; Cloudflare markers on loopback are treated as remote (never local-owner bootstrap). See [CLOUDFLARE-SETUP.md](CLOUDFLARE-SETUP.md).
 
 ## Limits
 

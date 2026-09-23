@@ -5,7 +5,7 @@ The app remains a local-first Windows agent with one active task at a time, loca
 ## Completed in this upgrade
 
 - Multi-user profiles: database-backed sessions, owner/trusted/standard/guest roles, scoped chats/memory/preferences/activity/approvals, owner user management and local-only profile switching, audit events, and transactional legacy-data backfill. See [MULTI-USER.md](MULTI-USER.md).
-- Cloudflare identity mapping: verified Access JWT → `external_identities` → CoffeeJack user; pending unmapped remotes; no owner fallback; hardened session expiry/revocation. See [REMOTE-ACCESS.md](REMOTE-ACCESS.md).
+- Cloudflare identity mapping: verified Access JWT → `external_identities` → CoffeeJack user; pending unmapped remotes; no owner fallback; tunnel-aware trust boundary (loopback+CF markers ≠ local owner); hardened session expiry/revocation; remote readiness check (`npm.cmd run remote:check`). See [REMOTE-ACCESS.md](REMOTE-ACCESS.md) and [CLOUDFLARE-SETUP.md](CLOUDFLARE-SETUP.md).
 - Per-user workspaces: owner CoffeeJack path preserved; other users under `.local/workspaces/<id>/`; chat→workspace binding; tools/git/shell scoped with realpath confinement. See [WORKSPACES.md](WORKSPACES.md).
 - AI Provider Registry: Ollama + optional OpenAI/Anthropic/Google/OpenAI-compatible adapters, model capability catalog, smart Auto Model router with reason codes, health/cooldown, fallback chains, Remote AI Allowed/Ask/Never, per-user council/budget/`councilOtherModels` prefs, privacy sanitizer. Works with zero remote keys; `qwen3:8b` remains local fallback. See [AI-PROVIDERS.md](AI-PROVIDERS.md).
 - AI Council: **provider-native** multi-model consultation with automatic bounded **evidence Round 2** after meaningful tool verification (tests/sources/inspection). Research evidence prefers structured tool payloads (slim stored sources) over scraping chat text. Distinct providers/models, no fakes, Gaming suppresses, Jack sole tool executor, timeouts/partial failure, max 2 rounds. Tool evidence overrides council majority. See [AI-COUNCIL.md](AI-COUNCIL.md).
@@ -29,4 +29,4 @@ Search is bounded to 50 results, 10,000 visited entries and 1 MB text files. Pro
 
 The canonical Jack portrait was not present and has not been invented; the monogram is an intentional placeholder. No OCR, voice, or recurring background agent was added. Browser/desktop actions and arbitrary shell commands retain their existing approval requirements and practical limitations.
 
-Cloudflare provisioning and real remote end-to-end verification require account authorization/configuration. The application-side guard is tested locally; this is not a claim that a public tunnel is deployed.
+Cloudflare Tunnel/Access operator setup is documented in [CLOUDFLARE-SETUP.md](CLOUDFLARE-SETUP.md). Live tunnel verification requires account credentials and is not claimed by CI.

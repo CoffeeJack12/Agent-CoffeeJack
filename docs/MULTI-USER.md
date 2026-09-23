@@ -40,6 +40,12 @@ Each user has a private default workspace. The owner’s CoffeeJack repo path is
 
 User creation, profile changes, identity link/unlink, remote login/deny, workspace create/switch/deny, approval decisions and manual gaming changes are written to `audit_events`. Audit details redact likely secrets and message content.
 
+## Session token transport
+
+- **Local:** `X-CoffeeJack-Token` from `/api/status`, held in memory by the UI (not `localStorage`).
+- **Remote:** same header for compatibility, plus `Set-Cookie: coffeejack_session` (HttpOnly, Secure, SameSite=Lax).
+- Audit events redact token/secret fields. Do not log Authorization or cookie values.
+
 ## Current limits
 
 Profiles share the machine, model installation and the single active agent slot. Isolation is SQLite + workspace path policy, not OS multi-tenancy. There is no password login UI beyond Cloudflare Access for remote; local remains frictionless for the owner.

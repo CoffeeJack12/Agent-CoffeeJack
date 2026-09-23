@@ -26,7 +26,8 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/identity.mjs`: Cloudflare Access ↔ CoffeeJack user mapping (`external_identities`); pending unmapped remote users.
 - `server/workspaces.mjs`: per-user workspaces, memberships, chat binding, owner migration and path authorization helpers.
 - `server/permissions.mjs`: owner/trusted/standard/guest role policy and per-capability allow, deny or approval decisions.
-- `server/access.mjs`: optional Cloudflare Access JWT boundary; returns verified identity attributes or false. The listener stays on loopback.
+- `server/access.mjs`: optional Cloudflare Access JWT boundary; env validation diagnostics; returns verified identity attributes or false. The listener stays on loopback.
+- `server/trust.mjs`: local vs remote classification — tunnel markers on loopback never become local owner; X-Forwarded-* is not trusted for locality.
 - `server/router.mjs`: smart Auto Model selection via ProviderRegistry (with legacy Ollama-only path), reason codes, remote Ask approval flag and fallback model lists.
 - `server/providers/`: ProviderRegistry and adapters (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys only).
 - `server/council.mjs`: provider-native multi-model consultation (distinct participants, budgets, timeouts, partial failure, max 2 evidence rounds; Jack sole tool executor).

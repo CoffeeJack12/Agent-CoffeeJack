@@ -1,0 +1,16 @@
+# Example Cloudflare Tunnel config — DO NOT commit real credentials.
+# Copy to a private path outside the repo (or a gitignored file) and replace placeholders.
+#
+# cloudflared tunnel --config /secure/path/tunnel.yml run
+
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /secure/path/YOUR_TUNNEL_ID.json
+
+ingress:
+  # Only CoffeeJack HTTP — never Ollama (:11434)
+  - hostname: jack.example.com
+    service: http://127.0.0.1:3210
+    originRequest:
+      # Keep the public Host header so CoffeeJack remote mode activates.
+      noHostHeader: false
+  - service: http_status:404

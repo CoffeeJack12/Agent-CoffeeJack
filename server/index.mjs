@@ -7,6 +7,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { accessFromEnvironment } from "./access.mjs";
+import { classifyRequest, expectedOrigin } from "./trust.mjs";
+import { createRateLimiter, REMOTE_RATE } from "./rate-limit.mjs";
 import { Store } from "./store.mjs";
 import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
@@ -231,7 +233,16 @@ export async function createApp({
     return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
   };
   const sessionIdentity = (req) => {
-    const requestToken = req.headers["x-coffeejack-token"];
+    const headerToken = req.headers["x-coffeejack-token"];
+    const cookieMatch = /(?:^|;\s*)coffeejack_session=([^;]+)/.exec(
+      req.headers.cookie || "",
+    );
+    const requestToken =
+      typeof headerToken === "string" && headerToken
+        ? headerToken
+        : cookieMatch
+          ? decodeURIComponent(cookieMatch[1])
+          : undefined;
     const session = getSession(store, requestToken);
     if (!session) return undefined;
     touchSession(store, requestToken);
@@ -239,45 +250,110 @@ export async function createApp({
     if (!user) return undefined;
     return { token: requestToken, user, session };
   };
+  const remoteLimiter = createRateLimiter({ windowMs: 60_000, max: 40 });
+  const setSessionCookie = (res, sessionToken, { remote }) => {
+    if (!remote || !sessionToken) return;
+    res.setHeader(
+      "Set-Cookie",
+      `coffeejack_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
+    );
+  };
+  const clearSessionCookie = (res, { remote }) => {
+    if (!remote) return;
+    res.setHeader(
+      "Set-Cookie",
+      "coffeejack_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+    );
+  };
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
+    res.setHeader("X-Frame-Options", "DENY");
     res.setHeader(
       "Content-Security-Policy",
       "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'",
     );
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=()",
+    );
     const host = req.headers.host ?? "";
-    const localHost = /^(127\.0\.0\.1|localhost)(:\d+)?$/.test(host);
+    const trust = classifyRequest(req, {
+      accessHostname: access?.hostname || null,
+      accessConfigured: Boolean(access),
+    });
+    const isLocal = trust.mode === "local";
     let remoteIdentity = null;
-    if (!localHost) {
-      if (!access || host !== access.hostname)
+    if (!isLocal) {
+      if (!access)
+        return json(res, 403, {
+          error: "Remote authentication required",
+          code: "access_not_configured",
+        });
+      const hostName = host.split(":")[0].toLowerCase();
+      const accessHost = access.hostname.toLowerCase();
+      // Public hostname must match; loopback+CF markers allowed only as tunnel rewrite.
+      if (
+        trust.reason !== "cloudflare_markers_on_loopback" &&
+        hostName !== accessHost
+      )
         return json(res, 403, { error: "Invalid host" });
       const verified = await access.authorize(req);
       if (!verified) {
+        const limited = remoteLimiter.check(
+          req,
+          REMOTE_RATE.loginDenied.category,
+          REMOTE_RATE.loginDenied.max,
+        );
+        if (!limited.ok) {
+          res.setHeader(
+            "Retry-After",
+            String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+          );
+          return json(res, 429, { error: "Too many requests" });
+        }
         audit(store, {
           action: "remote_login_denied",
-          detail: { reason: "invalid_token", host },
+          detail: { reason: "invalid_token", host: host.slice(0, 120) },
         });
         return json(res, 403, { error: "Remote authentication required" });
       }
       remoteIdentity = verified;
     }
-    // Spoofed CF headers on local loopback are ignored — localHost wins.
-    const expectedOrigin = (localHost ? "http://" : "https://") + host;
+    // Spoofed CF email headers never authorize — only verified JWT claims.
+    const expected = expectedOrigin(req, {
+      mode: trust.mode,
+      accessHostname: access?.hostname,
+    });
     if (
-      (req.headers.origin && req.headers.origin !== expectedOrigin) ||
+      (req.headers.origin && req.headers.origin !== expected) ||
       req.headers["sec-fetch-site"] === "cross-site"
     )
       return json(res, 403, { error: "Cross-origin request denied" });
-    const url = new URL(req.url, `http://${host}`);
+    const url = new URL(req.url, `http://${host || "127.0.0.1"}`);
     const route = url.pathname;
+    if (route.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
     try {
       let identity = route.startsWith("/api/")
         ? sessionIdentity(req)
         : undefined;
       // Remote: Cloudflare-verified identity must map to the session user.
       // Never let a stolen local session token impersonate another CF subject.
-      if (!localHost && remoteIdentity && route.startsWith("/api/")) {
+      if (!isLocal && remoteIdentity && route.startsWith("/api/")) {
+        if (route === "/api/status" && !identity) {
+          const limited = remoteLimiter.check(
+            req,
+            REMOTE_RATE.statusSession.category,
+            REMOTE_RATE.statusSession.max,
+          );
+          if (!limited.ok) {
+            res.setHeader(
+              "Retry-After",
+              String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+            );
+            return json(res, 429, { error: "Too many requests" });
+          }
+        }
         const ownerEmails = (
           process.env.CF_ACCESS_OWNER_EMAIL ||
           process.env.CF_ACCESS_ALLOWED_EMAILS ||
@@ -296,7 +372,14 @@ export async function createApp({
               : null,
         });
         if (mapped.status === "pending") {
-          if (identity?.token) revokeSession(store, identity.token);
+          if (identity?.token) {
+            revokeSession(store, identity.token);
+            audit(store, {
+              userId: identity.user?.id,
+              action: "session_revoked",
+              detail: { reason: "unmapped_identity" },
+            });
+          }
           audit(store, {
             action: "remote_login_denied",
             detail: { reason: "unmapped_identity" },
@@ -310,7 +393,14 @@ export async function createApp({
           return json(res, 403, { error: "Remote authentication required" });
         }
         if (mapped.status !== "mapped" || !mapped.user) {
-          if (identity?.token) revokeSession(store, identity.token);
+          if (identity?.token) {
+            revokeSession(store, identity.token);
+            audit(store, {
+              userId: identity.user?.id,
+              action: "session_revoked",
+              detail: { reason: mapped.reason || "denied" },
+            });
+          }
           audit(store, {
             action: "remote_login_denied",
             detail: { reason: mapped.reason || "denied" },
@@ -318,7 +408,14 @@ export async function createApp({
           return json(res, 403, { error: "Remote authentication required" });
         }
         if (identity && identity.user.id !== mapped.user.id) {
-          if (identity.token) revokeSession(store, identity.token);
+          if (identity.token) {
+            revokeSession(store, identity.token);
+            audit(store, {
+              userId: identity.user.id,
+              action: "session_revoked",
+              detail: { reason: "identity_mismatch" },
+            });
+          }
           audit(store, {
             userId: identity.user.id,
             action: "remote_login_denied",
@@ -326,6 +423,12 @@ export async function createApp({
           });
           return json(res, 403, { error: "Remote authentication required" });
         }
+        // Role/status changes apply on every request via fresh getUser.
+        if (identity)
+          identity = {
+            ...identity,
+            user: getUser(store, mapped.user.id) || mapped.user,
+          };
         if (!identity && route === "/api/status") {
           const remoteSession = createSession(store, mapped.user.id, {
             source: "remote",
@@ -337,17 +440,17 @@ export async function createApp({
           });
           identity = {
             token: remoteSession.token,
-            user: mapped.user,
+            user: getUser(store, mapped.user.id),
             session: getSession(store, remoteSession.token),
           };
+          setSessionCookie(res, remoteSession.token, { remote: true });
         } else if (!identity) {
           return json(res, 403, { error: "Invalid session token" });
         }
       }
       if (route === "/api/status" && req.method === "GET") {
         if (!identity) {
-          if (!localHost) {
-            // Unreachable when CF configured: remote branch above handles it.
+          if (!isLocal) {
             return json(res, 403, { error: "Remote authentication required" });
           } else {
             const localSession = createSession(store, owner.id, {
@@ -406,6 +509,7 @@ export async function createApp({
           /* keep ollama models */
         }
         const identities = findIdentitiesForUser(store, user.id);
+        if (!isLocal) setSessionCookie(res, identity.token, { remote: true });
         return json(res, 200, {
           token: identity.token,
           user: {
@@ -414,7 +518,7 @@ export async function createApp({
             role: user.role,
             status: user.status,
           },
-          identitySource: localHost ? "local" : "cloudflare",
+          identitySource: isLocal ? "local" : "cloudflare",
           identities: identities.map((i) => ({
             provider: i.provider,
             email: i.normalized_email,
@@ -426,7 +530,10 @@ export async function createApp({
           modelError,
           settings: {
             ...settings(),
-            workspace: activeWs.root_path,
+            workspace:
+              user.role === "owner" || user.role === "trusted"
+                ? activeWs.root_path
+                : activeWs.name,
           },
           workspaces,
           activeWorkspace: {
@@ -521,7 +628,7 @@ export async function createApp({
         return json(res, 200, updated);
       }
       if (route === "/api/session/switch" && req.method === "POST") {
-        if (!localHost)
+        if (!isLocal)
           return json(res, 403, {
             error: "Profile switching is local-only",
           });
@@ -546,12 +653,34 @@ export async function createApp({
         });
       }
       if (route === "/api/session/logout" && req.method === "POST") {
-        if (identity?.token) revokeSession(store, identity.token);
+        if (identity?.token) {
+          revokeSession(store, identity.token);
+          audit(store, {
+            userId: identity.user?.id,
+            action: "session_revoked",
+            detail: { reason: "logout" },
+          });
+        }
+        clearSessionCookie(res, { remote: !isLocal });
         return json(res, 200, { ok: true });
       }
       if (route === "/api/identity/link" && req.method === "POST") {
         if (!canManageUsers(user))
           return json(res, 403, { error: "Identity linking denied" });
+        if (!isLocal) {
+          const limited = remoteLimiter.check(
+            req,
+            REMOTE_RATE.identityLink.category,
+            REMOTE_RATE.identityLink.max,
+          );
+          if (!limited.ok) {
+            res.setHeader(
+              "Retry-After",
+              String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+            );
+            return json(res, 429, { error: "Too many requests" });
+          }
+        }
         const b = await body(req);
         const linked = linkExternalIdentity(store, {
           provider: b.provider || IDENTITY_PROVIDER,
@@ -790,6 +919,20 @@ export async function createApp({
         return json(res, 200, { ok: true });
       }
       if (route.startsWith("/api/approve/") && req.method === "POST") {
+        if (!isLocal) {
+          const limited = remoteLimiter.check(
+            req,
+            REMOTE_RATE.approval.category,
+            REMOTE_RATE.approval.max,
+          );
+          if (!limited.ok) {
+            res.setHeader(
+              "Retry-After",
+              String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+            );
+            return json(res, 429, { error: "Too many requests" });
+          }
+        }
         const b = await body(req);
         const pending = approvals.get(route.split("/").pop());
         if (!pending || pending.userId !== user.id)

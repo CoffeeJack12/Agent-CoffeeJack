@@ -56,7 +56,7 @@ test("remote access is disabled by default and incomplete configuration fails cl
   assert.equal(accessFromEnvironment({}), null);
   assert.throws(
     () => accessFromEnvironment({ COFFEEJACK_REMOTE_HOST: "jack.example.com" }),
-    /requires/,
+    /incomplete|invalid|together/i,
   );
   assert.throws(() =>
     createAccessGuard({ ...config, teamDomain: "attacker.example" }),

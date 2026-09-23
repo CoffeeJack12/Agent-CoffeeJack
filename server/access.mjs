@@ -1,23 +1,91 @@
 import { createPublicKey, verify } from "node:crypto";
 
+function emailOk(email) {
+  return (
+    typeof email === "string" &&
+    /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  );
+}
+
+/**
+ * Validate Cloudflare Access env without returning secret values.
+ * @returns {{ ok: boolean, mode: 'disabled'|'ready'|'incomplete', issues: string[], summary: object }}
+ */
+export function validateAccessEnvironment(env = process.env) {
+  const host = env.COFFEEJACK_REMOTE_HOST?.trim() || "";
+  const team = env.CF_ACCESS_TEAM_DOMAIN?.trim() || "";
+  const aud = env.CF_ACCESS_AUD?.trim() || "";
+  const emailsRaw = env.CF_ACCESS_ALLOWED_EMAILS?.trim() || "";
+  const ownerEmail = env.CF_ACCESS_OWNER_EMAIL?.trim() || "";
+  const autoCreate = env.CF_ACCESS_AUTO_CREATE_ROLE?.trim() || "";
+  const present = [host, team, aud, emailsRaw].filter(Boolean).length;
+  const issues = [];
+  const summary = {
+    COFFEEJACK_REMOTE_HOST: host ? "set" : "missing",
+    CF_ACCESS_TEAM_DOMAIN: team ? "set" : "missing",
+    CF_ACCESS_AUD: aud ? "set" : "missing",
+    CF_ACCESS_ALLOWED_EMAILS: emailsRaw ? "set" : "missing",
+    CF_ACCESS_OWNER_EMAIL: ownerEmail ? "set" : "optional_missing",
+    CF_ACCESS_AUTO_CREATE_ROLE: autoCreate || "off",
+  };
+
+  if (present === 0) {
+    return { ok: true, mode: "disabled", issues: [], summary };
+  }
+  if (present < 4) {
+    issues.push(
+      "Incomplete Cloudflare Access config: set COFFEEJACK_REMOTE_HOST, CF_ACCESS_TEAM_DOMAIN, CF_ACCESS_AUD, and CF_ACCESS_ALLOWED_EMAILS together (or leave all unset for local-only).",
+    );
+  }
+  if (host) {
+    if (
+      !/^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(
+        host,
+      ) ||
+      host.endsWith(".localhost")
+    )
+      issues.push("COFFEEJACK_REMOTE_HOST must be a public lowercase hostname.");
+  }
+  if (team && !/^[a-z0-9-]+\.cloudflareaccess\.com$/.test(team))
+    issues.push(
+      "CF_ACCESS_TEAM_DOMAIN must look like team-name.cloudflareaccess.com.",
+    );
+  if (aud && !/^[a-f0-9]{64}$/.test(aud))
+    issues.push("CF_ACCESS_AUD must be the 64-character hex application audience.");
+  if (emailsRaw) {
+    const emails = emailsRaw.split(",").map((e) => e.trim()).filter(Boolean);
+    if (!emails.length || emails.some((e) => !emailOk(e)))
+      issues.push(
+        "CF_ACCESS_ALLOWED_EMAILS must be a comma-separated list of valid emails.",
+      );
+  }
+  if (ownerEmail && !emailOk(ownerEmail))
+    issues.push("CF_ACCESS_OWNER_EMAIL must be a valid email when set.");
+  if (autoCreate && autoCreate !== "standard")
+    issues.push('CF_ACCESS_AUTO_CREATE_ROLE must be unset or "standard".');
+
+  return {
+    ok: issues.length === 0,
+    mode: issues.length ? "incomplete" : "ready",
+    issues,
+    summary,
+  };
+}
+
 // Remote access is opt-in. Never trust a forwarded hostname or an unsigned identity header.
 export function accessFromEnvironment(env = process.env) {
-  const values = [
-    env.COFFEEJACK_REMOTE_HOST,
-    env.CF_ACCESS_TEAM_DOMAIN,
-    env.CF_ACCESS_AUD,
-    env.CF_ACCESS_ALLOWED_EMAILS,
-  ];
-  if (values.every((value) => !value)) return null;
-  if (values.some((value) => !value))
+  const check = validateAccessEnvironment(env);
+  if (check.mode === "disabled") return null;
+  if (!check.ok) {
     throw new Error(
-      "Remote access requires hostname, Access team domain, audience and allowed emails",
+      "Cloudflare Access configuration invalid:\n- " + check.issues.join("\n- "),
     );
+  }
   return createAccessGuard({
-    hostname: values[0],
-    teamDomain: values[1],
-    audience: values[2],
-    emails: values[3].split(","),
+    hostname: env.COFFEEJACK_REMOTE_HOST.trim(),
+    teamDomain: env.CF_ACCESS_TEAM_DOMAIN.trim(),
+    audience: env.CF_ACCESS_AUD.trim(),
+    emails: env.CF_ACCESS_ALLOWED_EMAILS.split(","),
   });
 }
 
@@ -43,7 +111,7 @@ export function createAccessGuard(
     emails.some(
       (email) =>
         typeof email !== "string" ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()),
+        !emailOk(email),
     )
   )
     throw new Error("Explicit allowed email identities are required");
@@ -76,6 +144,8 @@ export function createAccessGuard(
   }
   return {
     hostname,
+    issuer,
+    audience,
     async authorize(req) {
       try {
         const token = req.headers["cf-access-jwt-assertion"];
@@ -115,6 +185,7 @@ export function createAccessGuard(
           Buffer.from(parts[2], "base64url"),
         );
         if (!ok) return false;
+        // Unsigned email headers are never used — only verified JWT claims.
         return {
           email: claims.email.trim().toLowerCase(),
           subject: String(claims.sub || claims.email).trim(),

@@ -8,3 +8,9 @@ work/
 outputs/
 *.log
 .DS_Store
+.cloudflared/
+deploy/cloudflare/credentials.json
+deploy/cloudflare/*.json
+!deploy/cloudflare/*.example.*
+**/tunnel-token*
+**/*credentials*.json
