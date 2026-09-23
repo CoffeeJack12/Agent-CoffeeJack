@@ -15,6 +15,9 @@ export class Store {
       CREATE TABLE IF NOT EXISTS messages (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE, role TEXT NOT NULL, content TEXT NOT NULL, created TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS memories (id TEXT PRIMARY KEY, content TEXT NOT NULL, kind TEXT NOT NULL, created TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, chat_id TEXT, tool TEXT NOT NULL, detail TEXT NOT NULL, status TEXT NOT NULL, created TEXT NOT NULL);`);
+    this.db.exec(
+      "CREATE TABLE IF NOT EXISTS task_states (chat_id TEXT PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE, state TEXT NOT NULL, updated TEXT NOT NULL)",
+    );
     if (
       !this.db
         .prepare("PRAGMA table_info(memories)")
@@ -25,6 +28,17 @@ export class Store {
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS memories_project ON memories(project)",
     );
+  }
+  taskState(chatId) {
+    const row = this.db
+      .prepare("SELECT state FROM task_states WHERE chat_id=?")
+      .get(chatId);
+    return row ? JSON.parse(row.state) : null;
+  }
+  saveTaskState(chatId, state) {
+    this.db
+      .prepare("INSERT OR REPLACE INTO task_states VALUES(?,?,?)")
+      .run(chatId, JSON.stringify(state), new Date().toISOString());
   }
   relevantMemories(query, options) {
     return retrieveMemories(this.db, query, options);
