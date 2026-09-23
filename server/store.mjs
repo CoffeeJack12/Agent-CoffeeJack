@@ -4,6 +4,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 import { projectKey, validateMemory, retrieveMemories } from "./memory.mjs";
+import { scrubStoredCapabilityClaims } from "./capabilities.mjs";
 
 export class Store {
   constructor(directory) {
@@ -29,6 +30,7 @@ export class Store {
     this.db.exec(
       "CREATE INDEX IF NOT EXISTS memories_project ON memories(project)",
     );
+    scrubStoredCapabilityClaims(this);
   }
   profilePreferences(profileId) {
     const row = this.db.prepare("SELECT value FROM profile_preferences WHERE profile_id=?").get(profileId);

@@ -425,6 +425,7 @@ export async function createApp({
             model: routing.model,
             profile: routing.profile,
             capabilities: routing.capabilities,
+            gaming,
             signal: controller.signal,
             emit,
           });

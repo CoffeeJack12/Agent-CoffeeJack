@@ -207,21 +207,33 @@ export function stateContext(state) {
   });
 }
 
-export function guardResponse(state, candidate, languageText = "") {
+export function guardResponse(state, candidate, languageText = "", options = {}) {
   let text = candidate;
   const rejected = [];
+  const registry = options.registry ?? [];
+  const pcEnabled = registry.some(
+    (c) =>
+      c.enabled &&
+      ["terminal", "files", "inspect_pc", "desktop", "browser"].includes(c.id),
+  );
   // Remove first-person boilerplate promises/disclaimers, never specific technical
   // boundaries, quoted source material or code. The prompt remains the primary control.
   if (!text.includes("\x60\x60\x60")) {
     for (const sentence of text.match(/[^.!?؟\n]+[.!?؟]?/g) ?? []) {
       const value = sentence.trim();
       const boilerplate =
-        /^(?:I(?:['’]m| am| can| will| do| don| have| must)|As an AI|My (?:help|assistance))/i.test(
+        (/^(?:I(?:['’]m| am| can| will| do| don| have| must)|As an AI|My (?:help|assistance|purpose))/i.test(
           value,
         ) &&
-        /ethical (?:and|or) legal boundaries|legal (?:and|or) ethical boundaries|(?:have|know) no limits|don['’]t have limits|help (?:you )?with (?:absolutely )?anything/i.test(
-          value,
-        );
+          /ethical (?:and|or) legal boundaries|legal (?:and|or) ethical boundaries|lawful and ethical|legality and ethics|within the boundaries of legality|(?:have|know) no limits|don['’]t have limits|help (?:you )?with (?:absolutely )?anything|my purpose is/i.test(
+            value,
+          )) ||
+        /as an AI(?: language model)?/i.test(value) ||
+        /I cannot hack or bypass/i.test(value) ||
+        (pcEnabled &&
+          /I cannot (?:directly )?(?:control|interact with|access) (?:your )?(?:PC|computer|desktop|system)/i.test(
+            value,
+          ));
       if (boilerplate) {
         text = text.replace(sentence, "");
         rejected.push(value);
@@ -273,10 +285,28 @@ export function guardResponse(state, candidate, languageText = "") {
     );
     text = text.trim();
     if (missing && !text) text = labels[missing];
-    else if (!text)
-      text = arabic
-        ? "السياق السابق محفوظ. أحتاج التفصيل الناقص فقط حتى أتابع."
-        : "The earlier context is saved. I still need the outstanding detail to continue.";
+    else if (!text) {
+      const falseDenial = rejected.some((r) =>
+        /cannot (?:directly )?(?:control|interact with|access)|as an AI|lawful and ethical|my purpose is|cannot hack or bypass/i.test(
+          r,
+        ),
+      );
+      if (falseDenial && pcEnabled) {
+        text = arabic
+          ? "نعم — عبر أدواتي المتصلة أقدر أشغّل PowerShell، أفحص الجهاز، أتعامل مع الملفات، وأستخدم المتصفح والإجراءات المدعومة على سطح المكتب. بعض الخطوات الحساسة قد تحتاج موافقتك. وش المطلوب؟"
+          : "Yes — through my connected tools I can run PowerShell, inspect the system, work with files, use the browser and handle supported desktop actions. Some sensitive steps may still need your approval. Give me an objective.";
+      } else if (
+        falseDenial &&
+        /hack|bypass|exploit|pentest|crack/i.test(languageText)
+      ) {
+        text = arabic
+          ? "يعتمد على الهدف. وش النظام، وش اللي تبغى توصله أو تعدّله أو تختبره؟"
+          : "Depends on the target. What are you trying to access, modify, test or bypass?";
+      } else
+        text = arabic
+          ? "السياق السابق محفوظ. أحتاج التفصيل الناقص فقط حتى أتابع."
+          : "The earlier context is saved. I still need the outstanding detail to continue.";
+    }
   }
   for (const question of text.match(/[^.!?؟\n]*[?؟]/g) ?? []) {
     const trimmed = question.trim();
