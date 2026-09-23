@@ -363,6 +363,83 @@ function showApproval(event) {
       }
     };
 }
+function renderMemoryAskCard(proposal) {
+  const card = document.createElement("div");
+  card.className = "memory-ask-card";
+  card.dataset.proposalId = proposal.id;
+  const body = document.createElement("div");
+  body.className = "memory-ask-body";
+  body.innerHTML = `<p class="memory-ask-label">${escape(tr("memory.ask.title"))}</p><p class="memory-ask-content">${escape(proposal.content)}</p>`;
+  const editor = document.createElement("textarea");
+  editor.className = "memory-ask-edit hidden";
+  editor.rows = 3;
+  editor.value = proposal.content;
+  const actions = document.createElement("div");
+  actions.className = "memory-ask-actions";
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "primary";
+  save.textContent = tr("memory.ask.save");
+  const discard = document.createElement("button");
+  discard.type = "button";
+  discard.className = "ghost";
+  discard.textContent = tr("memory.ask.discard");
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.className = "ghost";
+  edit.textContent = tr("memory.ask.edit");
+  const setBusy = (busy) => {
+    save.disabled = busy;
+    discard.disabled = busy;
+    edit.disabled = busy;
+  };
+  const finish = (message) => {
+    card.classList.add("resolved");
+    actions.remove();
+    editor.remove();
+    body.querySelector(".memory-ask-content").textContent = message;
+  };
+  save.onclick = async () => {
+    setBusy(true);
+    try {
+      const editing = !editor.classList.contains("hidden");
+      await api("memory-proposals/" + proposal.id, {
+        method: "POST",
+        body: editing
+          ? { action: "edit", content: editor.value }
+          : { action: "save" },
+      });
+      finish(tr("memory.ask.saved"));
+      if (state.view === "memory") loadMemories().catch(report);
+      refreshStatus().catch(report);
+    } catch (error) {
+      report(error);
+      setBusy(false);
+    }
+  };
+  discard.onclick = async () => {
+    setBusy(true);
+    try {
+      await api("memory-proposals/" + proposal.id, {
+        method: "POST",
+        body: { action: "discard" },
+      });
+      finish(tr("memory.ask.discarded"));
+    } catch (error) {
+      report(error);
+      setBusy(false);
+    }
+  };
+  edit.onclick = () => {
+    editor.classList.remove("hidden");
+    body.querySelector(".memory-ask-content")?.classList.add("hidden");
+    editor.focus();
+    edit.classList.add("hidden");
+  };
+  actions.append(save, discard, edit);
+  card.append(body, editor, actions);
+  return card;
+}
 $("#chatForm").onsubmit = async (event) => {
   event.preventDefault();
   const draft = $("#prompt").value;
@@ -493,6 +570,13 @@ $("#chatForm").onsubmit = async (event) => {
                 el.append(img);
               }
             }
+          }
+        }
+        if (item.type === "memory") {
+          thinking.remove();
+          for (const proposal of item.pending ?? []) {
+            if (!proposal?.id) continue;
+            answer.append(renderMemoryAskCard(proposal));
           }
         }
         if (item.type === "approval") showApproval(item);

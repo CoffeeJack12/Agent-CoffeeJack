@@ -30,6 +30,7 @@ export async function runAgent({
   signal,
   emit,
   requestedMode,
+  memoryProposals,
 }) {
   scrubStoredCapabilityClaims(store);
   const basePreferences = getPreferences(store);
@@ -58,11 +59,18 @@ export async function runAgent({
     preferences.customAddress = memoryResult.preferences.customAddress;
     preferences.name = memoryResult.preferences.name;
   }
-  if (memoryResult.saved.length || memoryResult.pending.length) {
+  const pending =
+    memoryResult.pending.length && memoryProposals
+      ? memoryProposals.enqueue(memoryResult.pending, chatId)
+      : memoryResult.pending.map((item) => ({
+          ...item,
+          id: null,
+        }));
+  if (memoryResult.saved.length || pending.length) {
     emit({
       type: "memory",
       saved: memoryResult.saved,
-      pending: memoryResult.pending,
+      pending,
     });
   }
   const policy = capabilityPolicy(preferences, text);

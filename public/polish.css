@@ -1506,3 +1506,55 @@ body[data-theme="light"] {
     clip-path: inset(50%);
   }
 }
+
+/* Memory Ask confirmation cards (non-blocking) */
+.memory-ask-card {
+  margin: 0.75rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(180, 200, 170, 0.22);
+  border-radius: 12px;
+  background: rgba(18, 24, 20, 0.92);
+  color: #e8efe4;
+  max-width: 36rem;
+}
+.memory-ask-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted, #9aa79d);
+}
+.memory-ask-content {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+.memory-ask-edit {
+  width: 100%;
+  margin: 0.5rem 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid rgba(180, 200, 170, 0.25);
+  background: #0f1411;
+  color: #e8efe4;
+  resize: vertical;
+}
+.memory-ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.75rem;
+}
+.memory-ask-card.resolved {
+  opacity: 0.78;
+  border-style: dashed;
+}
+[data-theme="light"] .memory-ask-card {
+  background: #f4f6f2;
+  color: #1c241e;
+  border-color: rgba(40, 60, 45, 0.18);
+}
+[data-theme="light"] .memory-ask-edit {
+  background: #fff;
+  color: #1c241e;
+}

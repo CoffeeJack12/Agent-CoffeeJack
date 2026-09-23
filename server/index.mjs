@@ -1,6 +1,6 @@
 import { getPreferences, savePreferences, LANGUAGES, ASSISTANT_LANGUAGES, APP_LANGUAGES, MODES, PACKS, PREFERENCE_OPTIONS, MEMORY_BEHAVIORS } from "./preferences.mjs";
 import { resolveEffectiveMode } from "./auto-mode.mjs";
-import { memoryCategory } from "./auto-memory.mjs";
+import { memoryCategory, createMemoryProposalStore } from "./auto-memory.mjs";
 import http from "node:http";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -29,6 +29,7 @@ export async function createApp({
   const token = randomBytes(32).toString("hex");
   const ollama = providedOllama ?? new Ollama(process.env.OLLAMA_URL);
   const approvals = new Map();
+  const memoryProposals = createMemoryProposalStore(store);
   let active = null,
     gaming = false,
     autoGaming = false,
@@ -226,6 +227,19 @@ export async function createApp({
       if (route.startsWith("/api/memories/") && req.method === "DELETE") {
         store.forget(route.split("/").pop());
         return json(res, 200, { ok: true });
+      }
+      if (route.startsWith("/api/memory-proposals/") && req.method === "POST") {
+        const id = route.split("/").pop();
+        const b = await body(req);
+        if (!["save", "discard", "edit"].includes(b.action))
+          throw new Error("Invalid memory proposal action");
+        if (
+          b.action === "edit" &&
+          (typeof b.content !== "string" || !b.content.trim())
+        )
+          throw new Error("Edited memory must contain text");
+        const result = memoryProposals.resolve(id, b.action, b.content);
+        return json(res, 200, result);
       }
       if (route === "/api/events" && req.method === "GET")
         return json(res, 200, store.events());
@@ -462,6 +476,7 @@ export async function createApp({
             signal: controller.signal,
             emit,
             requestedMode: modeInfo.requestedMode,
+            memoryProposals,
           });
         } catch (e) {
           emit({
@@ -528,6 +543,7 @@ export async function createApp({
     server,
     store,
     token,
+    memoryProposals,
     close: async () => {
       clearInterval(timer);
       if (active) {

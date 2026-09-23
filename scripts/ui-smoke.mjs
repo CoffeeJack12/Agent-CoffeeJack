@@ -211,6 +211,49 @@ try {
     await page.locator("#jackModeHost .cj-dropdown").evaluate((element) => element.getValue()),
     "empathy",
   );
+
+  // Memory Ask UX: card appears without blocking the reply; Save persists.
+  await page.locator('[data-view="settings"]').click();
+  await page
+    .locator('#preferenceForm .cj-dropdown:has(input[name="memoryBehavior"])')
+    .waitFor({ state: "visible" });
+  await page.evaluate(() => {
+    document
+      .querySelector('#preferenceForm .cj-dropdown:has(input[name="memoryBehavior"])')
+      ?.scrollIntoView({ block: "center" });
+  });
+  await chooseDropdown(preferenceDropdown("memoryBehavior"), "ask");
+  await page.locator("#preferenceForm .primary").click();
+  await page.waitForFunction(() =>
+    /Saved|تم الحفظ/.test(document.querySelector("#preferenceMessage")?.textContent || ""),
+  );
+  const prefCheck = await page.evaluate(async () => {
+    const r = await fetch("/api/preferences");
+    return (await r.json()).preferences.memoryBehavior;
+  });
+  assert.equal(prefCheck, "ask");
+  await page.locator('[data-view="chat"]').click();
+  await page.locator("#newChat").click();
+  await prompt.fill("From now on call me Lord");
+  await prompt.press("Enter");
+  await page.locator(".memory-ask-card").waitFor({ state: "visible", timeout: 15000 });
+  assert.match(
+    await page.locator(".memory-ask-content").first().innerText(),
+    /Lord/i,
+  );
+  await page.locator(".message.assistant .message-content").waitFor();
+  await page.locator("#stop").waitFor({ state: "hidden" });
+  assert.ok((await page.locator(".memory-ask-card").count()) >= 1);
+  await page.locator(".memory-ask-actions .primary").first().click();
+  await page.waitForFunction(() =>
+    document.querySelector(".memory-ask-card.resolved"),
+  );
+  const afterSave = await page.evaluate(async () => {
+    const r = await fetch("/api/preferences");
+    return (await r.json()).preferences;
+  });
+  assert.equal(afterSave.address, "lord");
+
   await page.locator('[data-view="chat"]').click();
   await page.locator("#gaming").click();
   await page.waitForFunction(() =>

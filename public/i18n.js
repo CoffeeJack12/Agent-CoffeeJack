@@ -127,6 +127,12 @@ export const dictionaries = {
     "memory.kind.preference": "Preference",
     "memory.kind.lesson": "Lesson",
     "memory.kind.note": "Note",
+    "memory.ask.title": "Remember this?",
+    "memory.ask.save": "Save",
+    "memory.ask.discard": "Don't save",
+    "memory.ask.edit": "Edit",
+    "memory.ask.saved": "Saved to memory.",
+    "memory.ask.discarded": "Not saved.",
 
     // Activity
     "activity.eyebrow": "EVERY STEP, IN THE OPEN",
@@ -446,6 +452,12 @@ export const dictionaries = {
     "memory.kind.preference": "تفضيل",
     "memory.kind.lesson": "درس",
     "memory.kind.note": "ملاحظة",
+    "memory.ask.title": "تحفظ هذا؟",
+    "memory.ask.save": "حفظ",
+    "memory.ask.discard": "لا تحفظ",
+    "memory.ask.edit": "تعديل",
+    "memory.ask.saved": "تم الحفظ في الذاكرة.",
+    "memory.ask.discarded": "لم يُحفظ.",
 
     "activity.eyebrow": "EVERY STEP, IN THE OPEN",
     "activity.title": "تعرف إيش صار، بالضبط.",

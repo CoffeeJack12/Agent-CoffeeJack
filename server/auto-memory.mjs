@@ -1,15 +1,19 @@
+import { randomUUID } from "node:crypto";
 import { validateMemory } from "./memory.mjs";
-import { savePreferences, addressTitle } from "./preferences.mjs";
+import { savePreferences } from "./preferences.mjs";
 
 const SECRET =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{16,}|AKIA[A-Z0-9]{16})|\bBearer\s+[\w.~-]{12,}|\b(?:password|passwd|api[_ -]?key|access[_ -]?token|secret)\s*[:=]\s*\S+/i;
+
+const EPHEMERAL =
+  /\b(?:acceptance.?test|live.?acceptance|temporary (?:fixture|project|workspace)|tmp[-_ ]?project|isolated temp(?:orary)?)\b/i;
 
 const RULES = [
   {
     type: "preference",
     setting: { address: "lord" },
     re: /\b(?:call me|address me as|from now on(?: call me)?)\s+lord\b|نادني\s*لورد|اسمي\s*لورد/i,
-    content: (m) => `Address preference: Lord`,
+    content: () => `Address preference: Lord`,
     confidence: 0.95,
   },
   {
@@ -83,8 +87,9 @@ const RULES = [
 
 export function extractMemories(text = "") {
   if (SECRET.test(text)) return [];
-  if (typeof text !== "string" || text.length < 4 || text.length > 2000) return [];
-  // Skip pure one-shot commands.
+  if (EPHEMERAL.test(text)) return [];
+  if (typeof text !== "string" || text.length < 4 || text.length > 2000)
+    return [];
   if (
     /^(inspect|check|search|open|run|fix|build|git|npm)\b/i.test(text.trim()) &&
     text.length < 80
@@ -95,11 +100,16 @@ export function extractMemories(text = "") {
     const match = text.match(rule.re);
     if (!match) continue;
     const content = rule.content(match);
-    if (!content || SECRET.test(content)) continue;
+    if (!content || SECRET.test(content) || EPHEMERAL.test(content)) continue;
     found.push({
       content,
       type: rule.type,
-      kind: rule.type === "preference" ? "preference" : rule.type === "project" ? "note" : "note",
+      kind:
+        rule.type === "preference"
+          ? "preference"
+          : rule.type === "project"
+            ? "note"
+            : "note",
       setting: rule.setting || null,
       confidence: rule.confidence,
     });
@@ -107,11 +117,11 @@ export function extractMemories(text = "") {
   return found.slice(0, 4);
 }
 
-export function applyAutomaticMemory(store, text, {
-  chatId = null,
-  behavior = "auto",
-  preferences,
-} = {}) {
+export function applyAutomaticMemory(
+  store,
+  text,
+  { chatId = null, behavior = "auto", preferences } = {},
+) {
   if (behavior === "off") return { saved: [], pending: [], preferences };
   const extracted = extractMemories(text);
   const saved = [];
@@ -123,11 +133,9 @@ export function applyAutomaticMemory(store, text, {
       continue;
     }
     try {
-      const id = upsertMemory(store, item, chatId);
-      saved.push({ ...item, id });
-      if (item.setting) {
-        nextPrefs = savePreferences(store, item.setting);
-      }
+      const committed = commitMemoryItem(store, item, chatId);
+      saved.push({ ...item, id: committed.id });
+      if (committed.preferences) nextPrefs = committed.preferences;
     } catch {
       /* secrets / validation */
     }
@@ -135,31 +143,115 @@ export function applyAutomaticMemory(store, text, {
   return { saved, pending, preferences: nextPrefs };
 }
 
-function upsertMemory(store, item, chatId) {
+/** Persist one durable memory (+ optional preference sync). */
+export function commitMemoryItem(store, item, chatId = null) {
+  const content =
+    typeof item.content === "string" ? item.content.trim() : "";
+  if (!content) throw new Error("Memory is empty");
+  if (SECRET.test(content)) throw new Error("Credentials cannot be stored");
   const kind = ["preference", "lesson", "note"].includes(item.kind)
     ? item.kind
     : "note";
-  validateMemory(item.content, kind);
+  validateMemory(content, kind);
   const similar = store
     .memories("")
     .filter((m) => m.kind === kind)
-    .find((m) => similarText(m.content, item.content));
+    .find((m) => similarText(m.content, content));
+  let id;
   if (similar) {
-    if (store.updateMemory) {
-      store.updateMemory(similar.id, {
-        content: item.content,
-        chatId,
-        confidence: item.confidence,
-      });
-      return similar.id;
-    }
-    return similar.id;
+    store.updateMemory?.(similar.id, {
+      content,
+      chatId,
+      confidence: item.confidence,
+      category: item.type,
+    });
+    id = similar.id;
+  } else {
+    id = store.remember(content, kind, null, {
+      chatId,
+      confidence: item.confidence,
+      category: item.type,
+    });
   }
-  return store.remember(item.content, kind, null, {
-    chatId,
-    confidence: item.confidence,
-    category: item.type,
-  });
+  let preferences = null;
+  if (item.setting) preferences = savePreferences(store, item.setting);
+  return { id, preferences };
+}
+
+/**
+ * In-memory Ask proposals. Does not block the agent reply.
+ * @returns {{
+ *   enqueue: (items: object[], chatId: string|null) => object[],
+ *   resolve: (id: string, action: 'save'|'discard'|'edit', content?: string) => object,
+ *   get: (id: string) => object|undefined,
+ *   size: () => number,
+ * }}
+ */
+export function createMemoryProposalStore(store) {
+  const proposals = new Map();
+  return {
+    enqueue(items, chatId = null) {
+      const out = [];
+      for (const item of items) {
+        const id = randomUUID();
+        proposals.set(id, {
+          ...item,
+          id,
+          chatId,
+          createdAt: Date.now(),
+        });
+        out.push({
+          id,
+          content: item.content,
+          type: item.type,
+          kind: item.kind,
+          confidence: item.confidence,
+        });
+      }
+      return out;
+    },
+    get(id) {
+      return proposals.get(id);
+    },
+    size() {
+      return proposals.size;
+    },
+    resolve(id, action, content) {
+      const proposal = proposals.get(id);
+      if (!proposal) throw new Error("Memory proposal expired");
+      if (action === "discard") {
+        proposals.delete(id);
+        return { ok: true, action: "discard" };
+      }
+      if (action === "edit" || action === "save") {
+        const nextContent =
+          action === "edit" && typeof content === "string"
+            ? content.trim()
+            : proposal.content;
+        if (!nextContent) throw new Error("Memory is empty");
+        if (SECRET.test(nextContent))
+          throw new Error("Credentials cannot be stored");
+        const item = {
+          ...proposal,
+          content: nextContent,
+          setting:
+            action === "edit" && nextContent !== proposal.content
+              ? null
+              : proposal.setting,
+        };
+        const committed = commitMemoryItem(store, item, proposal.chatId);
+        proposals.delete(id);
+        return {
+          ok: true,
+          action: action === "edit" ? "edit" : "save",
+          id: committed.id,
+          content: nextContent,
+          preferences: committed.preferences,
+        };
+      }
+      throw new Error("Invalid memory proposal action");
+    },
+  };
 }
 
 function similarText(a, b) {
@@ -187,7 +279,11 @@ export function memoryCategory(kind, content = "") {
   if (kind === "lesson") return "Lessons";
   if (/^Uses |Windows|environment/i.test(content)) return "Environment";
   if (/^Project:/i.test(content)) return "Projects";
-  if (/^Address preference|^App language|^Assistant language|Prefers /i.test(content))
+  if (
+    /^Address preference|^App language|^Assistant language|Prefers /i.test(
+      content,
+    )
+  )
     return "Preferences";
   return "About Me";
 }
