@@ -351,6 +351,11 @@
             <button class="primary" data-i18n="users.create">Create user</button>
           </form>
         </section>
+        <section id="providersSection" class="setting-card">
+          <h3 data-i18n="providers.title">AI Providers</h3>
+          <p data-i18n="providers.intro">Local Ollama always works. Remote providers use environment API keys — never stored in chat or SQLite.</p>
+          <div id="providersList" class="card-list"></div>
+        </section>
         <div class="setting-card"><h3>Branding / الهوية</h3><p>Replace approved assets in <code>public/jack/avatar.png</code>, <code>icon.png</code>, or <code>logo.png</code>. A J monogram appears until then.</p><p>Voice is not installed. Startup remains controlled by your CoffeeJack launcher.</p></div>
         <form id="settingsForm" class="settings-grid">
           <div class="setting-card">

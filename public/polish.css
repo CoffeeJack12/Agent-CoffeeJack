@@ -1558,3 +1558,24 @@ body[data-theme="light"] {
   background: #fff;
   color: #1c241e;
 }
+.provider-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line, #333) 80%, transparent);
+  font-size: 0.92rem;
+}
+.provider-row:last-child {
+  border-bottom: 0;
+}
+.exec-meta {
+  font-size: 0.78rem;
+  opacity: 0.72;
+  margin: 4px 0 8px;
+  direction: ltr;
+  text-align: start;
+}
+.council-step summary {
+  font-weight: 600;
+}

@@ -128,10 +128,32 @@ try {
     memoryBehavior: "off",
     language: "en",
     appLanguage: "en",
+    councilMode: "auto",
+    remoteAi: "allowed",
+    councilMaxModels: "2",
+    remoteBudget: "conservative",
   });
   await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   const port = app.server.address().port;
   const token = app.token;
+
+  // Providers status (no keys required)
+  try {
+    const providersRes = await fetch(`http://127.0.0.1:${port}/api/providers`, {
+      headers: { "X-CoffeeJack-Token": token },
+    });
+    assert.equal(providersRes.status, 200);
+    const providersBody = await providersRes.json();
+    assert.ok(providersBody.providers.some((p) => p.id === "ollama"));
+    assert.ok(providersBody.providers.some((p) => p.id === "openai"));
+    const openai = providersBody.providers.find((p) => p.id === "openai");
+    assert.ok(
+      openai.status === "not_configured" || openai.status === "unavailable",
+    );
+    pass("Providers API lists Ollama + unconfigured remotes");
+  } catch (error) {
+    fail("Providers API", error.message || error);
+  }
 
   // CapabilityRegistry sanity
   const registry = buildCapabilityRegistry({
@@ -153,7 +175,73 @@ try {
   );
   pass("Memory skips acceptance-test noise");
 
-  // A — AUTO RESEARCH
+  // A — AUTO SIMPLE (qwen, no council, no tools)
+  try {
+    const events = await streamChat(port, token, {
+      text: "hello Jack",
+      requestedMode: "auto",
+      requestedModel: "auto",
+      mode: "auto",
+    });
+    const routing = events.find((e) => e.type === "routing");
+    assert.match(routing?.model || "", /qwen3:8b/);
+    assert.equal(routing?.provider || "ollama", "ollama");
+    assert.ok(
+      !routing?.reasonCode ||
+        ["local_fast", "gaming_fallback"].includes(routing.reasonCode),
+    );
+    const council = events.find((e) => e.type === "council");
+    assert.ok(council, "council event expected");
+    assert.equal(council.status, "skipped");
+    assert.match(String(council.detail || council.reason || ""), /1 model|skipped|one_model|not_warranted|simple/i);
+    const tools = events.filter((e) => e.type === "tool");
+    assert.equal(tools.length, 0, "simple hello should not use tools");
+    pass("A AUTO SIMPLE", `model=${routing.model} council=${council.detail}`);
+  } catch (error) {
+    fail("A AUTO SIMPLE", error.message || error);
+  }
+
+  // D — Council with one model must not fake participants
+  try {
+    savePreferences(app.store, { councilMode: "on" });
+    const events = await streamChat(port, token, {
+      text: "ask the council to compare architecture approaches carefully",
+      requestedMode: "auto",
+      requestedModel: "auto",
+    });
+    const council = events.find((e) => e.type === "council");
+    assert.ok(council);
+    assert.equal(council.status, "skipped");
+    assert.match(
+      String(council.detail || ""),
+      /1 model available|consultation skipped|one_model/i,
+    );
+    const reply = transcript(events);
+    assert.doesNotMatch(reply, /\bClaude says\b|\bGPT says\b/i);
+    pass("D COUNCIL ONE MODEL", council.detail);
+    savePreferences(app.store, { councilMode: "auto" });
+  } catch (error) {
+    fail("D COUNCIL ONE MODEL", error.message || error);
+  }
+
+  // E — Remote Never never selects remote provider
+  try {
+    savePreferences(app.store, { remoteAi: "never" });
+    const events = await streamChat(port, token, {
+      text: "hello",
+      requestedMode: "auto",
+      requestedModel: "auto",
+    });
+    const routing = events.find((e) => e.type === "routing");
+    assert.equal(routing?.provider || "ollama", "ollama");
+    assert.match(routing?.model || "", /qwen3:8b/);
+    pass("E REMOTE NEVER", `provider=${routing.provider}`);
+    savePreferences(app.store, { remoteAi: "allowed" });
+  } catch (error) {
+    fail("E REMOTE NEVER", error.message || error);
+  }
+
+  // C — AUTO RESEARCH
   try {
     const mode = resolveEffectiveMode({
       requestedMode: "auto",
@@ -194,12 +282,12 @@ try {
     );
     assert.match(reply, /https?:\/\//i);
     pass(
-      "A AUTO RESEARCH",
+      "C AUTO RESEARCH",
       `model=${routing.model} tools=${researchTools.length} chars=${reply.length}`,
     );
     console.log("--- research reply preview ---\n" + reply.slice(0, 900) + "\n---");
   } catch (error) {
-    fail("A AUTO RESEARCH", error.message || error);
+    fail("C AUTO RESEARCH", error.message || error);
   }
 
   // B — AUTO DEVELOPER on isolated fixture (not CoffeeJack)
@@ -231,6 +319,7 @@ try {
     });
     const routing = events.find((e) => e.type === "routing");
     assert.match(routing?.model || "", /qwen3:8b/);
+    assert.ok(routing?.provider === "ollama" || !routing?.provider);
     const toolsUsed = [
       ...new Set(
         events.filter((e) => e.type === "tool").map((e) => e.name),
@@ -261,14 +350,32 @@ try {
     assert.doesNotMatch(reply, /cannot control|as an AI I cannot/i);
     pass(
       "B AUTO DEVELOPER",
-      `tools=${toolsUsed.join(",")} replyChars=${reply.length}`,
+      `tools=${toolsUsed.join(",")} replyChars=${reply.length} reason=${routing?.reasonCode || ""}`,
     );
     console.log("--- developer reply preview ---\n" + reply.slice(0, 900) + "\n---");
   } catch (error) {
     fail("B AUTO DEVELOPER", error.message || error);
   }
 
-  // Gaming Mode unload
+  // F — provider failure fallback (unit-level against live registry)
+  try {
+    const { routeModel } = await import("../server/router.mjs");
+    const route = await routeModel({
+      ollama: app.ollama,
+      registry: app.registry,
+      settings: { model: "qwen3:8b" },
+      text: "hello",
+      previousFailures: ["missing-remote:gpt"],
+      preferences: { remoteAi: "never" },
+    });
+    assert.match(route.model, /qwen3:8b/);
+    assert.equal(route.provider, "ollama");
+    pass("F PROVIDER FAILURE FALLBACK", route.reasonCode);
+  } catch (error) {
+    fail("F PROVIDER FAILURE FALLBACK", error.message || error);
+  }
+
+  // G — Gaming Mode unload + council suppressed / chat blocked
   try {
     const gaming = await fetch(`http://127.0.0.1:${port}/api/gaming`, {
       method: "POST",
@@ -299,15 +406,20 @@ try {
       },
       body: JSON.stringify({ enabled: false }),
     });
-    pass("Gaming Mode unloads and blocks chat", JSON.stringify(body.unloaded));
+    pass("G GAMING MODE", JSON.stringify(body.unloaded));
   } catch (error) {
-    fail("Gaming Mode", error.message || error);
+    fail("G GAMING MODE", error.message || error);
   }
 
-  // No temporary acceptance noise saved
+  // No temporary acceptance noise saved (verified coding lessons from the fixture are allowed)
   assert.equal(
-    app.store.memories().filter((m) => /acceptance|temporary fixture/i.test(m.content))
-      .length,
+    app.store
+      .memories()
+      .filter(
+        (m) =>
+          m.kind !== "lesson" &&
+          /acceptance|temporary fixture/i.test(m.content),
+      ).length,
     0,
   );
   pass("No acceptance-test memories stored");

@@ -4,9 +4,11 @@ CoffeeJack is a loopback-bound Node 24 application, with no frontend build step.
 
 ```text
 Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
-                                              ├─ Ollama models
-                                              ├─ SQLite memory/history/events
-                                              └─ Tool router
+                                              ├─ ProviderRegistry (Ollama + optional remote)
+                                              ├─ Smart Auto Model router + fallbacks
+                                              ├─ Optional AI Council (text proposals)
+                                              ├─ SQLite memory/history/events/lessons
+                                              └─ Tool router (single executor)
                                                  ├─ confined file tools
                                                  ├─ document readers
                                                  ├─ PowerShell / Git / package manager
@@ -23,7 +25,11 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions and audit events.
 - `server/permissions.mjs`: owner/trusted/standard/guest role policy and per-capability allow, deny or approval decisions.
 - `server/access.mjs`: optional Cloudflare Access JWT boundary; disabled without full configuration. The listener stays on loopback.
-- `server/router.mjs`: deterministic general/coding/vision selection with installed-model and capability checks.
+- `server/router.mjs`: smart Auto Model selection via ProviderRegistry (with legacy Ollama-only path), reason codes, remote Ask approval flag and fallback model lists.
+- `server/providers/`: ProviderRegistry and adapters (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys only).
+- `server/council.mjs`: bounded multi-model consultation (text proposals; Jack sole tool executor).
+- `server/lessons.mjs`: verified lesson candidates with evidence gates and per-user scope.
+- `server/privacy.mjs`: credential/session redaction before remote prompts.
 - `server/memory.mjs`: ranked, bounded project context and credential-pattern rejection.
 - `server/developer.mjs`: bounded project mapping, script detection and exact-context patching.
 - `server/agent.mjs`: personality, conversation context, memory, model/tool loop and execution evidence.
@@ -42,7 +48,7 @@ Only one agent task runs at a time. Mutating tools suspend until their exact ope
 
 ## Extension points
 
-Add tool schemas and implementations to `server/tools.mjs`, preserving approval and event recording. A new inference provider needs a compatible `chat`, `models`, `inspect` and `unload` adapter (with `prepare` for single-model residency); currently only Ollama is implemented. External API providers, MCP discovery, durable scheduled workflows, embeddings and fine-tuning are not implemented. Local shell/browser tools can access authorized services, but that is not a universal native integration.
+Add tool schemas and implementations to `server/tools.mjs`, preserving approval and event recording. New inference backends register as ProviderRegistry adapters (`listModels`, `health`, `chat`, capability helpers). Ollama remains the required local path; remote adapters are optional and keyless-by-default. External MCP discovery, durable scheduled workflows, embeddings and fine-tuning are not implemented. See [AI-PROVIDERS.md](AI-PROVIDERS.md) and [AI-COUNCIL.md](AI-COUNCIL.md).
 
 ## Tests
 

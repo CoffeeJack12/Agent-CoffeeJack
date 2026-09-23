@@ -74,13 +74,18 @@ function mountComposerDropdowns() {
     value: dropdowns.taskMode?.getValue?.() ?? "auto",
     ariaLabel: tr("composer.taskType"),
   });
-  const installed = state.status?.models?.map((model) => model.name) ?? [];
+  const installed = state.status?.models ?? [];
   dropdowns.requestedModel = mountDropdown("#modelHost", {
     options: [
       { value: "auto", label: tr("settings.autoModel") },
-      ...installed.map((value) => ({ value, label: value })),
+      ...installed.map((model) => ({
+        value: model.name,
+        label:
+          model.label ||
+          `${model.name} · ${model.provider || "Ollama"} · ${model.local === false ? tr("composer.modelRemote") : tr("composer.modelLocal")}`,
+      })),
     ],
-    value: installed.includes(state.requestedModel)
+    value: installed.some((m) => m.name === state.requestedModel)
       ? state.requestedModel
       : "auto",
     ariaLabel: tr("settings.autoModel"),
@@ -163,6 +168,38 @@ async function copyText(text, button) {
     button.textContent = original;
   }, 1600);
 }
+function renderProviders(providers) {
+  const host = $("#providersList");
+  if (!host) return;
+  host.innerHTML = "";
+  const list = providers?.length
+    ? providers
+    : [
+        { id: "ollama", name: "Ollama", status: "unavailable" },
+        { id: "openai", name: "OpenAI", status: "not_configured" },
+        { id: "anthropic", name: "Anthropic", status: "not_configured" },
+        { id: "google", name: "Google", status: "not_configured" },
+      ];
+  for (const provider of list) {
+    const row = document.createElement("div");
+    row.className = "provider-row";
+    const status =
+      provider.status ||
+      (!provider.enabled
+        ? "not_configured"
+        : provider.available
+          ? "connected"
+          : "unavailable");
+    const label =
+      status === "connected"
+        ? tr("providers.connected")
+        : status === "unavailable"
+          ? tr("providers.unavailable")
+          : tr("providers.notConfigured");
+    row.innerHTML = `<strong>${escape(provider.name || provider.id)}</strong><span>${escape(label)}${provider.type ? ` · ${escape(provider.type)}` : ""}</span>`;
+    host.append(row);
+  }
+}
 async function api(route, options = {}) {
   const response = await fetch("/api/" + route, {
     ...options,
@@ -209,7 +246,12 @@ async function refreshStatus() {
       : ready
         ? tr("connection.local")
         : tr("connection.modelNotReady");
-    $("#modelLabel").textContent = `${status.settings.model} · ${tr("composer.modelLocal")}`;
+    const prefModel = status.preferences?.model ?? "auto";
+    $("#modelLabel").textContent =
+      prefModel === "auto"
+        ? `Auto → ${status.settings.model}`
+        : `${status.settings.model} · ${tr("composer.modelLocal")}`;
+    renderProviders(status.providers);
     $("#gaming").classList.toggle("on", status.gaming);
     $("#gaming").setAttribute("aria-pressed", String(status.gaming));
     $("#gaming span").textContent = status.gaming
@@ -513,8 +555,34 @@ $("#chatForm").onsubmit = async (event) => {
           renderText(content, full);
         }
         if (item.type === "routing") {
+          const provider = item.provider ? ` · ${item.provider}` : "";
+          const auto =
+            (item.requestedModel === "auto" || !item.requestedModel) &&
+            item.effectiveModel
+              ? `Auto → ${item.effectiveModel}`
+              : item.model;
           $("#modelLabel").textContent =
-            `${item.model} · ${item.kind}${item.fallback ? ` · ${tr("composer.modelFallback")}` : ""}`;
+            `${auto}${provider}${item.fallback ? ` · ${tr("composer.modelFallback")}` : ""}`;
+          const log = document.createElement("div");
+          log.className = "exec-meta";
+          log.textContent = `Mode: ${item.effectiveMode || "-"} · Model: ${item.effectiveModel || item.model} · Provider: ${item.provider || "ollama"}`;
+          answer.append(log);
+        }
+        if (item.type === "council") {
+          const el = document.createElement("details");
+          el.className = "tool-step council-step";
+          const ok = item.status === "done";
+          el.innerHTML = `<summary>${ok ? "✓" : "◌"} ${escape(item.title || "AI Council")} · ${escape(item.detail || item.status || "")}</summary>`;
+          if (item.proposals?.length) {
+            const list = document.createElement("ul");
+            for (const p of item.proposals) {
+              const row = document.createElement("li");
+              row.textContent = `${p.role}: ${p.provider}/${p.model} · ${p.status}`;
+              list.append(row);
+            }
+            el.append(list);
+          }
+          answer.append(el);
         }
         if (item.type === "round")
           $("#runStatus").textContent = tr("composer.status.working", {
@@ -1184,6 +1252,10 @@ async function loadPreferences() {
       ["tone", "verbosity", "humor", "initiative"],
     ],
     ["settings.section.modes", ["mode"]],
+    [
+      "settings.section.aiProviders",
+      ["councilMode", "remoteAi", "councilMaxModels", "remoteBudget"],
+    ],
   ];
   const labelKeys = {
     appLanguage: "settings.appLanguage",
@@ -1198,6 +1270,10 @@ async function loadPreferences() {
     humor: "settings.humorPref",
     initiative: "settings.initiative",
     mode: "settings.defaultMode",
+    councilMode: "settings.councilMode",
+    remoteAi: "settings.remoteAi",
+    councilMaxModels: "settings.councilMaxModels",
+    remoteBudget: "settings.remoteBudget",
   };
   const preferenceDropdowns = {};
   let custom = data.preferences.capabilities !== null;
@@ -1216,12 +1292,26 @@ async function loadPreferences() {
       }));
     if (key === "mode") return modeOptions();
     if (key === "model") {
-      const installed = state.status?.models?.map((item) => item.name) ?? [];
+      const installed = state.status?.models ?? [];
       return [
         { value: "auto", label: tr("settings.autoModel") },
-        ...installed.map((value) => ({ value, label: value })),
+        ...installed.map((item) => ({
+          value: item.name,
+          label:
+            item.label ||
+            `${item.name} · ${item.provider || "Ollama"} · ${item.local === false ? tr("composer.modelRemote") : tr("composer.modelLocal")}`,
+        })),
       ];
     }
+    if (
+      ["councilMode", "remoteAi", "councilMaxModels", "remoteBudget"].includes(
+        key,
+      )
+    )
+      return data.catalog.options[key].map((value) => ({
+        value,
+        label: tr(`${key}.${value}`),
+      }));
     return data.catalog.options[key].map((value) => ({
       value,
       label: tr(
