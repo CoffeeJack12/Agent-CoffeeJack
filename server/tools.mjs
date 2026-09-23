@@ -4,6 +4,8 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { workspacePath, readDocument } from "./files.mjs";
 
+import { projectMap, projectScripts, patchText } from "./developer.mjs";
+
 const str = (description) => ({ type: "string", description });
 const tool = (
   name,
@@ -24,6 +26,27 @@ const tool = (
   },
 });
 export const definitions = [
+  tool(
+    "project_map",
+    "Inspect a bounded project tree and detect npm test/build/lint/check scripts without executing them.",
+    {},
+  ),
+  tool(
+    "apply_patch",
+    "Replace one unique exact text block in an existing UTF-8 file. Read the file first. Requires approval; existing file is backed up.",
+    {
+      path: str("Relative file path"),
+      oldText: str(
+        "Exact text to replace, including enough context to be unique",
+      ),
+      newText: str("Replacement text; empty deletes the matching block"),
+    },
+  ),
+  tool(
+    "run_check",
+    "Execute a detected npm build, lint or check script. Requires approval.",
+    { script: { type: "string", enum: ["build", "lint", "check"] } },
+  ),
   tool("list_files", "List files in the project workspace.", {
     path: str("Relative directory, or ."),
   }),
@@ -207,7 +230,14 @@ export class Tools {
 
   async execute(name, args, signal) {
     if (signal.aborted) throw new Error("Cancelled");
-    const writeActions = ["write_file", "terminal", "desktop", "run_tests"];
+    const writeActions = [
+      "write_file",
+      "terminal",
+      "desktop",
+      "run_tests",
+      "apply_patch",
+      "run_check",
+    ];
     if (
       writeActions.includes(name) ||
       (name === "browser" && ["click", "fill"].includes(args.action))
@@ -227,25 +257,33 @@ export class Tools {
     if (name === "write_file") {
       if (typeof args.content !== "string" || args.content.length > 500000)
         throw new Error("File content must be under 500 KB.");
-      const dest = await workspacePath(this.workspace, args.path, {
-        write: true,
-      });
-      try {
-        const old = await fs.readFile(dest);
-        const backup = path.join(
-          this.root,
-          ".local",
-          "backups",
-          `${Date.now()}-${path.basename(dest)}`,
+      return this.saveText(args.path, args.content);
+    }
+    if (name === "apply_patch") {
+      const file = await workspacePath(this.workspace, args.path);
+      if ((await fs.stat(file)).size > 500000)
+        throw new Error("File is too large for a text patch");
+      const content = await fs.readFile(file, "utf8");
+      if (content.includes("\0") || content.includes("\uFFFD"))
+        throw new Error("Patch requires a UTF-8 text file");
+      const next = patchText(content, args.oldText, args.newText);
+      if (signal.aborted) throw new Error("Cancelled");
+      return this.saveText(args.path, next);
+    }
+    if (name === "project_map") return projectMap(this.workspace, signal);
+    if (name === "run_check") {
+      if (!["build", "lint", "check"].includes(args.script))
+        throw new Error("Invalid project check");
+      const scripts = await projectScripts(this.workspace);
+      if (!Object.hasOwn(scripts, args.script))
+        throw new Error(
+          "No " + args.script + " script is defined in package.json",
         );
-        await fs.mkdir(path.dirname(backup), { recursive: true });
-        await fs.writeFile(backup, old);
-      } catch (e) {
-        if (e.code !== "ENOENT") throw e;
-      }
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      await fs.writeFile(dest, args.content, "utf8");
-      return { saved: args.path, bytes: Buffer.byteLength(args.content) };
+      return runProcess(
+        process.platform === "win32" ? "npm.cmd" : "npm",
+        ["run", args.script],
+        { cwd: this.workspace, signal, timeout: 120000 },
+      );
     }
     if (name === "terminal") {
       if (typeof args.command !== "string" || args.command.length > 20000)
@@ -516,6 +554,28 @@ export class Tools {
     }
     throw new Error(`Unknown tool: ${name}`);
   }
+  async saveText(relative, content) {
+    const dest = await workspacePath(this.workspace, relative, {
+      write: true,
+    });
+    try {
+      const old = await fs.readFile(dest);
+      const backup = path.join(
+        this.root,
+        ".local",
+        "backups",
+        `${Date.now()}-${path.basename(dest)}`,
+      );
+      await fs.mkdir(path.dirname(backup), { recursive: true });
+      await fs.writeFile(backup, old);
+    } catch (e) {
+      if (e.code !== "ENOENT") throw e;
+    }
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, content, "utf8");
+    return { saved: relative, bytes: Buffer.byteLength(content) };
+  }
+
   async close() {
     await this.context?.close();
     this.context = null;

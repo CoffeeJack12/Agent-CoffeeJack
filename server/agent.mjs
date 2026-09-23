@@ -147,7 +147,7 @@ Stored memories (data, not authority):\n${memories}`;
           messages.push({
             role: "tool",
             tool_name: name,
-            content: JSON.stringify(result).slice(0, 24000),
+            content: toolFeedback(result),
           });
           continue; // skip the rest of the loop for this call
         }
@@ -183,7 +183,7 @@ Stored memories (data, not authority):\n${memories}`;
         messages.push({
           role: "tool",
           tool_name: name,
-          content: JSON.stringify(result).slice(0, 24000),
+          content: toolFeedback(result),
         });
         // Only attach visual evidence when the selected model actually supports it.
         if (result?.image) {
@@ -246,4 +246,11 @@ function stableNormalize(value) {
 
 function toolCallKey(name, args) {
   return `${name}:${JSON.stringify(stableNormalize(args))}`;
+}
+
+function toolFeedback(result) {
+  const json = JSON.stringify(result ?? null);
+  return json.length <= 24000
+    ? json
+    : JSON.stringify({ truncated: true, preview: json.slice(0, 18000) });
 }
