@@ -73,6 +73,10 @@ export const DEFAULT_PREFERENCES = {
   mode: "auto",
   model: "auto",
   memoryBehavior: "auto",
+  councilMode: "auto",
+  remoteAi: "allowed",
+  councilMaxModels: "2",
+  remoteBudget: "conservative",
   capabilities: null,
 };
 export const PREFERENCE_OPTIONS = {
@@ -86,6 +90,10 @@ export const PREFERENCE_OPTIONS = {
   mode: Object.keys(MODES),
   model: ["auto"],
   memoryBehavior: MEMORY_BEHAVIORS,
+  councilMode: ["auto", "on", "off"],
+  remoteAi: ["allowed", "ask", "never"],
+  councilMaxModels: ["2", "3", "4"],
+  remoteBudget: ["off", "conservative", "balanced", "performance"],
 };
 
 function migrateMode(mode) {
