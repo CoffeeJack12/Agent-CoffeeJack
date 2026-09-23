@@ -1,0 +1,12 @@
+{
+  "name": "CoffeeJack",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "coffeejack",
+      "command": "bash .cursor/serve-app.sh"
+    }
+  ],
+  "ports": [3210]
+}
