@@ -4,6 +4,8 @@ The app remains a local-first Windows agent with one active task at a time, loca
 
 ## Completed in this upgrade
 
+- Jarvis foundation: persisted conversation facts/questions, Steam continuity, direct cybersecurity tone, existing-chat bootstrap, execution plans and bounded test-claim evaluation. See [JARVIS-CORE.md](JARVIS-CORE.md) for supported cases and limits.
+
 - Execution reliability: stable anti-loop keys, fourth-failure blocking, successful-repeat reset, real Windows PowerShell and npm execution, protected recursive search and checked Git results.
 - Routing: automatic general/coding classification, explicit modes, installed-model fallback, capability-verified vision and tool support. Image input overrides a non-vision selection. No model downloads are triggered by routing.
 - Coding profile: reasoning enabled only when supported; 16K context on machines with at least 24 GB RAM, otherwise 8K, capped to declared model context. Coding output is bounded to 4096 tokens; normal chat retains the lightweight defaults. Other resident models are released before selecting one model. Gaming Mode still cancels tasks and unloads Ollama.

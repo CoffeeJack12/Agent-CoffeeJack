@@ -153,12 +153,15 @@ export function runProcess(
         (key) => key.toLowerCase() === "path",
       );
       const directories = (environment[pathKey] ?? "").split(path.delimiter);
-      const directory = directories.find((dir) =>
-        existsSync(path.join(dir, "npm.cmd")),
-      );
-      const cli =
-        directory &&
-        path.join(directory, "node_modules", "npm", "bin", "npm-cli.js");
+      const cli = directories
+        .filter((dir) => existsSync(path.join(dir, "npm.cmd")))
+        .flatMap((dir) => [
+          path.join(dir, "node_modules", "npm", "bin", "npm-cli.js"),
+          ...(path.basename(dir).toLowerCase() === ".bin"
+            ? [path.resolve(dir, "..", "npm", "bin", "npm-cli.js")]
+            : []),
+        ])
+        .find((candidate) => existsSync(candidate));
       if (!cli || !existsSync(cli))
         return reject(new Error("Cannot locate npm CLI beside npm.cmd"));
       command = process.execPath;

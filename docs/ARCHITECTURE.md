@@ -16,6 +16,9 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 
 ## Modules
 
+- `server/task-state.mjs`: user-grounded task context and pre-emission clarification/tone guard, persisted per chat.
+- `server/planner.mjs`: bounded execution stages, tool evidence and one-repair test-claim evaluator.
+
 - `server/index.mjs`: HTTP routing, session/Origin checks, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
 - `server/access.mjs`: optional Cloudflare Access JWT boundary; disabled without full configuration. The listener stays on loopback.
 - `server/router.mjs`: deterministic general/coding/vision selection with installed-model and capability checks.

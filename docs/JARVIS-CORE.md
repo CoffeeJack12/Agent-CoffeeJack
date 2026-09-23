@@ -12,7 +12,7 @@ Entity extraction currently covers project/file names, game targets and distribu
 
 ## Validation so far
 
-43 Node tests pass and Chromium smoke passes. The exact three-turn Steam conversation was run against local `qwen3:8b`: first response asked target/result, second asked game name/objective, third asked the game name. No repeated machine/lab/external question appeared after the device fact. Observed turn latency was 1045/841/1053 ms on this run; these are individual warm-system observations, not a statistical benchmark.
+46 Node tests passed for the conversation/tone phase and Chromium smoke passes. The exact three-turn Steam conversation was run against local `qwen3:8b`: first response asked target/result, second asked game name/objective, third asked the game name. No repeated machine/lab/external question appeared after the device fact. Observed turn latency was 1045/841/1053 ms on this run; these are individual warm-system observations, not a statistical benchmark.
 
 ## Next implementation priorities
 
@@ -21,4 +21,12 @@ Entity extraction currently covers project/file names, game targets and distribu
 3. Provider registry and bounded consultation without requiring remote keys.
 4. Research sources, voice foundation, scheduler and gaming integration.
 
-The running app may still be on the previous loaded code until restarted. Test instances use isolated temporary databases. Do not remove original security or Gaming Mode tests.
+The conversation/tone fix is live locally and CI passed for `fd68d34`. Restart the idle app after later changes. Test instances use isolated temporary databases. Do not remove original security or Gaming Mode tests.
+
+## Planner and evaluator foundation
+
+`server/planner.mjs` creates bounded inspect/edit/test/review steps for recognized coding requests and retains tool-generated evidence across conversation turns. A new explicit task or workspace discards previous evidence. Successful edits invalidate test/review completion. Tool failures and completed steps persist; cancellation avoids model/tool execution. There is no background planning workload.
+
+Before a final tests-passed claim reaches the UI, the evaluator requires an unfiltered `run_tests` exit code 0 after the latest edit or arbitrary shell command. Unsupported claims receive at most one repair prompt within the same 16-round budget, then an honest unverified result. This is a narrow English/Arabic claim heuristic, not a general truth verifier. General-purpose terminal test execution is deliberately not treated as structured test evidence. Plans represent observed categories, not proof of goal completion.
+
+Remaining planner work: model-generated custom steps with validated evidence references, persistent exact approval lifecycle, broader completion evaluation, and recovery after process interruption. UI currently ignores plan events; tool progress remains visible.
