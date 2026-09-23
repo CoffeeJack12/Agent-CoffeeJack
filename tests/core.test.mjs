@@ -6,6 +6,7 @@ import path from "node:path";
 import { Store } from "../server/store.mjs";
 import { workspacePath } from "../server/files.mjs";
 import { createApp } from "../server/index.mjs";
+import { Tools, definitions, runProcess } from "../server/tools.mjs";
 import { runAgent } from "../server/agent.mjs";
 
 async function temporary(t) {
@@ -225,188 +226,328 @@ test("pending tool approval is cancelled when gaming mode starts", async (t) => 
   await reader.cancel();
 });
 
-test("anti-loop protection blocks identical failed tool calls", async (t) => {
+async function agentSequence(t, argumentsList, execute) {
   const dir = await temporary(t);
   const store = new Store(dir);
-  const chat = store.createChat("anti-loop-test");
-  let ollamaCalls = 0;
-  const ollama = {
-    chat: async (args) => {
-      ollamaCalls++;
-      // First call: tool is offered
-      if (ollamaCalls === 1) {
-        return {
-          role: "assistant",
-          content: "",
-          tokens: 1,
-          tool_calls: [
-            {
-              function: {
-                name: "write_file",
-                arguments: { path: "test.txt", content: "hello" },
-              },
-            },
-          ],
-        };
-      }
-      // Second call with same args: model should receive anti-loop feedback
-      // and choose a different strategy (terminal in this case)
-      if (ollamaCalls === 2) {
-        return {
-          role: "assistant",
-          content: "",
-          tokens: 1,
-          tool_calls: [
-            {
-              function: {
-                name: "terminal",
-                arguments: { command: "dir" },
-              },
-            },
-          ],
-        };
-      }
-      // Third call: no more tool calls, agent completes
-      return { role: "assistant", content: "done", tokens: 0 };
-    },
-  };
+  t.cleanup.push(() => store.close());
+  const feedback = [];
+  let round = 0;
+  let executed = 0;
   await runAgent({
     store,
-    ollama,
-    tools: {
-      workspace: dir,
-      execute: async (name, args) => {
-        // Handle write_file - first two throws simulate failure, third succeeds
-        if (name === "write_file" && args.content === "hello") {
-          if (store.get("loopCount") === undefined) store.set("loopCount", 0);
-          const count = store.get("loopCount") + 1;
-          store.set("loopCount", count);
-          if (count <= 2) throw new Error("simulated failure");
-          // Third time's the charm
-          return { saved: args.path, bytes: Buffer.byteLength(args.content) };
-        }
-        // Handle terminal
-        if (name === "terminal") {
-          return { output: "Volume Serial Number is " + Date.now().toString(16), exitCode: 0 };
-        }
-        throw new Error("unknown tool: " + name);
-      },
-    },
-    chatId: chat.id,
-    text: "Test anti-loop",
+    chatId: store.createChat("behavior").id,
+    text: "Test coding workflow",
     model: "test",
     signal: new AbortController().signal,
     emit: () => {},
-  });
-  // The agent should not get stuck in an infinite loop
-  const reflection = store.get("lastReflection");
-  // Should complete without hitting step limit
-  assert.ok(reflection.outcome !== "step-limit",
-    "Agent should not hit step limit from anti-loop blocked calls");
-  // Should complete in a reasonable number of rounds
-  assert.ok(reflection.outcome === "completed" || reflection.outcome === "error",
-    "Agent should complete: actual outcome=" + reflection.outcome);
-  // Messages should include at least the user prompt and one assistant response
-  assert.ok(store.messages(chat.id).length >= 1,
-    "Agent should have processed at least one round, actual: " + store.messages(chat.id).length);
-  store.close(); await fs.rm(dir, { recursive: true, force: true });
-});
-
-test("anti-loop successful calls not blocked", async (t) => {
-  const dir = await temporary(t);
-  const store = new Store(dir);
-  const chat = store.createChat("success-repeat");
-  let callCount = 0;
-  const ollama = {
-    chat: async (args) => {
-      callCount++;
-      if (callCount <= 2) {
+    tools: {
+      workspace: dir,
+      execute: async (...args) => {
+        executed++;
+        return execute(executed, ...args);
+      },
+    },
+    ollama: {
+      chat: async ({ messages }) => {
+        if (round) feedback.push(JSON.parse(messages.at(-1).content));
+        if (round === argumentsList.length)
+          return { role: "assistant", content: "done", tokens: 0 };
         return {
           role: "assistant",
           content: "",
-          tokens: 1,
+          tokens: 0,
           tool_calls: [
             {
-              function: {
-                name: "write_file",
-                arguments: { path: "test.txt", content: "hello round " + callCount },
-              },
+              function: { name: "terminal", arguments: argumentsList[round++] },
             },
           ],
         };
-      }
-      return { role: "assistant", content: "done", tokens: 0 };
-    },
-  };
-  await runAgent({
-    store,
-    ollama,
-    tools: {
-      workspace: dir,
-      execute: async (name, args) => {
-        // Each call should succeed, not be blocked by anti-loop
-        return { saved: args.path, bytes: Buffer.byteLength(args.content) };
       },
     },
-    chatId: chat.id,
-    text: "Test",
-    model: "test",
-    signal: new AbortController().signal,
-    emit: () => {},
   });
-  // Both calls should have succeeded
-  const reflection = store.get("lastReflection");
-  assert.equal(reflection.successfulTools, 2, "Two successful calls should not be blocked");
-  assert.equal(reflection.failedTools, 0, "Zero failures expected");
-  store.close(); await fs.rm(dir, { recursive: true, force: true });
+  return { executed, feedback, reflection: store.get("lastReflection") };
+}
+
+test("anti-loop blocks the fourth identical failure before execution", async (t) => {
+  const result = await agentSequence(
+    t,
+    Array(4).fill({ command: "fail" }),
+    () => {
+      throw new Error("failed");
+    },
+  );
+  assert.equal(result.executed, 3);
+  assert.equal(result.feedback[3].blocked, true);
+  assert.equal(result.feedback[3].previousFailures, 3);
+  assert.match(result.feedback[3].error, /different strategy/);
+  assert.equal(result.reflection.outcome, "completed");
 });
 
-test("search_code excludes protected directories and finds matches", async (t) => {
-  const dir = await temporary(t);
-  // Create a src directory with a searchable file
-  await fs.mkdir(path.join(dir, "src"), { recursive: true });
-  await fs.writeFile(path.join(dir, "src", "app.js"), "const x = 1;\n");
-  // Create a store for cleanup
-  const store = new Store(dir);
-  // Verify the source file exists using fs.access
-  const appJsPath = path.join(dir, "src", "app.js");
-  try {
-    await fs.access(appJsPath);
-    assert.ok(true, "src/app.js should exist in workspace");
-  } catch {
-    assert.ok(false, "src/app.js should exist in workspace");
-  }
-  // Verify protected directories would be excluded by search_code
-  // .git, node_modules, .env are not created here, but the tool should exclude them
-  assert.ok(true, "Workspace contains searchable files without protected dirs");
-  store.close(); await fs.rm(dir, { recursive: true, force: true });
+test("anti-loop normalizes nested argument keys and JSON string arguments", async (t) => {
+  const a = { command: "fail", nested: { a: 1, b: [2, 3] } };
+  const b = { nested: { b: [2, 3], a: 1 }, command: "fail" };
+  const result = await agentSequence(t, [a, b, JSON.stringify(b), a], () => {
+    throw new Error("failed");
+  });
+  assert.equal(result.executed, 3);
+  assert.equal(result.feedback[3].blocked, true);
 });
 
-test("git_status tool definition exists", async (t) => {
-  const dir = await temporary(t);
-  const store = new Store(dir);
-  const { definitions } = await import("../server/tools.mjs");
-  const def = definitions.find(d => d.function.name === "git_status");
-  assert.ok(def, "git_status tool should be defined in tools.mjs definitions");
-  store.close(); await fs.rm(dir, { recursive: true, force: true });
+test("successful identical calls remain allowed and clear previous failures", async (t) => {
+  const result = await agentSequence(
+    t,
+    Array(11).fill({ command: "same" }),
+    (n) => {
+      if ([1, 2, 8, 9, 10].includes(n)) throw new Error("transient");
+      return { code: 0, output: "ok" };
+    },
+  );
+  assert.equal(result.executed, 10);
+  assert.equal(result.feedback[9].blocked, false);
+  assert.equal(result.feedback[10].blocked, true);
+  assert.equal(result.reflection.successfulTools, 5);
 });
 
-test("git_diff tool definition exists", async (t) => {
-  const dir = await temporary(t);
-  const store = new Store(dir);
-  const { definitions } = await import("../server/tools.mjs");
-  const def = definitions.find(d => d.function.name === "git_diff");
-  assert.ok(def, "git_diff tool should be defined in tools.mjs definitions");
-  store.close(); await fs.rm(dir, { recursive: true, force: true });
+test("nonzero process results participate in anti-loop protection", async (t) => {
+  const result = await agentSequence(
+    t,
+    Array(4).fill({ command: "fail" }),
+    () => ({ code: 1, output: "actual failure" }),
+  );
+  assert.equal(result.executed, 3);
+  assert.match(result.feedback[0].error, /actual failure/);
+  assert.equal(result.feedback[3].blocked, true);
 });
 
-test("run_tests tool definition exists with testFilter", async (t) => {
+function makeTools(workspace, approve = async () => {}) {
+  return new Tools({
+    root: workspace,
+    workspace,
+    approve,
+    artifactDirectory: workspace,
+  });
+}
+const toolSignal = () => new AbortController().signal;
+
+test("search_code finds nested matches and excludes protected paths and junctions", async (t) => {
   const dir = await temporary(t);
-  const store = new Store(dir);
-  const { definitions } = await import("../server/tools.mjs");
-  const def = definitions.find(d => d.function.name === "run_tests");
-  assert.ok(def, "run_tests tool should be defined in tools.mjs definitions");
-  assert.ok(def.function.parameters.properties.testFilter,
-    "run_tests should accept testFilter argument");
-  store.close(); await fs.rm(dir, { recursive: true, force: true });
+  const root = path.join(dir, "project");
+  for (const folder of [
+    "src/deep",
+    ".git",
+    "node_modules",
+    ".local",
+    "outside",
+  ])
+    await fs.mkdir(path.join(root, folder), { recursive: true });
+  for (const file of [
+    ".git/secret.js",
+    "node_modules/secret.js",
+    ".local/secret.js",
+    ".env",
+    ".env.something",
+    ".ENV.Other",
+  ])
+    await fs.writeFile(path.join(root, file), "needle");
+  await fs.writeFile(
+    path.join(root, "src/deep/example.js"),
+    "before\nneedle here\nafter\n",
+  );
+  const outside = path.join(dir, "outside");
+  await fs.mkdir(outside);
+  await fs.writeFile(path.join(outside, "secret.js"), "needle");
+  await fs.symlink(
+    outside,
+    path.join(root, "escape"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  await fs.symlink(
+    path.join(root, ".local"),
+    path.join(root, "internal-link"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
+  const tools = makeTools(root);
+  const result = await tools.execute(
+    "search_code",
+    { query: "needle" },
+    toolSignal(),
+  );
+  assert.equal(result.count, 1);
+  assert.deepEqual(result.results[0], {
+    path: "src/deep/example.js",
+    lineNumber: 2,
+    matchingLine: "needle here",
+    context: ["    before", ">>> needle here", "    after", "    "],
+  });
+  assert.equal(
+    (
+      await tools.execute(
+        "search_code",
+        { query: "needle", path: "src/deep" },
+        toolSignal(),
+      )
+    ).count,
+    1,
+  );
+  assert.equal(
+    (
+      await tools.execute(
+        "search_code",
+        { query: "needle", path: ".local" },
+        toolSignal(),
+      )
+    ).count,
+    0,
+  );
+  for (const query of ["", "   ", "x".repeat(1001), 7])
+    await assert.rejects(
+      tools.execute("search_code", { query }, toolSignal()),
+      /query/,
+    );
+  await assert.rejects(
+    tools.execute(
+      "search_code",
+      { query: "needle", path: "escape" },
+      toolSignal(),
+    ),
+    /outside/,
+  );
+  await fs.writeFile(path.join(root, "many.js"), "needle\n".repeat(70));
+  const capped = await tools.execute(
+    "search_code",
+    { query: "needle" },
+    toolSignal(),
+  );
+  assert.equal(capped.count, 50);
+  assert.equal(capped.limited, true);
+});
+
+async function gitFixture(t) {
+  const dir = await temporary(t);
+  const git = async (args) => {
+    const result = await runProcess("git", args, { cwd: dir });
+    assert.equal(result.code, 0, result.output);
+    return result;
+  };
+  await git(["init"]);
+  await fs.writeFile(path.join(dir, "first.txt"), "baseline first\n");
+  await fs.writeFile(path.join(dir, "second.txt"), "baseline second\n");
+  await git(["add", "first.txt", "second.txt"]);
+  await git([
+    "-c",
+    "user.name=CoffeeJack Test",
+    "-c",
+    "user.email=test@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-m",
+    "fixture",
+  ]);
+  return { dir, tools: makeTools(dir) };
+}
+
+test("git_status reports actual clean and modified files and rejects non-repos", async (t) => {
+  const { dir, tools } = await gitFixture(t);
+  assert.equal(
+    (await tools.execute("git_status", {}, toolSignal())).status,
+    "clean",
+  );
+  await fs.writeFile(path.join(dir, "first.txt"), "changed first\n");
+  const result = await tools.execute("git_status", {}, toolSignal());
+  assert.equal(result.status, "modified");
+  assert.ok(result.changes.some((line) => line.includes("first.txt")));
+  const empty = makeTools(await temporary(t));
+  await assert.rejects(
+    empty.execute("git_status", {}, toolSignal()),
+    /git status failed/,
+  );
+  await assert.rejects(
+    empty.execute("git_diff", {}, toolSignal()),
+    /git diff failed/,
+  );
+});
+
+test("git_diff returns real diffs and confines optional literal paths", async (t) => {
+  const { dir, tools } = await gitFixture(t);
+  await fs.writeFile(path.join(dir, "first.txt"), "changed first\n");
+  await fs.writeFile(path.join(dir, "second.txt"), "changed second\n");
+  const all = await tools.execute("git_diff", {}, toolSignal());
+  assert.match(all.diff, /changed first/);
+  assert.match(all.diff, /changed second/);
+  const one = await tools.execute(
+    "git_diff",
+    { path: "first.txt" },
+    toolSignal(),
+  );
+  assert.match(one.diff, /changed first/);
+  assert.doesNotMatch(one.diff, /second.txt/);
+  await fs.unlink(path.join(dir, "first.txt"));
+  assert.match(
+    (await tools.execute("git_diff", { path: "first.txt" }, toolSignal())).diff,
+    /deleted file/,
+  );
+  for (const p of ["../outside", ".env", ".git/config"])
+    await assert.rejects(tools.execute("git_diff", { path: p }, toolSignal()));
+});
+
+test("run_tests executes npm with flat arguments, filters and approval", async (t) => {
+  const dir = await temporary(t);
+  await fs.writeFile(
+    path.join(dir, "package.json"),
+    JSON.stringify({ scripts: { test: "node test.cjs" } }),
+  );
+  await fs.writeFile(
+    path.join(dir, "test.cjs"),
+    'console.log("TEST_EXECUTED", JSON.stringify(process.argv.slice(2))); if(process.argv.includes("fail")) process.exitCode=1;',
+  );
+  const approvals = [];
+  const tools = makeTools(dir, async (name) => approvals.push(name));
+  const normal = await tools.execute("run_tests", {}, toolSignal());
+  assert.equal(normal.code, 0, normal.output);
+  assert.match(normal.output, /TEST_EXECUTED \[\]/);
+  const filter = 'space & whoami | echo %PATH% "quote"';
+  const filtered = await tools.execute(
+    "run_tests",
+    { testFilter: filter },
+    toolSignal(),
+  );
+  assert.equal(filtered.code, 0, filtered.output);
+  assert.ok(
+    filtered.output.includes(JSON.stringify([filter])),
+    filtered.output,
+  );
+  const failed = await tools.execute(
+    "run_tests",
+    { testFilter: "fail" },
+    toolSignal(),
+  );
+  assert.equal(failed.code, 1);
+  assert.deepEqual(approvals, ["run_tests", "run_tests", "run_tests"]);
+  await fs.unlink(path.join(dir, "test.cjs"));
+  const denied = makeTools(dir, async () => {
+    throw new Error("approval denied");
+  });
+  await assert.rejects(
+    denied.execute("run_tests", {}, toolSignal()),
+    /approval denied/,
+  );
+});
+
+test("terminal runs a real platform shell command", async (t) => {
+  const tools = makeTools(await temporary(t));
+  const command =
+    process.platform === "win32" ? "Write-Output (6 * 7)" : "printf 42";
+  const result = await tools.execute("terminal", { command }, toolSignal());
+  assert.equal(result.code, 0, result.output);
+  assert.equal(result.output.trim(), "42");
+});
+
+test("optional tool parameters have accurate schemas", () => {
+  const required = (name) =>
+    definitions.find((d) => d.function.name === name).function.parameters
+      .required;
+  assert.deepEqual(required("search_code"), ["query"]);
+  assert.deepEqual(required("git_diff"), []);
+  assert.deepEqual(required("run_tests"), []);
 });

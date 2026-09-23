@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { workspacePath, readDocument } from "./files.mjs";
@@ -43,19 +44,23 @@ export const definitions = [
     },
     ["command"],
   ),
-  tool("search_code", "Search for code patterns in the workspace.", {
-    query: str("Search query pattern or filename"),
-    path: str("Optional relative path to search in, defaults to workspace root"),
-  }),
   tool(
-    "git_status",
-    "Check git status of the workspace.",
-    {},
+    "search_code",
+    "Search for code patterns in the workspace.",
+    {
+      query: str("Literal text to find in code"),
+      path: str(
+        "Optional relative path to search in, defaults to workspace root",
+      ),
+    },
+    ["query"],
   ),
+  tool("git_status", "Check git status of the workspace.", {}),
   tool(
     "git_diff",
     "Check git diff of the workspace.",
-    {},
+    { path: str("Optional relative file or directory") },
+    [],
   ),
   tool(
     "remember",
@@ -106,10 +111,9 @@ export const definitions = [
         description: "Optional test filter pattern (e.g., 'name' or '-grep')",
       },
     },
+    [],
   ),
 ];
-
-let lastFailedCalls = new Map(); // tracks {toolName}:{argString} -> count
 
 export function runProcess(
   command,
@@ -118,6 +122,25 @@ export function runProcess(
 ) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(new Error("Cancelled"));
+    // Node cannot spawn Windows batch files directly (EINVAL). Resolve the
+    // npm.cmd installation and launch its CLI without a shell so filters stay data.
+    if (process.platform === "win32" && command === "npm.cmd") {
+      const environment = env ?? process.env;
+      const pathKey = Object.keys(environment).find(
+        (key) => key.toLowerCase() === "path",
+      );
+      const directories = (environment[pathKey] ?? "").split(path.delimiter);
+      const directory = directories.find((dir) =>
+        existsSync(path.join(dir, "npm.cmd")),
+      );
+      const cli =
+        directory &&
+        path.join(directory, "node_modules", "npm", "bin", "npm-cli.js");
+      if (!cli || !existsSync(cli))
+        return reject(new Error("Cannot locate npm CLI beside npm.cmd"));
+      command = process.execPath;
+      args = [cli, ...args];
+    }
     const child = spawn(command, args, {
       cwd,
       env: env ?? process.env,
@@ -184,23 +207,13 @@ export class Tools {
 
   async execute(name, args, signal) {
     if (signal.aborted) throw new Error("Cancelled");
-    const writeActions = ["write_file", "terminal", "desktop"];
+    const writeActions = ["write_file", "terminal", "desktop", "run_tests"];
     if (
       writeActions.includes(name) ||
       (name === "browser" && ["click", "fill"].includes(args.action))
     )
       await this.approve(name, args, signal);
     if (signal.aborted) throw new Error("Cancelled");
-
-    // --- Anti-loop protection for repeated identical failed tool calls ---
-    const argKey = name + ":" + JSON.stringify(args);
-    const entry = lastFailedCalls.get(argKey) || 0;
-    if (entry >= 3) {
-      throw new Error(
-        `Anti-loop protection: tool "${name}" with same arguments has failed 3 consecutive times.`,
-      );
-    }
-    // ----------------------------------------------------------
 
     if (name === "list_files") {
       const dir = await workspacePath(this.workspace, args.path);
@@ -237,16 +250,15 @@ export class Tools {
     if (name === "terminal") {
       if (typeof args.command !== "string" || args.command.length > 20000)
         throw new Error("Invalid command");
-      // On Windows, prefer npm.cmd for npm commands
-      const cmd = process.platform === "win32" ? "npm.cmd" : "npm";
-      const pwArgs = process.platform === "win32"
-        ? ["-NoProfile", "-NonInteractive", "-Command", args.command]
-        : ["-c", args.command];
+      const cmd = process.platform === "win32" ? "powershell.exe" : "sh";
+      const pwArgs =
+        process.platform === "win32"
+          ? ["-NoProfile", "-NonInteractive", "-Command", args.command]
+          : ["-c", args.command];
       return await runProcess(cmd, pwArgs, {
         cwd: this.workspace,
         signal,
-        timeout:
-          Math.min(120, Math.max(1, Number(args.timeout) || 60)) * 1000,
+        timeout: Math.min(120, Math.max(1, Number(args.timeout) || 60)) * 1000,
       });
     }
     if (name === "remember") {
@@ -325,132 +337,175 @@ export class Tools {
         : result;
     }
     if (name === "search_code") {
-      const searchPath = args.path
-        ? await workspacePath(this.workspace, args.path)
-        : this.workspace;
       const query = args.query;
-      // Protected directories that should never be searched
-      const protectedDirs = new Set([".git", "node_modules", ".env", ".env.*", ".local"]);
+      if (typeof query !== "string" || !query.trim() || query.length > 1000)
+        throw new Error("Search query must contain 1 to 1000 characters.");
+      const base = await fs.realpath(this.workspace);
+      const searchPath = await workspacePath(base, args.path ?? ".");
+      const protectedPart = (part) => {
+        const p = part.toLowerCase().replace(/[ .]+$/, "");
+        return (
+          [".git", "node_modules", ".local", ".env"].includes(p) ||
+          p.startsWith(".env.")
+        );
+      };
+      // An explicitly supplied starting path must not enter a link, including
+      // links to protected directories inside the workspace.
+      let ancestor = base;
+      for (const part of path
+        .relative(base, searchPath)
+        .split(path.sep)
+        .filter(Boolean)) {
+        ancestor = path.join(ancestor, part);
+        if ((await fs.lstat(ancestor)).isSymbolicLink())
+          throw new Error("Search paths cannot traverse symbolic links.");
+      }
+      const extensions = new Set([
+        ".js",
+        ".mjs",
+        ".cjs",
+        ".json",
+        ".ts",
+        ".tsx",
+        ".jsx",
+        ".ps1",
+        ".sh",
+        ".bash",
+        ".cmd",
+        ".txt",
+        ".md",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".cfg",
+        ".ini",
+        ".html",
+        ".css",
+        ".py",
+      ]);
       const results = [];
-      const searchRecursive = async (dirEnt) => {
-        const fullPath = path.join(searchPath, dirEnt.name);
+      let visited = 0;
+      let limited = false;
+      const walk = async (current) => {
+        if (signal.aborted) throw new Error("Cancelled");
+        if (results.length >= 50 || visited >= 10000) {
+          limited = true;
+          return;
+        }
+        visited++;
+        const relative = path.relative(base, current);
+        if (relative.split(path.sep).some(protectedPart)) return;
         let stat;
         try {
-          stat = await fs.stat(fullPath);
+          stat = await fs.lstat(current);
+          if (stat.isSymbolicLink()) return;
+          await workspacePath(base, relative || ".");
         } catch {
-          return; // skip unreadable paths
+          return;
         }
         if (stat.isDirectory()) {
-          // Check if this directory name matches a protected pattern
-          const dirName = path.basename(fullPath);
-          if (protectedDirs.has(dirName)) return;
+          let entries;
           try {
-            const entries = await fs.readdir(fullPath, { withFileTypes: true });
-            for (const entry of entries) {
-              await searchRecursive(entry);
-            }
+            entries = await fs.readdir(current);
           } catch {
-            // skip directories we can't read
+            return;
           }
-        } else if (stat.isFile()) {
-          // Only search in text-based files
-          const ext = path.extname(fullPath);
-          const textExtensions = [
-            ".js", ".mjs", ".cjs", ".json", ".ts", ".tsx", ".jsx",
-            ".mjs", ".ps1", ".bash", ".cmd", ".txt", ".md", ".yaml", ".yml",
-            ".json", ".toml", ".cfg", ".ini", ".html", ".css",
-          ];
-          if (!textExtensions.includes(ext)) return;
+          for (const entry of entries) {
+            await walk(path.join(current, entry));
+            if (limited) break;
+          }
+        } else if (
+          stat.isFile() &&
+          extensions.has(path.extname(current).toLowerCase())
+        ) {
+          if (stat.size > 1024 * 1024) return;
+          let content;
           try {
-            const content = await fs.readFile(fullPath, "utf8");
-            const lines = content.split("\n");
-            for (let li = 0; li < lines.length; li++) {
-              if (lines[li].includes(query)) {
-                // Get surrounding context (2 lines before and after)
-                const start = Math.max(0, li - 2);
-                const end = Math.min(lines.length, li + 3);
-                const contextLines = lines.slice(start, end);
-                // Find the matching line index within context
-                const matchLocalIndex = li - start;
-                results.push({
-                  file: dirEnt.name,
-                  path: fullPath,
-                  lineNumber: li + 1,
-                  matchingLine: lines[li],
-                  context: contextLines.map((l, i) => {
-                    const marker = i === matchLocalIndex ? ">>>" : "   ";
-                    return `${marker} ${l}`;
-                  }),
-                });
-                // Stop after first match per file to avoid duplicates, or remove this limit if you want all
-                break;
-              }
+            content = await fs.readFile(current, "utf8");
+          } catch {
+            return;
+          }
+          if (content.includes("\0")) return;
+          const lines = content.split(/\r?\n/);
+          for (let i = 0; i < lines.length; i++) {
+            if (!lines[i].includes(query)) continue;
+            const start = Math.max(0, i - 2);
+            results.push({
+              path: relative.split(path.sep).join("/"),
+              lineNumber: i + 1,
+              matchingLine: lines[i].slice(0, 500),
+              context: lines
+                .slice(start, i + 3)
+                .map(
+                  (line, offset) =>
+                    (start + offset === i ? ">>> " : "    ") +
+                    line.slice(0, 500),
+                ),
+            });
+            if (results.length >= 50) {
+              limited = true;
+              break;
             }
-          } catch (e) {
-            // skip unreadable files
           }
         }
       };
-      try {
-        const dir = await fs.readdir(searchPath, { withFileTypes: true });
-        for (const entry of dir) {
-          await searchRecursive(entry);
-        }
-        // Cap output: limit total results and context lines
-        const maxResults = 50;
-        const cappedResults = results.slice(0, maxResults);
-        return { results: cappedResults, count: Math.min(results.length, maxResults) };
-      } catch (e) {
-        throw new Error(`Search failed: ${e.message}`);
-      }
+      await walk(searchPath);
+      return { results, count: results.length, limited };
     }
     if (name === "git_status") {
-      try {
-        const result = await runProcess(
-          process.platform === "win32" ? "git.cmd" : "git",
-          ["status", "--porcelain"],
-          { cwd: this.workspace, signal, timeout: 30000 },
+      const result = await runProcess("git", ["status", "--porcelain"], {
+        cwd: this.workspace,
+        signal,
+        timeout: 30000,
+      });
+      if (result.code !== 0 || result.stopped)
+        throw new Error(
+          `git status failed: ${result.output || "process stopped"}`,
         );
-        const lines = result.output
-          .trim()
-          .split("\n")
-          .filter((l) => l.length > 0);
-        return { status: lines.length > 0 ? "modified" : "clean", changes: lines };
-      } catch (e) {
-        throw new Error(`git status failed: ${e.message}`);
-      }
+      const changes = result.output.split(/\r?\n/).filter(Boolean);
+      return { status: changes.length ? "modified" : "clean", changes };
     }
     if (name === "git_diff") {
-      try {
-        const result = await runProcess(
-          process.platform === "win32" ? "git.cmd" : "git",
-          ["diff"],
-          { cwd: this.workspace, signal, timeout: 30000 },
+      const argv = [
+        "--literal-pathspecs",
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+      ];
+      if (args.path !== undefined) {
+        const target = await workspacePath(this.workspace, args.path, {
+          write: true,
+        });
+        argv.push(
+          "--",
+          path.relative(await fs.realpath(this.workspace), target) || ".",
         );
-        return { diff: result.output || "" };
-      } catch (e) {
-        throw new Error(`git diff failed: ${e.message}`);
       }
+      const result = await runProcess("git", argv, {
+        cwd: this.workspace,
+        signal,
+        timeout: 30000,
+      });
+      if (result.code !== 0 || result.stopped)
+        throw new Error(
+          `git diff failed: ${result.output || "process stopped"}`,
+        );
+      return {
+        diff: result.output.slice(0, 20000),
+        truncated: result.output.length > 20000,
+      };
     }
     if (name === "run_tests") {
-      const filter = args.testFilter || "";
-      let cmd;
-      if (process.platform === "win32") {
-        if (filter) {
-          cmd = [["npm.cmd", "run", "test", "--", filter]];
-        } else {
-          cmd = ["npm.cmd", "run", "test"];
-        }
-      } else {
-        if (filter) {
-          cmd = ["npm", "run", "test", "--", filter];
-        } else {
-          cmd = ["npm", "run", "test"];
-        }
-      }
+      const filter = args.testFilter ?? "";
+      if (
+        typeof filter !== "string" ||
+        filter.length > 1000 ||
+        filter.includes("\0")
+      )
+        throw new Error("Invalid test filter");
       return await runProcess(
         process.platform === "win32" ? "npm.cmd" : "npm",
-        cmd,
+        ["run", "test", ...(filter ? ["--", filter] : [])],
         { cwd: this.workspace, signal, timeout: 120000 },
       );
     }
