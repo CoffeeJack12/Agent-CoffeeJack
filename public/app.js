@@ -232,24 +232,88 @@ async function api(route, options = {}) {
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || tr("notice.requestFailed"));
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const err = new Error(data.error || tr("notice.requestFailed"));
+    err.code = data.code;
+    err.email = data.email;
+    throw err;
+  }
   return data;
 }
 function notice(text = "") {
   $("#notice").textContent = text;
   $("#notice").classList.toggle("hidden", !text);
 }
+function showAccessPending(detail) {
+  const panel = $("#accessPending");
+  if (!panel) return;
+  panel.classList.remove("hidden");
+  const detailEl = $("#accessPendingDetail");
+  if (detailEl && detail)
+    detailEl.textContent = detail;
+  document.body.classList.add("access-locked");
+}
+function hideAccessPending() {
+  $("#accessPending")?.classList.add("hidden");
+  document.body.classList.remove("access-locked");
+}
+function renderAccountIdentity(status) {
+  const account = $("#accountIdentity");
+  const roleEl = $("#profileRole");
+  if (!status?.user) return;
+  const source =
+    status.identitySource === "cloudflare"
+      ? tr("account.sourceCloudflare")
+      : tr("account.sourceLocal");
+  const linked = (status.identities || []).some(
+    (i) => i.provider === "cloudflare_access",
+  );
+  const linkLabel = linked
+    ? tr("account.linkedCloudflare")
+    : tr("account.localOnly");
+  const line = `${status.user.display_name} · ${status.user.role} · ${source}`;
+  if (account) account.textContent = `${line} · ${linkLabel}`;
+  if (roleEl)
+    roleEl.textContent = `${status.user.role} · ${source}`;
+}
+function renderWorkspaces(status) {
+  const select = $("#workspaceSelect");
+  if (!select) return;
+  const list = status.workspaces || [];
+  const activeId = status.activeWorkspace?.id;
+  select.innerHTML = "";
+  for (const ws of list) {
+    const opt = document.createElement("option");
+    opt.value = ws.id;
+    opt.textContent = ws.name;
+    if (ws.id === activeId) opt.selected = true;
+    select.append(opt);
+  }
+  select.onchange = async () => {
+    try {
+      await api("workspaces/active", {
+        method: "POST",
+        body: { workspaceId: select.value, chatId: state.chatId || undefined },
+      });
+      await refreshStatus();
+    } catch (error) {
+      report(error);
+    }
+  };
+}
 async function refreshStatus() {
   try {
     const status = await api("status");
+    hideAccessPending();
     state.status = status;
     state.token = status.token;
     if (status.user) {
       $("#profileName").textContent = status.user.display_name;
-      $("#profileRole").textContent = status.user.role;
       $("#profileAvatar").textContent =
         status.user.display_name.trim().charAt(0).toUpperCase() || "?";
+      renderAccountIdentity(status);
+      renderWorkspaces(status);
     }
     applyAppLanguage(status.preferences?.appLanguage ?? "auto");
     if (!state.modeInitialized) {
@@ -297,6 +361,10 @@ async function refreshStatus() {
   } catch (e) {
     $("#connectionLabel").textContent = tr("connection.disconnected");
     $("#connectionDot").classList.remove("ready");
+    if (e?.code === "pending_identity") {
+      const email = e.email ? ` (${e.email})` : "";
+      showAccessPending(tr("access.pendingBody") + email);
+    }
   }
 }
 async function history() {
@@ -977,8 +1045,11 @@ async function switchUser(userId) {
   state.chatId = null;
   state.modeInitialized = false;
   state.status = null;
+  state.attachments = [];
   $("#messages").innerHTML = "";
   $("#welcome").classList.remove("hidden");
+  const wsSelect = $("#workspaceSelect");
+  if (wsSelect) wsSelect.innerHTML = "";
   await refreshStatus();
   await Promise.all([history(), loadPreferences()]);
   if (state.view === "settings") await loadUsers();
@@ -995,7 +1066,12 @@ async function loadUsers() {
     const row = document.createElement("div");
     row.className = "card";
     const label = document.createElement("p");
-    label.textContent = `${user.display_name} · ${user.role} · ${user.status}`;
+    const ids = user.identities || [];
+    const hasCf = ids.some((i) => i.provider === "cloudflare_access");
+    const identityNote = hasCf
+      ? tr("account.linkedCloudflare")
+      : tr("account.localOnly");
+    label.textContent = `${user.display_name} · ${user.role} · ${user.status} · ${identityNote}`;
     row.append(label);
     if (owner && user.status === "active" && user.id !== current.id) {
       const use = document.createElement("button");

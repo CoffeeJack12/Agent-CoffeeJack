@@ -338,7 +338,12 @@
         <form id="preferenceForm" class="settings-grid" aria-label="Jack preferences"></form>
         <section id="usersSection" class="setting-card">
           <h3 data-i18n="users.title">Users</h3>
+          <p id="accountIdentity" class="hint"></p>
           <p id="currentUser"></p>
+          <label class="workspace-select"
+            ><span data-i18n="workspaces.label">Workspace</span>
+            <select id="workspaceSelect" dir="ltr"></select>
+          </label>
           <div id="usersList" class="card-list"></div>
           <form id="createUserForm" class="inline-form hidden">
             <input name="displayName" maxlength="80" required data-i18n-placeholder="users.name" placeholder="Display name" />
@@ -422,5 +427,13 @@
       </section>
     </main>
     <script type="module" src="/app.js"></script>
+    <div id="accessPending" class="access-pending hidden" role="alertdialog" aria-live="polite">
+      <div class="access-pending-card">
+        <h2 data-i18n="access.pendingTitle">Access pending</h2>
+        <p id="accessPendingDetail" data-i18n="access.pendingBody">
+          Your Cloudflare identity is verified but not linked to a CoffeeJack user yet. Ask the owner to approve access.
+        </p>
+      </div>
+    </div>
   </body>
 </html>

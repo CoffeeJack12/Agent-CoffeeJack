@@ -1590,3 +1590,34 @@ body[data-theme="light"] {
   font-size: 0.78rem;
   margin-top: 2px;
 }
+.workspace-select {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0 16px;
+}
+.workspace-select select {
+  max-width: 100%;
+}
+.access-pending {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  background: color-mix(in srgb, var(--bg, #0d0d0d) 92%, transparent);
+  padding: 24px;
+}
+.access-pending.hidden {
+  display: none;
+}
+.access-pending-card {
+  max-width: 420px;
+  padding: 28px 24px;
+  border: 1px solid var(--line, #333);
+  background: var(--panel, #161616);
+}
+body.access-locked aside,
+body.access-locked main {
+  visibility: hidden;
+}

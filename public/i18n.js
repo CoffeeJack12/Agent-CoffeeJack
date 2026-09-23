@@ -242,6 +242,14 @@ export const dictionaries = {
     "users.rename": "Rename",
     "users.disable": "Disable",
     "users.disableConfirm": "Disable this user?",
+    "workspaces.label": "Workspace",
+    "account.sourceLocal": "Local",
+    "account.sourceCloudflare": "Cloudflare",
+    "account.linkedCloudflare": "Local + Cloudflare linked",
+    "account.localOnly": "Local only",
+    "access.pendingTitle": "Access pending",
+    "access.pendingBody":
+      "Your Cloudflare identity is verified but not linked yet. Ask the owner to approve access.",
 
     // Preferences (settings form)
     "settings.appLanguage": "App language",
@@ -599,6 +607,14 @@ export const dictionaries = {
     "users.rename": "إعادة تسمية",
     "users.disable": "تعطيل",
     "users.disableConfirm": "تعطيل هذا المستخدم؟",
+    "workspaces.label": "مساحة العمل",
+    "account.sourceLocal": "محلي",
+    "account.sourceCloudflare": "Cloudflare",
+    "account.linkedCloudflare": "محلي + Cloudflare مرتبط",
+    "account.localOnly": "محلي فقط",
+    "access.pendingTitle": "بانتظار الموافقة",
+    "access.pendingBody":
+      "تم التحقق من هويتك عبر Cloudflare لكن لم تُربط بعد بمستخدم CoffeeJack. اطلب من المالك الموافقة.",
 
     "settings.appLanguage": "لغة الواجهة",
     "settings.assistantLanguage": "لغة المساعد",

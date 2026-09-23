@@ -65,7 +65,12 @@ test("remote access is disabled by default and incomplete configuration fails cl
 });
 test("Access guard verifies signatures, expiry, audience, issuer and owner identity", async () => {
   const access = guard();
-  assert.equal(await access.authorize(request(token())), true);
+  assert.deepEqual(await access.authorize(request(token())), {
+    email: "owner@example.com",
+    subject: "owner@example.com",
+    issuer: "https://" + config.teamDomain,
+    audience: [config.audience],
+  });
   for (const jwt of [
     undefined,
     "fake",
@@ -113,6 +118,13 @@ test("remote HTTP protects reads and preserves session-token and origin checks",
     ollama: { models: async () => [] },
   });
   app.store.set("autoGaming", false);
+  const { linkExternalIdentity } = await import("../server/identity.mjs");
+  const { resolveLocalOwner } = await import("../server/users.mjs");
+  linkExternalIdentity(app.store, {
+    subject: "owner@example.com",
+    email: "owner@example.com",
+    userId: resolveLocalOwner(app.store).id,
+  });
   await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     await app.close();
@@ -129,7 +141,8 @@ test("remote HTTP protects reads and preserves session-token and origin checks",
           headers: { Host: config.hostname, ...headers },
         },
         (res) => {
-          res.resume();
+          let body = "";
+          res.on("data", (c) => (body += c));
           res.on("end", () => resolve(res.statusCode));
         },
       );
@@ -141,7 +154,8 @@ test("remote HTTP protects reads and preserves session-token and origin checks",
   assert.equal(await send(), 403);
   assert.equal(await send({}, "GET", "/"), 403);
   const auth = { "Cf-Access-Jwt-Assertion": token() };
-  assert.equal(await send(auth), 403);
+  // JWT alone issues a mapped remote session on /api/status.
+  assert.equal(await send(auth), 200);
   assert.equal(
     await send({ ...auth, "X-CoffeeJack-Token": app.token }),
     200,
