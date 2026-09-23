@@ -141,6 +141,11 @@ export function createOpenAICompatibleProvider({
     async chat({ model: modelId, messages, profile = {}, signal, onToken }) {
       const key = getKey();
       if (!key) throw new Error(`${name} API key is not configured`);
+      const timed = signal
+        ? typeof AbortSignal.any === "function"
+          ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
+          : signal
+        : AbortSignal.timeout(45000);
       try {
         const response = await fetch(`${getBaseUrl()}/chat/completions`, {
           method: "POST",
@@ -156,7 +161,7 @@ export function createOpenAICompatibleProvider({
               ? { temperature: profile.temperature }
               : {}),
           }),
-          signal,
+          signal: timed,
         });
         const payload = await responseJson(response, [key]);
         const content = payload.choices?.[0]?.message?.content ?? "";
@@ -213,6 +218,11 @@ export function createAnthropicProvider() {
       const conversational = messages.filter(
         (entry) => entry.role !== "system",
       );
+      const timed = signal
+        ? typeof AbortSignal.any === "function"
+          ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
+          : signal
+        : AbortSignal.timeout(45000);
       try {
         const response = await fetch(`${baseUrl()}/messages`, {
           method: "POST",
@@ -227,7 +237,7 @@ export function createAnthropicProvider() {
             max_tokens: profile.predict ?? 3072,
             ...(system ? { system } : {}),
           }),
-          signal,
+          signal: timed,
         });
         const payload = await responseJson(response, [key]);
         const content = (payload.content ?? [])
@@ -290,6 +300,11 @@ export function createGoogleProvider() {
           role: entry.role === "assistant" ? "model" : "user",
           parts: [{ text: String(entry.content ?? "") }],
         }));
+      const timed = signal
+        ? typeof AbortSignal.any === "function"
+          ? AbortSignal.any([signal, AbortSignal.timeout(45000)])
+          : signal
+        : AbortSignal.timeout(45000);
       try {
         const response = await fetch(
           `${baseUrl()}/models/${encodeURIComponent(modelId)}:generateContent`,
@@ -305,7 +320,7 @@ export function createGoogleProvider() {
                 ? { systemInstruction: { parts: [{ text: systemText }] } }
                 : {}),
             }),
-            signal,
+            signal: timed,
           },
         );
         const payload = await responseJson(response, [key]);

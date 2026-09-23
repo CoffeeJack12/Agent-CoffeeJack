@@ -77,6 +77,7 @@ export const DEFAULT_PREFERENCES = {
   remoteAi: "allowed",
   councilMaxModels: "2",
   remoteBudget: "conservative",
+  councilOtherModels: "on",
   capabilities: null,
 };
 export const PREFERENCE_OPTIONS = {
@@ -94,6 +95,7 @@ export const PREFERENCE_OPTIONS = {
   remoteAi: ["allowed", "ask", "never"],
   councilMaxModels: ["2", "3", "4"],
   remoteBudget: ["off", "conservative", "balanced", "performance"],
+  councilOtherModels: ["on", "off"],
 };
 
 function migrateMode(mode) {

@@ -33,7 +33,7 @@ function reasonCode({ locked, kind, gaming, fallback, remote }) {
   return "local_fast";
 }
 
-function scoreModel(entry, { kind, gaming, remoteBudget, preferLocal }) {
+function scoreModel(entry, { kind, gaming, remoteBudget, preferLocal, health }) {
   let score = 0;
   const caps = entry.capabilities || [];
   if (kind === "vision") score += caps.includes("vision") ? 50 : -100;
@@ -50,6 +50,13 @@ function scoreModel(entry, { kind, gaming, remoteBudget, preferLocal }) {
   }
   if (entry.speedTier === "fast") score += gaming ? 20 : 5;
   if (entry.costTier === "free" || entry.costTier === "local") score += 5;
+  // Health / cooldown (bounded; one failure is not a permanent blacklist).
+  const h = health || {};
+  if (h.inCooldown) score -= 70;
+  if ((h.failures || 0) >= 3) score -= 35;
+  else if ((h.failures || 0) >= 1) score -= 8;
+  if ((h.timeouts || 0) >= 2) score -= 20;
+  if (h.qualityBoost) score += Math.min(15, h.qualityBoost);
   return score;
 }
 
@@ -97,6 +104,8 @@ export async function routeModel({
     let candidates = models.filter((m) => {
       if (previousFailures.includes(m.id) || previousFailures.includes(m.effectiveModel))
         return false;
+      const health = registry.getModelHealth?.(m.provider, m.id);
+      if (health?.inCooldown && !locked) return false;
       const caps = m.capabilities || [];
       if (kind === "vision" && !caps.includes("vision") && !locked) return false;
       if (kind === "coding" && !caps.includes("tools") && !m.local && !locked)
@@ -113,11 +122,26 @@ export async function routeModel({
           normalize(m.id) === normalize(requestedModel),
       );
     } else {
-      candidates = [...candidates].sort(
-        (a, b) =>
-          scoreModel(b, { kind, gaming, remoteBudget, preferLocal }) -
-          scoreModel(a, { kind, gaming, remoteBudget, preferLocal }),
-      );
+      candidates = [...candidates].sort((a, b) => {
+        const ha = registry.getModelHealth?.(a.provider, a.id);
+        const hb = registry.getModelHealth?.(b.provider, b.id);
+        return (
+          scoreModel(b, {
+            kind,
+            gaming,
+            remoteBudget,
+            preferLocal,
+            health: hb,
+          }) -
+          scoreModel(a, {
+            kind,
+            gaming,
+            remoteBudget,
+            preferLocal,
+            health: ha,
+          })
+        );
+      });
     }
 
     // Prefer settings.model / codingModel / visionModel as soft hints for local.
