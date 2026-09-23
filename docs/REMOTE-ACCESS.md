@@ -1,6 +1,19 @@
 # Optional Cloudflare remote access
 
-Status: the application-side authentication boundary is implemented and tested. No tunnel, DNS record, Access application or public endpoint has been provisioned. Remote access is disabled when the four configuration values below are absent. The Node listener remains bound to `127.0.0.1` even when remote access is configured.
+Status: application-side Access JWT verification, identity mapping, remote session issuance and workspace isolation are implemented and tested. Tunnel/DNS/Access app provisioning remain operator steps. Remote access is disabled when the four configuration values below are absent. The Node listener remains bound to `127.0.0.1` even when remote access is configured.
+
+## Trust boundary
+
+```text
+LOCAL  127.0.0.1 / localhost
+       → owner bootstrap allowed; CF headers ignored
+
+REMOTE configured hostname
+       → Cloudflare Access JWT required
+       → map verified subject/email → CoffeeJack user
+       → issue CoffeeJack session (source=remote)
+       → never fall back to owner for unmapped identities
+```
 
 ## Architecture
 
@@ -8,42 +21,40 @@ Status: the application-side authentication boundary is implemented and tested. 
 Authorized browser → Cloudflare Access (identity + MFA policy)
                    → authenticated Cloudflare Tunnel
                    → loopback CoffeeJack HTTP server on Windows
+                   → identity map → session → per-user workspace tools
                    → local Ollama, SQLite, files and approved tools
-
-GitHub → source history, review, CI and backup
 ```
 
-GitHub and the Windows runtime retain their current roles. No agent runtime moves to Workers. Ollama port 11434 is never a tunnel destination. There are no router port forwards or listeners on `0.0.0.0`.
+## Configuration
 
-## Configuration contract
+| Value                         | Purpose                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| `COFFEEJACK_REMOTE_HOST`      | Exact lowercase public hostname, without scheme, port or path |
+| `CF_ACCESS_TEAM_DOMAIN`       | `team-name.cloudflareaccess.com`                              |
+| `CF_ACCESS_AUD`               | Access application audience (64 hex chars)                    |
+| `CF_ACCESS_ALLOWED_EMAILS`    | Comma-separated Access allowlist (signature gate)             |
+| `CF_ACCESS_OWNER_EMAIL`       | Optional; first verified email that may auto-link to owner    |
+| `CF_ACCESS_AUTO_CREATE_ROLE`  | Optional `standard` to auto-create users; default is pending  |
 
-Set these process environment values only after provisioning an Access application for the exact hostname:
+Partial or invalid configuration prevents startup. The application validates RS256 signatures, issuer, audience, expiry, nbf and the email allowlist. Authorize returns verified `{ email, subject, issuer, audience }` or `false`.
 
-| Value                      | Purpose                                                       |
-| -------------------------- | ------------------------------------------------------------- |
-| `COFFEEJACK_REMOTE_HOST`   | Exact lowercase public hostname, without scheme, port or path |
-| `CF_ACCESS_TEAM_DOMAIN`    | The account's `team-name.cloudflareaccess.com` domain         |
-| `CF_ACCESS_AUD`            | The Access application's 64-character audience tag            |
-| `CF_ACCESS_ALLOWED_EMAILS` | Comma-separated explicitly authorized email identities        |
+## Identity mapping
 
-Partial or invalid configuration prevents startup. The application validates RS256 signatures using the configured team's HTTPS key endpoint, then verifies issuer, audience, expiry, not-before and the email allowlist. Signing keys are fetched on demand and cached for one minute. No background polling or model loading is added. Failed validation or unavailable signing keys deny access.
+After JWT verification, CoffeeJack looks up `external_identities` by provider + subject. Email assist may auto-link only when `CF_ACCESS_OWNER_EMAIL` (or explicit owner link API) matches. Unknown verified users receive HTTP 403 `pending_identity` and see an access-pending UI — no chats, memories or workspaces.
 
-Every request to the remote hostname, including HTML and read-only APIs, requires `Cf-Access-Jwt-Assertion`. An arbitrary identity header does not grant access. Existing session-token checks still apply to mutations. The remote browser Origin must be exactly `https://<configured-hostname>`, and cross-site requests remain blocked. Local host and HTTP Origin rules remain unchanged.
+Sessions expire (remote ~24h, local ~7d), reject disabled users, and are revoked on logout or when a remote mapping no longer matches. Profile switching is refused on remote hosts.
 
-## Provisioning checklist for the operator/agent
+## Remote restrictions
 
-1. Create an Access self-hosted application for the entire hostname (all paths), with an allow policy restricted to the owner's email and the chosen identity provider; enable MFA. Do not use Bypass or Everyone policies.
-2. Create a remotely managed Tunnel and a public hostname service targeting `http://127.0.0.1:3210`. Keep the Host header equal to `COFFEEJACK_REMOTE_HOST`; do not rewrite it to localhost, which would prevent remote Origin validation.
-3. Enable Tunnel **Protect with Access** using the same team and application audience, adding connector-side JWT validation as another boundary.
-4. Configure the four non-secret application values and restart CoffeeJack. Keep tool auto-approval disabled for remote use.
-5. Install `cloudflared` and run the connector with a restricted local token file using `--token-file`. Keep that file outside the repository, restrict it to the owning Windows account, and never print its contents. Do not put tokens on a command line, in logs or in Git.
-6. Verify unauthenticated and unauthorized browsers cannot retrieve `/`, `/api/status`, chat history, artifacts or files. Verify the authorized browser can stream chat and approve a bounded test action. Verify cross-origin requests and missing session tokens are rejected. Check Gaming Mode cancels active work from the remote browser.
-7. Document the tunnel ID and chosen hostname, without credentials. Stopping the connector removes remote reachability; local CoffeeJack keeps working.
+Cloudflare identity alone does **not** grant desktop control, Gaming toggle, or owner workspace access. Existing capability permissions and per-user workspaces still apply. Guests/standard users stay in their own roots under `.local/workspaces/<id>/`.
 
-The unit/HTTP tests exercise valid signed tokens, tampered signatures, expiry, future validity, incorrect issuer/audience/email, unavailable keys, protected reads, and the existing token/origin boundaries. They do not replace the final real Cloudflare end-to-end checks.
+## Provisioning checklist
 
-## Credential-dependent next step
+1. Access application for the hostname with MFA and an allow policy for known emails.
+2. Tunnel public hostname → `http://127.0.0.1:3210` with Host preserved as `COFFEEJACK_REMOTE_HOST`.
+3. Set env values; optionally set `CF_ACCESS_OWNER_EMAIL` so the first remote owner login links without a duplicate account.
+4. Verify unauthenticated/unauthorized browsers cannot read app data; verify pending users see access-pending; verify mapped users get their own workspace only.
 
-To provision the resources directly, the operator/agent needs a narrowly scoped Cloudflare API token with Tunnel write, Access applications/policies edit and DNS edit for the intended account/zone, together with account ID, zone ID, chosen hostname and allowed login email. An existing authenticated Cloudflare session may be used instead. If resources already exist, supply their non-secret configuration plus the Tunnel connector token through a secure local secret file. No Cloudflare credentials are currently installed by this project.
+## Limits
 
-References: [Access application tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/application-token/), [Tunnel origin Access validation](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/origin-parameters/), [Tunnel tokens](https://developers.cloudflare.com/tunnel/reference/tunnel-tokens/), [token-file option](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/run-parameters/).
+Tests cover mocked JWTs (mapped owner, unknown, expired, wrong aud/iss, disabled user, mapping removed, remote switch deny, spoofed loopback headers). They do not replace live Cloudflare tunnel verification.

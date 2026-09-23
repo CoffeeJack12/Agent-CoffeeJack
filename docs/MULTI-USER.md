@@ -4,9 +4,16 @@ CoffeeJack supports local profiles backed by SQLite. On first upgrade, it create
 
 ## Identity and isolation
 
-Identity comes only from `X-CoffeeJack-Token`. Request bodies and query strings never select the acting user. Loopback `GET /api/status` bootstraps an owner session when no valid token exists; other API routes require a valid active session.
+Identity comes only from `X-CoffeeJack-Token` (and, for remote hosts, a verified Cloudflare Access JWT mapped to a CoffeeJack user). Request bodies and query strings never select the acting user.
 
-Chats, memories, preferences, activity, memory proposals and approvals are filtered by the session user. Switching profiles returns a new token; the client must use that token before the target identity applies.
+- **Local (127.0.0.1 / localhost):** `GET /api/status` bootstraps an owner session when no valid token exists. Profile switching remains owner-only and local-only.
+- **Remote (configured Cloudflare host):** Access JWT is verified server-side. Verified `email` + `sub` map through `external_identities` to a CoffeeJack user. Unmapped identities get `pending_identity` (no owner fallback). Spoofed CF headers on loopback are ignored.
+
+Chats, memories, preferences, activity, memory proposals, approvals and workspaces are filtered by the session user. Switching profiles returns a new token; the client must use that token before the target identity applies.
+
+## External identities
+
+Table `external_identities` stores `provider` (e.g. `cloudflare_access`), `external_subject`, optional `normalized_email`, and `user_id`. Subject is the primary key for mapping. Owner auto-link uses explicit env allowlists (`CF_ACCESS_OWNER_EMAIL` / first allowed email), never silent email guessing. Optional `CF_ACCESS_AUTO_CREATE_ROLE=standard` can auto-create standard users; default is pending until the owner links or creates them.
 
 ## Roles
 
@@ -17,15 +24,22 @@ Chats, memories, preferences, activity, memory proposals and approvals are filte
 
 Permission decisions are `allow`, `deny`, or `require_approval`. Tool execution remains observable and cancellable. Approval requests can only be answered by the user who owns the active run.
 
+## Workspaces
+
+Each user has a private default workspace. The owner’s CoffeeJack repo path is preserved as a logical workspace record. See [WORKSPACES.md](WORKSPACES.md).
+
 ## User API
 
-- `GET /api/users`: owners see all profiles; other roles see themselves.
-- `POST /api/users`: owner-only profile creation.
+- `GET /api/users`: owners see all profiles (with identity link status); other roles see themselves.
+- `POST /api/users`: owner-only profile creation (also creates a private workspace).
 - `PATCH /api/users/:id`: owner-only rename, role or status update. The last active owner cannot be demoted or disabled.
-- `POST /api/session/switch`: owner-only switch to an active profile; returns a new session token.
+- `POST /api/session/switch`: **local** owner-only switch to an active profile; returns a new session token.
+- `POST /api/session/logout`: revokes the current session.
+- `POST /api/identity/link`: owner links a verified external subject/email to a user.
+- `GET /api/workspaces`, `POST /api/workspaces/active`: list/select accessible workspaces.
 
-User creation, profile changes, profile switches, approval decisions and manual gaming changes are written to `audit_events`. Audit details redact likely secrets and message content.
+User creation, profile changes, identity link/unlink, remote login/deny, workspace create/switch/deny, approval decisions and manual gaming changes are written to `audit_events`. Audit details redact likely secrets and message content.
 
 ## Current limits
 
-Profiles share the configured workspace, model installation, global runtime settings, browser storage and the single active agent slot. This is local profile separation, not OS-level sandboxing or a network multi-tenant security boundary. There is no password login, session management screen, per-user workspace, encrypted database, or remote user provisioning.
+Profiles share the machine, model installation and the single active agent slot. Isolation is SQLite + workspace path policy, not OS multi-tenancy. There is no password login UI beyond Cloudflare Access for remote; local remains frictionless for the owner.

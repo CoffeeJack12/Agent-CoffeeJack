@@ -4,9 +4,11 @@ The app remains a local-first Windows agent with one active task at a time, loca
 
 ## Completed in this upgrade
 
-- Multi-user profiles: database-backed sessions, owner/trusted/standard/guest roles, scoped chats/memory/preferences/activity/approvals, owner user management and profile switching, audit events, and transactional legacy-data backfill. See [MULTI-USER.md](MULTI-USER.md).
+- Multi-user profiles: database-backed sessions, owner/trusted/standard/guest roles, scoped chats/memory/preferences/activity/approvals, owner user management and local-only profile switching, audit events, and transactional legacy-data backfill. See [MULTI-USER.md](MULTI-USER.md).
+- Cloudflare identity mapping: verified Access JWT → `external_identities` → CoffeeJack user; pending unmapped remotes; no owner fallback; hardened session expiry/revocation. See [REMOTE-ACCESS.md](REMOTE-ACCESS.md).
+- Per-user workspaces: owner CoffeeJack path preserved; other users under `.local/workspaces/<id>/`; chat→workspace binding; tools/git/shell scoped with realpath confinement. See [WORKSPACES.md](WORKSPACES.md).
 - AI Provider Registry: Ollama + optional OpenAI/Anthropic/Google/OpenAI-compatible adapters, model capability catalog, smart Auto Model router with reason codes, health/cooldown, fallback chains, Remote AI Allowed/Ask/Never, per-user council/budget/`councilOtherModels` prefs, privacy sanitizer. Works with zero remote keys; `qwen3:8b` remains local fallback. See [AI-PROVIDERS.md](AI-PROVIDERS.md).
-- AI Council: **provider-native** multi-model consultation with automatic bounded **evidence Round 2** after meaningful tool verification (tests/sources/inspection). Distinct providers/models, no fakes, Gaming suppresses, Jack sole tool executor, timeouts/partial failure, max 2 rounds. Tool evidence overrides council majority. See [AI-COUNCIL.md](AI-COUNCIL.md).
+- AI Council: **provider-native** multi-model consultation with automatic bounded **evidence Round 2** after meaningful tool verification (tests/sources/inspection). Research evidence prefers structured tool payloads (slim stored sources) over scraping chat text. Distinct providers/models, no fakes, Gaming suppresses, Jack sole tool executor, timeouts/partial failure, max 2 rounds. Tool evidence overrides council majority. See [AI-COUNCIL.md](AI-COUNCIL.md).
 - Jarvis foundation: persisted conversation facts/questions, Steam continuity, direct cybersecurity tone, existing-chat bootstrap, execution plans and bounded test-claim evaluation. See [JARVIS-CORE.md](JARVIS-CORE.md) for supported cases and limits.
 
 - Execution reliability: stable anti-loop keys, fourth-failure blocking, successful-repeat reset, real Windows PowerShell and npm execution, protected recursive search and checked Git results.

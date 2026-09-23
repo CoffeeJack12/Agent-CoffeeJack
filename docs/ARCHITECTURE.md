@@ -22,9 +22,11 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/planner.mjs`: bounded execution stages, tool evidence and one-repair test-claim evaluator.
 
 - `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
-- `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions and audit events.
+- `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions (expiry/source) and audit events.
+- `server/identity.mjs`: Cloudflare Access ↔ CoffeeJack user mapping (`external_identities`); pending unmapped remote users.
+- `server/workspaces.mjs`: per-user workspaces, memberships, chat binding, owner migration and path authorization helpers.
 - `server/permissions.mjs`: owner/trusted/standard/guest role policy and per-capability allow, deny or approval decisions.
-- `server/access.mjs`: optional Cloudflare Access JWT boundary; disabled without full configuration. The listener stays on loopback.
+- `server/access.mjs`: optional Cloudflare Access JWT boundary; returns verified identity attributes or false. The listener stays on loopback.
 - `server/router.mjs`: smart Auto Model selection via ProviderRegistry (with legacy Ollama-only path), reason codes, remote Ask approval flag and fallback model lists.
 - `server/providers/`: ProviderRegistry and adapters (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys only).
 - `server/council.mjs`: provider-native multi-model consultation (distinct participants, budgets, timeouts, partial failure, max 2 evidence rounds; Jack sole tool executor).
@@ -43,7 +45,7 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 
 ## Data and lifecycle
 
-`.local/coffeejack.sqlite` stores users, sessions, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals and activity are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. `.local/projects` is the default generated-project workspace. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
+`.local/coffeejack.sqlite` stores users, sessions, external identities, workspaces, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals, activity and workspaces are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. The owner workspace points at the existing CoffeeJack/project path without moving it; other users get `.local/workspaces/<user-id>/`. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
 
 Only one agent task runs at a time. Mutating tools suspend until their exact operation is approved (or auto-approval is explicitly enabled). Approval expires after five minutes, and cancellation rejects pending approvals. Enabling gaming mode aborts the active task, waits for its cleanup, closes the automation browser and unloads all resident Ollama models. Configured process names are checked every 15 seconds. The next user request reloads its selected model after gaming mode ends.
 
@@ -55,4 +57,4 @@ Add tool schemas and implementations to `server/tools.mjs`, preserving approval 
 
 The automated suite covers persistence, traversal/junction escape prevention, blocked secret paths, model/tool error feedback, session/Origin checks, gaming-mode blocking, streaming messages and cancellation during approval. Hardware, real model, document, browser and desktop smoke tests are performed separately because they require Windows, installed models and interactive dependencies.
 
-Optional remote architecture and provisioning prerequisites are documented in [REMOTE-ACCESS.md](REMOTE-ACCESS.md). Browser interaction checks run separately through `scripts/ui-smoke.mjs` and in the Windows browser CI job.
+Optional remote architecture and provisioning prerequisites are documented in [REMOTE-ACCESS.md](REMOTE-ACCESS.md). Workspace isolation is documented in [WORKSPACES.md](WORKSPACES.md). Browser interaction checks run separately through `scripts/ui-smoke.mjs` and in the Windows browser CI job.
