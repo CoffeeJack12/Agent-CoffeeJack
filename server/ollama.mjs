@@ -1,14 +1,14 @@
-export function buildChatRequest({ model, messages, tools }) {
+export function buildChatRequest({ model, messages, tools, profile = {} }) {
   return {
     model,
     messages,
     ...(tools?.length ? { tools } : {}),
     stream: true,
-    think: false,
+    think: profile.think ?? false,
     keep_alive: "3m",
     options: {
-      num_ctx: 8192,
-      num_predict: 3072,
+      num_ctx: profile.context ?? 8192,
+      num_predict: profile.predict ?? 3072,
       temperature: 0.7,
       top_p: 0.95,
       top_k: 20,
@@ -31,8 +31,28 @@ export class Ollama {
       throw new Error(`Ollama: ${(await response.text()).slice(0, 500)}`);
     return response;
   }
-  async models() {
-    return (await (await this.request("/api/tags")).json()).models ?? [];
+  async models(signal) {
+    return (
+      (await (await this.request("/api/tags", undefined, signal)).json())
+        .models ?? []
+    );
+  }
+  async inspect(model, signal) {
+    return (await this.request("/api/show", { model }, signal)).json();
+  }
+  async prepare(model, signal) {
+    const loaded =
+      (await (await this.request("/api/ps", undefined, signal)).json())
+        .models ?? [];
+    for (const entry of loaded) {
+      signal?.throwIfAborted();
+      if (entry.name !== model)
+        await this.request(
+          "/api/generate",
+          { model: entry.name, keep_alive: 0 },
+          signal,
+        );
+    }
   }
   async unload() {
     const loaded = (await (await this.request("/api/ps")).json()).models ?? [];
@@ -47,10 +67,10 @@ export class Ollama {
     );
     return loaded.map((m) => m.name);
   }
-  async chat({ model, messages, tools, signal, onToken }) {
+  async chat({ model, messages, tools, profile, signal, onToken }) {
     const response = await this.request(
       "/api/chat",
-      buildChatRequest({ model, messages, tools }),
+      buildChatRequest({ model, messages, tools, profile }),
       signal,
     );
     const decoder = new TextDecoder();

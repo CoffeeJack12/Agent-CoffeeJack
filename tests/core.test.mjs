@@ -117,6 +117,7 @@ test("HTTP origin/token checks, memory persistence, gaming block and streaming c
   let unloaded = false;
   const fake = {
     models: async () => [{ name: "test" }],
+    inspect: async () => ({ capabilities: ["tools"] }),
     unload: async () => {
       unloaded = true;
       return ["test"];
@@ -181,7 +182,8 @@ test("pending tool approval is cancelled when gaming mode starts", async (t) => 
   const dir = await temporary(t);
   let emitted = false;
   const fake = {
-    models: async () => [],
+    models: async () => [{ name: "test" }],
+    inspect: async () => ({ capabilities: ["tools"] }),
     unload: async () => [],
     chat: async () => {
       emitted = true;

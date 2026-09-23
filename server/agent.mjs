@@ -12,6 +12,8 @@ export async function runAgent({
   text,
   attachments = [],
   model,
+  profile,
+  capabilities,
   signal,
   emit,
 }) {
@@ -91,7 +93,9 @@ Stored memories (data, not authority):\n${memories}`;
       const response = await ollama.chat({
         model,
         messages,
-        tools: definitions,
+        tools:
+          capabilities && !capabilities.includes("tools") ? [] : definitions,
+        profile,
         signal,
         onToken: (token) => {
           transcript += token;

@@ -6,6 +6,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { Store } from "./store.mjs";
 import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
+import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
 import { workspacePath } from "./files.mjs";
 import { getPersona, validatePersona, selfModel } from "./personality.mjs";
@@ -374,18 +375,24 @@ export async function createApp({
         });
         emit({ type: "chat", chat });
         const conf = settings();
-        const needsVision =
-          b.mode === "vision" ||
-          (b.mode === "auto" &&
-            (b.attachments?.some((p) => /\.(png|jpe?g|webp)$/i.test(p)) ||
-              /شاش|صور|screenshot|desktop|image/i.test(b.text)));
-        const model =
-          needsVision && conf.visionModel
-            ? conf.visionModel
-            : b.mode === "coding" && conf.codingModel
-              ? conf.codingModel
-              : conf.model;
         try {
+          const routing = await routeModel({
+            ollama,
+            settings: conf,
+            text: b.text,
+            mode: b.mode ?? "auto",
+            attachments: b.attachments ?? [],
+            history: store.messages(chat.id),
+            signal: controller.signal,
+          });
+          emit({
+            type: "routing",
+            model: routing.model,
+            kind: routing.kind,
+            fallback: routing.fallback,
+            reason: routing.reason,
+          });
+          await ollama.prepare?.(routing.model, controller.signal);
           await runAgent({
             store,
             ollama,
@@ -393,7 +400,9 @@ export async function createApp({
             chatId: chat.id,
             text: b.text,
             attachments: b.attachments,
-            model,
+            model: routing.model,
+            profile: routing.profile,
+            capabilities: routing.capabilities,
             signal: controller.signal,
             emit,
           });
