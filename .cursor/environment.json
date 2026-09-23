@@ -1,8 +1,11 @@
 {
   "name": "CoffeeJack",
   "install": "bash .cursor/install.sh",
-  "start": "bash .cursor/start.sh",
   "terminals": [
+    {
+      "name": "ollama",
+      "command": "bash .cursor/serve-ollama.sh"
+    },
     {
       "name": "coffeejack",
       "command": "bash .cursor/serve-app.sh"
