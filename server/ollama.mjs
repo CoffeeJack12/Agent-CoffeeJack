@@ -16,9 +16,30 @@ export function buildChatRequest({ model, messages, tools, profile = {} }) {
   };
 }
 
+/** Keep Ollama on loopback unless explicitly overridden for owned labs. */
+export function assertLocalOllamaUrl(url = "http://127.0.0.1:11434") {
+  const raw = String(url || "http://127.0.0.1:11434").trim();
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error("OLLAMA_URL must be a valid http(s) URL");
+  }
+  if (!["http:", "https:"].includes(parsed.protocol))
+    throw new Error("OLLAMA_URL must use http or https");
+  const host = parsed.hostname.toLowerCase();
+  const loopback =
+    host === "127.0.0.1" || host === "localhost" || host === "::1";
+  if (!loopback && process.env.COFFEEJACK_ALLOW_REMOTE_OLLAMA !== "1")
+    throw new Error(
+      "OLLAMA_URL must target 127.0.0.1/localhost (set COFFEEJACK_ALLOW_REMOTE_OLLAMA=1 only for owned lab setups)",
+    );
+  return raw.replace(/\/$/, "");
+}
+
 export class Ollama {
   constructor(url = "http://127.0.0.1:11434") {
-    this.url = url;
+    this.url = assertLocalOllamaUrl(url);
   }
   async request(endpoint, body, signal) {
     const response = await fetch(this.url + endpoint, {

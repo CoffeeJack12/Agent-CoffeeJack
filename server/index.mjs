@@ -277,12 +277,19 @@ export async function createApp({
       "Permissions-Policy",
       "camera=(), microphone=(), geolocation=()",
     );
+    res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
+    res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     const host = req.headers.host ?? "";
     const trust = classifyRequest(req, {
       accessHostname: access?.hostname || null,
       accessConfigured: Boolean(access),
     });
     const isLocal = trust.mode === "local";
+    if (!isLocal)
+      res.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+      );
     let remoteIdentity = null;
     if (!isLocal) {
       if (!access)
@@ -915,6 +922,8 @@ export async function createApp({
         return json(res, 200, { gaming, unloaded });
       }
       if (route === "/api/stop" && req.method === "POST") {
+        if (active && active.userId !== user.id)
+          return json(res, 403, { error: "Stop denied for another user's task" });
         active?.controller.abort();
         return json(res, 200, { ok: true });
       }
@@ -1382,9 +1391,13 @@ export async function createApp({
       if (
         route.startsWith("/artifacts/") &&
         /^[a-z]+-\d+\.png$/.test(path.basename(route))
-      )
+      ) {
+        // Artifacts may contain screenshots — require an authenticated session.
+        const artifactUser = sessionIdentity(req);
+        if (!artifactUser)
+          return json(res, 403, { error: "Invalid session token" });
         filename = path.join(artifacts, path.basename(route));
-      else if (
+      } else if (
         [
           "/",
           "/app.js",

@@ -45,7 +45,9 @@ User creation, profile changes, identity link/unlink, remote login/deny, workspa
 - **Local:** `X-CoffeeJack-Token` from `/api/status`, held in memory by the UI (not `localStorage`).
 - **Remote:** same header for compatibility, plus `Set-Cookie: coffeejack_session` (HttpOnly, Secure, SameSite=Lax).
 - Audit events redact token/secret fields. Do not log Authorization or cookie values.
+- `/artifacts/*` requires a valid session. `/api/stop` only cancels the caller's own active task.
+- `OLLAMA_URL` must be loopback unless `COFFEEJACK_ALLOW_REMOTE_OLLAMA=1` (owned lab only).
 
 ## Current limits
 
-Profiles share the machine, model installation and the single active agent slot. Isolation is SQLite + workspace path policy, not OS multi-tenancy. There is no password login UI beyond Cloudflare Access for remote; local remains frictionless for the owner.
+Profiles share the machine, model installation and the single active agent slot. Isolation is SQLite + workspace path policy, not OS multi-tenancy. There is no password login UI beyond Cloudflare Access for remote; local remains frictionless for the owner. Artifact files are session-gated but not yet per-user path partitioned.
