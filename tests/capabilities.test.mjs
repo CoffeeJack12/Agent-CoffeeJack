@@ -146,6 +146,7 @@ async function chatFixture(t, prefs, answers, text) {
     signal: new AbortController().signal,
     emit: (e) => {
       if (e.type === "token") output += e.text;
+      if (e.type === "revise") output = e.text || "";
       if (e.type === "tool") tools.push(`${e.name}:${e.status}`);
     },
     tools: {
@@ -317,6 +318,7 @@ test("Steam local-game context is retained when asking if Jack can inspect", asy
       signal: new AbortController().signal,
       emit: (e) => {
         if (e.type === "token") output += e.text;
+        if (e.type === "revise") output = e.text || "";
       },
       tools: { workspace: dir, execute: async () => ({ code: 0 }) },
       ollama: {
@@ -345,6 +347,7 @@ test("Steam local-game context is retained when asking if Jack can inspect", asy
     signal: new AbortController().signal,
     emit: (e) => {
       if (e.type === "token") inspectOut += e.text;
+      if (e.type === "revise") inspectOut = e.text || "";
     },
     tools: { workspace: dir, execute: async () => ({ code: 0 }) },
     ollama: {

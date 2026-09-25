@@ -318,6 +318,8 @@ test("owner manages users, cannot demote last owner, and switches by token", asy
   );
   assert.equal(createdResponse.status, 201);
   const created = await createdResponse.json();
+  assert.equal(created.role, ROLES.STANDARD);
+  assert.equal(listUsers(app.store).find((u) => u.id === created.id).role, ROLES.STANDARD);
   assert.equal(
     (
       await request(
@@ -339,10 +341,20 @@ test("owner manages users, cannot demote last owner, and switches by token", asy
   );
   assert.equal(switchedResponse.status, 200);
   const switched = await switchedResponse.json();
+  assert.equal(switched.user.id, created.id);
+  assert.equal(switched.user.role, ROLES.STANDARD);
   const status = await (
     await request(base, switched.token, "/api/status")
   ).json();
   assert.equal(status.user.id, created.id);
+  assert.equal(status.user.role, ROLES.STANDARD);
+  assert.equal(status.identitySource, "local");
+  // Owner account is unchanged; switched session is standard-only.
+  assert.equal(resolveLocalOwner(app.store).role, ROLES.OWNER);
+  assert.equal(
+    listUsers(app.store).find((u) => u.id === created.id).role,
+    ROLES.STANDARD,
+  );
   assert.equal((await (await request(base, switched.token, "/api/users")).json()).length, 1);
   assert.equal(
     (
@@ -356,4 +368,49 @@ test("owner manages users, cannot demote last owner, and switches by token", asy
     ).status,
     403,
   );
+});
+
+test("user creation preserves roles after reopening and requires explicit owner confirmation", async (t) => {
+  const { app, base } = await runningApp(t);
+  const createdIds = [];
+  for (const role of [undefined, ROLES.STANDARD, ROLES.TRUSTED, ROLES.GUEST]) {
+    const response = await request(base, app.token, "/api/users", "POST", {
+      displayName: `Regression ${role ?? "default"}`, role,
+    });
+    assert.equal(response.status, 201);
+    const user = await response.json();
+    assert.equal(user.role, role ?? ROLES.STANDARD);
+    createdIds.push([user.id, user.role]);
+  }
+  const before = listUsers(app.store).length;
+  for (const role of ["owner", "OWNER"]) {
+    for (const confirmOwner of [undefined, false, "true"]) {
+      const response = await request(base, app.token, "/api/users", "POST", {
+        displayName: "Accidental owner", role, confirmOwner,
+      });
+      assert.equal(response.status, 400);
+    }
+  }
+  assert.equal(listUsers(app.store).length, before);
+  const response = await request(base, app.token, "/api/users", "POST", {
+    displayName: "Explicit owner", role: ROLES.OWNER, confirmOwner: true,
+  });
+  assert.equal(response.status, 201);
+  assert.equal((await response.json()).role, ROLES.OWNER);
+  for (const [id] of createdIds) {
+    const token = createSession(app.store, id).token;
+    for (const role of [ROLES.STANDARD, ROLES.OWNER]) {
+      assert.equal((await request(base, token, "/api/users", "POST", {
+        displayName: "Unauthorized", role, confirmOwner: true,
+      })).status, 403);
+    }
+  }
+  const filename = app.store.db.prepare("PRAGMA database_list").get().file;
+  const reopened = new Store(path.dirname(filename));
+  try {
+    for (const [id, role] of createdIds)
+      assert.equal(listUsers(reopened).find((u) => u.id === id).role, role);
+  } finally {
+    reopened.close();
+  }
 });

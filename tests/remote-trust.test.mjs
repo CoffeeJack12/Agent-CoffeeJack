@@ -206,6 +206,41 @@ async function appWithAccess(t) {
   return { app, port: app.server.address().port, dir };
 }
 
+test("Access entry navigation allows only verified remote GET documents", async (t) => {
+  const { port, dir } = await appWithAccess(t);
+  await fs.mkdir(path.join(dir, "public"));
+  await fs.writeFile(path.join(dir, "public", "index.html"), "<!doctype html><title>CoffeeJack</title>");
+  const headers = {
+    "Sec-Fetch-Site": "cross-site",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Dest": "document",
+  };
+  const base = { host: config.hostname, jwt: jwt(), headers };
+  for (const route of ["/", "/?after=access"]) {
+    const res = await httpReq(port, route, base);
+    assert.equal(res.status, 200);
+    assert.match(res.headers["content-type"], /text\/html/);
+  }
+  assert.equal((await httpReq(port, "/", {
+    ...base, host: "127.0.0.1", headers: { ...headers, "Cf-Ray": "test" },
+  })).status, 200);
+  for (const opts of [
+    { method: "POST" }, { method: "PUT" }, { method: "DELETE" }, { method: "HEAD" },
+    { headers: { ...headers, Origin: "https://evil.example" } },
+    { headers: { ...headers, Origin: "null" } },
+    { headers: { ...headers, "Sec-Fetch-Mode": "cors" } },
+    { headers: { ...headers, "Sec-Fetch-Dest": "iframe" } },
+    { headers: { "Sec-Fetch-Site": "cross-site" } },
+    { jwt: undefined }, { jwt: "invalid" }, { host: "evil.example" },
+    { host: "127.0.0.1", jwt: undefined },
+  ]) assert.equal((await httpReq(port, "/", { ...base, ...opts })).status, 403);
+  for (const route of ["/api/status", "/api/chats", "/app.js"]) {
+    const res = await httpReq(port, route, base);
+    assert.equal(res.status, 403);
+    assert.equal(res.data.error, "Cross-origin request denied");
+  }
+});
+
 test("forwarded tunnel on loopback never bootstraps local owner", async (t) => {
   const { port } = await appWithAccess(t);
   const res = await httpReq(port, "/api/status", {
@@ -268,6 +303,45 @@ test("valid remote owner and TestUser sessions + security headers", async (t) =>
   assert.equal(tu.status, 200);
   assert.equal(tu.data.user.role, "standard");
   assert.equal(tu.data.identitySource, "cloudflare");
+});
+
+test("remote owner cannot switch profiles; local switch cannot bypass Cloudflare binding", async (t) => {
+  const { app, port } = await appWithAccess(t);
+  const owner = resolveLocalOwner(app.store);
+  const target = createUser(app.store, { displayName: "LocalOnly", role: "standard" });
+  const remote = { host: config.hostname, jwt: jwt() };
+  const first = await httpReq(port, "/api/status", remote);
+  assert.equal(first.data.user.id, owner.id);
+  const denied = await httpReq(port, "/api/session/switch", {
+    ...remote, token: first.data.token, method: "POST", body: { userId: target.id },
+  });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.data.code, "remote_switch_denied");
+  assert.match(
+    denied.data.error,
+    /Local-only users cannot be switched into from a Cloudflare-authenticated session/,
+  );
+  assert.match(denied.data.error, /127\.0\.0\.1:3210/);
+  assert.equal(denied.data.token, undefined);
+  const unchanged = await httpReq(port, "/api/status", { ...remote, token: first.data.token });
+  assert.equal(unchanged.data.user.id, owner.id);
+  const local = await httpReq(port, "/api/status");
+  const switched = await httpReq(port, "/api/session/switch", {
+    token: local.data.token, method: "POST", body: { userId: target.id },
+  });
+  assert.equal(switched.status, 200);
+  const localStatus = await httpReq(port, "/api/status", { token: switched.data.token });
+  assert.equal(localStatus.data.user.id, target.id);
+  assert.equal(localStatus.data.user.role, "standard");
+  assert.equal(localStatus.data.identitySource, "local");
+  const impersonation = await httpReq(port, "/api/status", { ...remote, token: switched.data.token });
+  assert.equal(impersonation.status, 403);
+  // Owner Cloudflare binding remains intact after a local switch elsewhere.
+  const stillOwner = await httpReq(port, "/api/status", { ...remote, token: first.data.token });
+  assert.equal(stillOwner.status, 200);
+  assert.equal(stillOwner.data.user.id, owner.id);
+  assert.equal(stillOwner.data.user.role, "owner");
+  assert.equal(stillOwner.data.identitySource, "cloudflare");
 });
 
 test("role downgrade applies on next remote status", async (t) => {

@@ -364,6 +364,11 @@ test("remote cannot use local profile switching", async (t) => {
     body: { userId: other.id },
   });
   assert.equal(switchRes.status, 403);
+  assert.equal(switchRes.data.code, "remote_switch_denied");
+  assert.match(
+    switchRes.data.error,
+    /Local-only users cannot be switched into from a Cloudflare-authenticated session/,
+  );
 });
 
 test("spoofed CF headers on loopback do not become remote owner", async (t) => {

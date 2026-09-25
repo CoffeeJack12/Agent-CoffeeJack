@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { localizedSystemNote } from "./conversation-style.mjs";
 
 const patterns = {
   targetLocation:
@@ -303,9 +304,11 @@ export function guardResponse(state, candidate, languageText = "", options = {})
           ? "يعتمد على الهدف. وش النظام، وش اللي تبغى توصله أو تعدّله أو تختبره؟"
           : "Depends on the target. What are you trying to access, modify, test or bypass?";
       } else
-        text = arabic
-          ? "السياق السابق محفوظ. أحتاج التفصيل الناقص فقط حتى أتابع."
-          : "The earlier context is saved. I still need the outstanding detail to continue.";
+        text = localizedSystemNote(state.style || {}, {
+          jeddawi: "كمّل معي من نفس الموضوع — وش تبغى نسوي دحين؟",
+          ar: "السياق محفوظ. وش تبغى نكمّل؟",
+          en: "The earlier context is saved. I still need the outstanding detail to continue.",
+        });
     }
   }
   for (const question of text.match(/[^.!?؟\n]*[?؟]/g) ?? []) {

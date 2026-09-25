@@ -178,7 +178,8 @@ test("HTTP origin/token checks, memory persistence, gaming block and streaming c
   await send("/api/gaming", { enabled: false });
   const response = await send("/api/chat", { text: "hello" });
   const events = (await response.text()).trim().split("\n").map(JSON.parse);
-  assert.equal(events.at(-1).type, "done");
+  assert.equal(events.at(-1).type, "timing");
+  assert.equal(events.find((e) => e.type === "done")?.type, "done");
   assert.equal(events.find((e) => e.type === "token").text, "Hello Jack");
   const chats = await (await fetch(base + "/api/chats", authenticated)).json();
   assert.equal(chats.length, 1);

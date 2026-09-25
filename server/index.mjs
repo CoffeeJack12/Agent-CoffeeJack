@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
 import { accessFromEnvironment } from "./access.mjs";
 import { classifyRequest, expectedOrigin } from "./trust.mjs";
-import { createRateLimiter, REMOTE_RATE } from "./rate-limit.mjs";
+import { createRateLimiter, AUTH_RATE, REMOTE_RATE } from "./rate-limit.mjs";
 import { Store } from "./store.mjs";
 import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
@@ -36,8 +36,10 @@ import {
   applyLegacyOwnerAutoApprove,
   authorize,
   canManageUsers,
+  canSelfRepair,
   canToggleGaming,
   permissionSummary,
+  publicAccountNeedsVerification,
   toolCapability,
 } from "./permissions.mjs";
 import {
@@ -79,18 +81,53 @@ import {
   cleanupArtifacts,
   migrateLegacyArtifacts,
 } from "./artifacts.mjs";
+import {
+  shouldAttachVerification,
+  resolveTurnContext,
+  eventsForCurrentTurn,
+  latestEventId,
+  filterToolsForTurn,
+} from "./conversation-intent.mjs";
+import {
+  attachOwnerCredentials,
+  authenticateAccount,
+  backupSqliteOnce,
+  ensureAuthSchema,
+  publicUser,
+  registerAccount,
+  requestPasswordReset,
+  resetPassword,
+  resendVerification,
+  verifyEmail,
+} from "./accounts.mjs";
+import { mailStatus } from "./email.mjs";
+import { loadLocalEnv } from "./env.mjs";
+import { resolveLocalModelPlan } from "./local-models.mjs";
+import { createTurnTiming, devTimingEnabled } from "./latency.mjs";
+import {
+  createSelfRepairStore,
+  isSelfRepairComplaint,
+  formatProposalForPrompt,
+  canDiagnoseSelfRepair,
+} from "./self-repair.mjs";
 
 export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   dataDirectory,
   ollama: providedOllama,
   remoteAccess,
+  mailSender,
+  mailEnv,
 } = {}) {
-  const access = remoteAccess ?? accessFromEnvironment();
+  const access =
+    remoteAccess === undefined ? accessFromEnvironment() : remoteAccess;
+  const mail = { send: mailSender, env: mailEnv ?? process.env };
   const data = dataDirectory ?? path.join(root, ".local");
   const artifacts = path.join(data, "artifacts");
   await fs.mkdir(artifacts, { recursive: true });
   const store = new Store(data);
+  ensureAuthSchema(store);
+  await backupSqliteOnce(data);
   ensureIdentitySchema(store);
   ensureWorkspaceSchema(store);
   ensureArtifactSchema(store);
@@ -103,6 +140,7 @@ export async function createApp({
   const registry = createDefaultRegistry(ollama);
   const approvals = new Map();
   const memoryProposals = createMemoryProposalStore(store);
+  const selfRepair = createSelfRepairStore(store, { repoRoot: root });
   let active = null,
     gaming = false,
     autoGaming = false,
@@ -260,18 +298,19 @@ export async function createApp({
     return { token: requestToken, user, session };
   };
   const remoteLimiter = createRateLimiter({ windowMs: 60_000, max: 40 });
+  const authLimiter = createRateLimiter({ windowMs: 60_000, max: 8 });
   const setSessionCookie = (res, sessionToken, { remote }) => {
-    if (!remote || !sessionToken) return;
+    if (!sessionToken) return;
+    const secure = remote ? "; Secure" : "";
     res.setHeader(
       "Set-Cookie",
-      `coffeejack_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=86400`,
+      `coffeejack_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly${secure}; SameSite=Lax; Max-Age=86400`,
     );
   };
-  const clearSessionCookie = (res, { remote }) => {
-    if (!remote) return;
+  const clearSessionCookie = (res) => {
     res.setHeader(
       "Set-Cookie",
-      "coffeejack_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
+      "coffeejack_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
     );
   };
   const server = http.createServer(async (req, res) => {
@@ -341,18 +380,208 @@ export async function createApp({
       mode: trust.mode,
       accessHostname: access?.hostname,
     });
+    // Access redirects can retain cross-site Fetch Metadata. Only the verified
+    // remote app entry document may cross that boundary; APIs and writes may not.
+    const accessNavigation =
+      Boolean(remoteIdentity) &&
+      req.method === "GET" &&
+      (req.url === "/" || req.url.startsWith("/?")) &&
+      req.headers["sec-fetch-mode"] === "navigate" &&
+      req.headers["sec-fetch-dest"] === "document";
     if (
       (req.headers.origin && req.headers.origin !== expected) ||
-      req.headers["sec-fetch-site"] === "cross-site"
+      (req.headers["sec-fetch-site"] === "cross-site" && !accessNavigation)
     )
       return json(res, 403, { error: "Cross-origin request denied" });
     const url = new URL(req.url, `http://${host || "127.0.0.1"}`);
     const route = url.pathname;
     if (route.startsWith("/api/")) res.setHeader("Cache-Control", "no-store");
+    const tooMany = (res, limited) => {
+      if (limited.ok) return false;
+      res.setHeader(
+        "Retry-After",
+        String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+      );
+      json(res, 429, { error: "Too many requests" });
+      return true;
+    };
     try {
       let identity = route.startsWith("/api/")
         ? sessionIdentity(req)
         : undefined;
+      const publicBase = !isLocal && access?.hostname
+        ? `https://${access.hostname}`
+        : `http://${host || "127.0.0.1:3210"}`;
+      const sessionExpired = () =>
+        json(res, 401, {
+          error: "Your session expired. Please log in again.",
+          code: "session_expired",
+        });
+      if (route === "/api/auth/config" && req.method === "GET") {
+        return json(res, 200, {
+          mail: mailStatus(mail.env),
+          publicRegistration: true,
+        });
+      }
+      if (route === "/api/auth/me" && req.method === "GET") {
+        if (!identity?.user) return sessionExpired();
+        return json(res, 200, {
+          user: {
+            ...publicUser(identity.user),
+            email_verification_required: publicAccountNeedsVerification(
+              identity.user,
+            ),
+          },
+        });
+      }
+      if (route === "/api/auth/register" && req.method === "POST") {
+        if (
+          tooMany(
+            res,
+            authLimiter.check(req, AUTH_RATE.signup.category, AUTH_RATE.signup.max),
+          )
+        )
+          return;
+        const b = await body(req);
+        const created = await registerAccount(
+          store,
+          {
+            displayName: b.displayName,
+            email: b.email,
+            password: b.password,
+            confirmPassword: b.confirmPassword,
+            role: b.role,
+          },
+          { dataDirectory: data, mail, publicBase },
+        );
+        if (identity?.token) revokeSession(store, identity.token);
+        const session = createSession(store, created.user.id, {
+          source: isLocal ? "account" : "remote",
+        });
+        setSessionCookie(res, session.token, { remote: !isLocal });
+        return json(res, 201, created);
+      }
+      if (route === "/api/auth/login" && req.method === "POST") {
+        if (
+          tooMany(
+            res,
+            authLimiter.check(req, AUTH_RATE.login.category, AUTH_RATE.login.max),
+          )
+        )
+          return;
+        const b = await body(req);
+        const result = await authenticateAccount(store, {
+          email: b.email,
+          password: b.password,
+        });
+        if (!result.ok)
+          return json(res, 401, { error: "Invalid email or password" });
+        if (identity?.token) revokeSession(store, identity.token);
+        const session = createSession(store, result.user.id, {
+          source: isLocal ? "account" : "remote",
+        });
+        setSessionCookie(res, session.token, { remote: !isLocal });
+        audit(store, {
+          userId: result.user.id,
+          action: "account_login",
+          detail: { source: isLocal ? "local" : "remote" },
+        });
+        return json(res, 200, {
+          user: publicUser(result.user),
+        });
+      }
+      if (route === "/api/auth/logout" && req.method === "POST") {
+        if (identity?.token) {
+          revokeSession(store, identity.token);
+          audit(store, {
+            userId: identity.user?.id,
+            action: "session_revoked",
+            detail: { reason: "account_logout" },
+          });
+        }
+        clearSessionCookie(res);
+        return json(res, 200, { ok: true });
+      }
+      if (route === "/api/auth/forgot" && req.method === "POST") {
+        if (
+          tooMany(
+            res,
+            authLimiter.check(req, AUTH_RATE.reset.category, AUTH_RATE.reset.max),
+          )
+        )
+          return;
+        const b = await body(req);
+        const result = await requestPasswordReset(store, b.email, {
+          dataDirectory: data,
+          mail,
+          publicBase,
+        });
+        return json(res, 200, {
+          message: result.message,
+          mail: result.mail,
+          ...(result.devToken ? { devToken: result.devToken } : {}),
+        });
+      }
+      if (route === "/api/auth/reset" && req.method === "POST") {
+        if (
+          tooMany(
+            res,
+            authLimiter.check(req, AUTH_RATE.reset.category, AUTH_RATE.reset.max),
+          )
+        )
+          return;
+        const b = await body(req);
+        await resetPassword(store, {
+          email: b.email,
+          code: b.code || b.token,
+          password: b.password,
+          confirmPassword: b.confirmPassword,
+        });
+        return json(res, 200, { ok: true });
+      }
+      if (route === "/api/auth/verify" && req.method === "POST") {
+        if (
+          tooMany(
+            res,
+            authLimiter.check(req, AUTH_RATE.verify.category, AUTH_RATE.verify.max),
+          )
+        )
+          return;
+        if (!identity?.user) return sessionExpired();
+        const b = await body(req);
+        const user = await verifyEmail(store, b.code || b.token, {
+          user: identity.user,
+        });
+        return json(res, 200, { user });
+      }
+      if (route === "/api/auth/resend" && req.method === "POST") {
+        if (
+          tooMany(
+            res,
+            authLimiter.check(req, AUTH_RATE.verify.category, AUTH_RATE.verify.max),
+          )
+        )
+          return;
+        if (!identity?.user) return sessionExpired();
+        const result = await resendVerification(store, identity.user, {
+          dataDirectory: data,
+          mail,
+          publicBase,
+        });
+        return json(res, 200, result);
+      }
+      if (route === "/api/auth/owner/credentials" && req.method === "POST") {
+        const actor = identity?.user;
+        if (!actor || actor.role !== ROLES.OWNER)
+          return json(res, 403, { error: "Owner credentials denied" });
+        const b = await body(req);
+        const user = await attachOwnerCredentials(store, actor, {
+          email: b.email,
+          password: b.password,
+          confirmPassword: b.confirmPassword,
+        });
+        return json(res, 200, { user });
+      }
       // Remote: Cloudflare-verified identity must map to the session user.
       // Never let a stolen local session token impersonate another CF subject.
       if (!isLocal && remoteIdentity && route.startsWith("/api/")) {
@@ -494,6 +723,7 @@ export async function createApp({
         });
         let models = [],
           modelError = "";
+        let localModelPlan = null;
         try {
           models = await ollama.models();
         } catch (e) {
@@ -521,8 +751,16 @@ export async function createApp({
               local: m.local !== false,
               label: `${m.id} · ${m.provider}${m.local === false ? " · Remote" : " · Local"}`,
             }));
+          localModelPlan = resolveLocalModelPlan(
+            models.filter((m) => m.local !== false).map((m) => m.name),
+          );
         } catch {
           /* keep ollama models */
+        }
+        if (!localModelPlan) {
+          localModelPlan = resolveLocalModelPlan(
+            (models || []).map((m) => m.name || m.id).filter(Boolean),
+          );
         }
         const identities = findIdentitiesForUser(store, user.id);
         if (!isLocal) setSessionCookie(res, identity.token, { remote: true });
@@ -533,8 +771,15 @@ export async function createApp({
             display_name: user.display_name,
             role: user.role,
             status: user.status,
+            email: user.email || null,
+            email_verified: Boolean(user.email_verified),
+            email_verification_required: publicAccountNeedsVerification(user),
           },
-          identitySource: isLocal ? "local" : "cloudflare",
+          identitySource: !isLocal
+            ? "cloudflare"
+            : identity.session?.source === "account"
+              ? "account"
+              : "local",
           identities: identities.map((i) => ({
             provider: i.provider,
             email: i.normalized_email,
@@ -543,6 +788,15 @@ export async function createApp({
           permissions: permissionSummary(user),
           models,
           providers,
+          localModels: localModelPlan,
+          autoRouting: localModelPlan
+            ? {
+                provider: "ollama",
+                general: localModelPlan.general,
+                reasoning: localModelPlan.reasoning,
+                fallback: localModelPlan.fallback,
+              }
+            : null,
           modelError,
           settings: {
             ...settings(),
@@ -568,11 +822,25 @@ export async function createApp({
           approvals: [...approvals.values()]
             .filter((pending) => pending.userId === user.id)
             .map(({ id, name, args }) => ({ id, name, args })),
+          selfRepair: {
+            settings: selfRepair.settings(),
+            canApply: canSelfRepair(user),
+            canDiagnose: canDiagnoseSelfRepair(user),
+          },
         });
       }
       if (route.startsWith("/api/") && !identity)
         return json(res, 403, { error: "Invalid session token" });
       const user = identity?.user;
+      if (
+        publicAccountNeedsVerification(user) &&
+        route !== "/api/session/logout" &&
+        !route.startsWith("/api/auth/")
+      )
+        return json(res, 403, {
+          error: "Email verification required",
+          code: "email_unverified",
+        });
       if (route === "/api/users" && req.method === "GET") {
         const users = canManageUsers(user)
           ? listUsers(store)
@@ -593,6 +861,10 @@ export async function createApp({
         if (!canManageUsers(user))
           return json(res, 403, { error: "User management denied" });
         const b = await body(req);
+        // An accidental role selection must not silently grant owner access.
+        if (String(b.role ?? "").toLowerCase() === ROLES.OWNER &&
+            b.confirmOwner !== true)
+          return json(res, 400, { error: "Owner creation requires explicit confirmation" });
         const created = createUser(store, {
           displayName: b.displayName,
           role: b.role,
@@ -644,9 +916,12 @@ export async function createApp({
         return json(res, 200, updated);
       }
       if (route === "/api/session/switch" && req.method === "POST") {
+        // Cloudflare-bound remote sessions must not impersonate another local user.
         if (!isLocal)
           return json(res, 403, {
-            error: "Profile switching is local-only",
+            error:
+              "Local-only users cannot be switched into from a Cloudflare-authenticated session. Open CoffeeJack locally at http://127.0.0.1:3210 to switch users.",
+            code: "remote_switch_denied",
           });
         if (!canManageUsers(user))
           return json(res, 403, { error: "Profile switching denied" });
@@ -677,7 +952,7 @@ export async function createApp({
             detail: { reason: "logout" },
           });
         }
-        clearSessionCookie(res, { remote: !isLocal });
+        clearSessionCookie(res);
         return json(res, 200, { ok: true });
       }
       if (route === "/api/identity/link" && req.method === "POST") {
@@ -794,6 +1069,60 @@ export async function createApp({
           return json(res, 404, { error: "Memory proposal expired" });
         const result = memoryProposals.resolve(id, b.action, b.content);
         return json(res, 200, result);
+      }
+      if (route === "/api/self-repair" && req.method === "GET") {
+        const settings = selfRepair.settings();
+        return json(res, 200, {
+          settings,
+          canApply: canSelfRepair(user),
+          canDiagnose: canDiagnoseSelfRepair(user),
+          history: user.role === "owner" ? selfRepair.history() : [],
+          pending:
+            user.role === "owner"
+              ? selfRepair.listPending()
+              : selfRepair.listPending().filter((p) => p.userId === user.id),
+        });
+      }
+      if (route === "/api/self-repair" && req.method === "POST") {
+        if (user.role !== "owner")
+          return json(res, 403, { error: "Only the Owner can change Self Repair settings" });
+        const b = await body(req);
+        return json(res, 200, { settings: selfRepair.saveSettings(b) });
+      }
+      if (route.startsWith("/api/self-repair/") && req.method === "POST") {
+        const id = route.split("/").pop();
+        const b = await body(req);
+        const action = b.action;
+        if (action === "cancel") {
+          return json(res, 200, await selfRepair.cancel(id, user));
+        }
+        if (action === "attach_patches") {
+          if (!canSelfRepair(user))
+            return json(res, 403, { error: "Only the Owner can attach patches" });
+          return json(res, 200, {
+            proposal: selfRepair.attachPatches(id, user, b.patches),
+          });
+        }
+        if (action === "apply") {
+          if (!canSelfRepair(user))
+            return json(res, 403, { error: "Only the Owner can apply Self Repair" });
+          const result = await selfRepair.apply(id, user, {
+            acknowledgeSecurity: b.acknowledgeSecurity === true,
+          });
+          return json(res, result.ok ? 200 : 409, result);
+        }
+        if (action === "diagnose") {
+          if (!canDiagnoseSelfRepair(user))
+            return json(res, 403, { error: "Diagnosis not allowed for this role" });
+          const result = await selfRepair.diagnose({
+            text: String(b.text || ""),
+            chatId: b.chatId || null,
+            user,
+            historyMessages: b.chatId ? store.messages(b.chatId) : [],
+          });
+          return json(res, 200, result);
+        }
+        throw new Error("Invalid self-repair action");
       }
       if (route === "/api/events" && req.method === "GET")
         return json(res, 200, store.events(user.id));
@@ -1009,6 +1338,28 @@ export async function createApp({
         return json(res, 200, { path: `uploads/${name}`, name: b.name });
       }
       if (route === "/api/chat" && req.method === "POST") {
+        const chatAuth = authorize({ user, capability: "chat" });
+        if (chatAuth.decision !== "allow")
+          return json(res, 403, {
+            error: chatAuth.reason || "Chat denied",
+            code: publicAccountNeedsVerification(user)
+              ? "email_unverified"
+              : "capability_denied",
+          });
+        if (user.role === "standard") {
+          if (
+            tooMany(
+              res,
+              authLimiter.check(
+                req,
+                AUTH_RATE.chatStandard.category,
+                AUTH_RATE.chatStandard.max,
+                user.id,
+              ),
+            )
+          )
+            return;
+        }
         if (gaming)
           return json(res, 409, {
             error: "وضع الألعاب مفعّل. أوقفه لبدء المحادثة.",
@@ -1091,21 +1442,49 @@ export async function createApp({
           workspace: { id: activeWs.id, name: activeWs.name },
         });
         const conf = settings();
+        const timing = createTurnTiming();
         try {
           const preferences = {
             ...getPreferences(store, user.id),
             ...(user.role === "guest" ? { remoteAi: "never" } : {}),
           };
+          const history = store.messages(boundChat.id);
+          const previousState = store.taskState(boundChat.id);
+          const previousStyle = previousState?.style || null;
+          const previousTopic = previousState?.canonicalTopic || null;
+          // PRE-ROUTING: dialect understanding then priority lanes then follow-ups.
+          const previousSpeakerPersona = previousState?.speakerPersona || null;
+          const turn = resolveTurnContext(b.text, {
+            history,
+            user,
+            previousStyle,
+            previousTopic,
+            previousSpeakerPersona,
+          });
+          timing.mark("context_resolved");
+          const conversationIntent = turn;
+          const routingText = turn.effectiveIntent || b.text;
           const requestedMode =
             typeof b.requestedMode === "string" && b.requestedMode
               ? b.requestedMode
               : preferences.mode;
-          const modeInfo = resolveEffectiveMode({
-            requestedMode,
-            text: b.text,
-            attachments: b.attachments ?? [],
-            history: store.messages(boundChat.id),
-          });
+          const modeInfo =
+            turn.priorityLane === "self_repair" || turn.priorityLane === "persona"
+              ? {
+                  requestedMode,
+                  effectiveMode: "auto",
+                  reason:
+                    turn.priorityLane === "self_repair"
+                      ? "self_repair_priority"
+                      : "persona_priority",
+                  hybrid: [],
+                }
+              : resolveEffectiveMode({
+                  requestedMode,
+                  text: routingText,
+                  attachments: b.attachments ?? [],
+                  history,
+                });
           const requestedModel =
             typeof b.requestedModel === "string" && b.requestedModel
               ? b.requestedModel
@@ -1114,19 +1493,85 @@ export async function createApp({
             b.mode && ["general", "coding", "vision"].includes(b.mode)
               ? b.mode
               : "auto";
+          // Fast path only for ordinary greetings — never for Self Repair / persona.
+          const useFastPath =
+            turn.fastPath === true && turn.priorityLane !== "self_repair";
+          let selfRepairProposal = null;
+          let selfRepairDiagnosis = null;
+          const repairSettings = selfRepair.settings();
+          // Self Repair is a priority lane: diagnose before routing/memory/tools.
+          if (
+            (turn.priorityLane === "self_repair" ||
+              isSelfRepairComplaint(b.text)) &&
+            repairSettings.enabled &&
+            repairSettings.autoDiagnose &&
+            canDiagnoseSelfRepair(user)
+          ) {
+            const diagnosed = await selfRepair.diagnose({
+              text: b.text,
+              chatId: boundChat.id,
+              user,
+              historyMessages: history,
+            });
+            if (diagnosed.ok && diagnosed.kind === "diagnosis" && diagnosed.diagnosis) {
+              selfRepairDiagnosis = diagnosed.diagnosis;
+              emit({
+                type: "self_repair",
+                kind: "diagnosis",
+                diagnosis: diagnosed.diagnosis,
+              });
+            } else if (diagnosed.ok && diagnosed.proposal) {
+              selfRepairProposal = diagnosed.proposal;
+              emit({
+                type: "self_repair",
+                kind: "proposal",
+                proposal: diagnosed.proposal,
+              });
+            }
+          }
           const routing = await routeModel({
             ollama,
             registry,
             settings: conf,
-            text: b.text,
+            text: routingText,
             mode: taskMode,
             attachments: b.attachments ?? [],
-            history: store.messages(boundChat.id),
+            history:
+              turn.resetTaskState || turn.priorityLane === "persona"
+                ? []
+                : history,
             signal: controller.signal,
-            requestedModel,
+            requestedModel: requestedModel || "auto",
             effectiveMode: modeInfo.effectiveMode,
             gaming,
             preferences,
+            fastPath: useFastPath,
+            conversationStyle: turn.conversationStyle || null,
+            turnIntent: turn.intent || null,
+            priorityLane: turn.priorityLane || null,
+          });
+          timing.mark("routing_done");
+          emit({
+            type: "priority",
+            lane: turn.priorityLane || "normal",
+            intent: turn.intent,
+            personaKind: turn.personaKind || null,
+            fastPath: useFastPath,
+          });
+          emit({
+            type: "turn_context",
+            intent: turn.intent,
+            taskHint: turn.taskHint || null,
+            fastPath: useFastPath,
+            effectiveIntent: String(turn.effectiveIntent || "").slice(0, 400),
+            transientFacts: (turn.snapshot?.transientFacts || []).slice(0, 6),
+            hasThreadContext: Boolean(turn.threadContext),
+            languageSwitch: turn.languageSwitch || null,
+            conversationStyle: turn.conversationStyle || null,
+            styleChanged: Boolean(turn.styleChanged),
+            canonicalTopic: turn.canonicalTopic || null,
+            semanticKind: turn.semantic?.kind || null,
+            speakerPersona: turn.speakerPersona || null,
           });
           if (routing.needsRemoteApproval) {
             // Remote Ask: require an approval-shaped gate before prepare/chat.
@@ -1170,103 +1615,129 @@ export async function createApp({
             effectiveModel: routing.effectiveModel,
             requestedMode: modeInfo.requestedMode,
             effectiveMode: modeInfo.effectiveMode,
+            conversationIntent: conversationIntent.intent,
+            taskHint: turn.taskHint,
+            fastPath: useFastPath,
+            autoRouting: routing.localPlan
+              ? {
+                  general: routing.localPlan.general,
+                  reasoning: routing.localPlan.reasoning,
+                }
+              : undefined,
           });
-          // Provider-native Council (text proposals only; Jack sole tool executor).
+          // Provider-native Council — skipped entirely on fast path (no probe, no UI card).
           let councilResult = null;
           let councilPlan = null;
-          try {
-            await registry.refresh(controller.signal);
-            const available = registry.listModels({
-              remoteAllowed: preferences.remoteAi !== "never" && !gaming,
-              localOnly:
-                preferences.remoteAi === "never" ||
-                preferences.remoteBudget === "off" ||
-                gaming,
-            });
-            const locked =
-              requestedModel && requestedModel !== "auto"
-                ? requestedModel
-                : null;
-            councilPlan = buildCouncilPlan({
-              text: b.text,
-              preferences,
-              gaming,
-              effectiveMode: modeInfo.effectiveMode,
-              taskKind: routing.kind,
-              availableModels: available,
-              lockedModel: locked,
-              effectiveModel: routing.effectiveModel,
-              healthLookup: (providerId, modelId) =>
-                registry.getModelHealth(providerId, modelId),
-            });
-            if (!councilPlan.enabled) {
-              emit({
-                type: "council",
-                ...councilUiSummary(
-                  { skipped: true, reason: councilPlan.triggerReason },
-                  councilPlan,
-                ),
+          if (!useFastPath) {
+            timing.mark("council_start");
+            try {
+              await registry.refresh(controller.signal);
+              const available = registry.listModels({
+                remoteAllowed: preferences.remoteAi !== "never" && !gaming,
+                localOnly:
+                  preferences.remoteAi === "never" ||
+                  preferences.remoteBudget === "off" ||
+                  gaming,
               });
-            } else {
-              const needsRemoteCouncil =
-                preferences.remoteAi === "ask" &&
-                councilPlan.participants.some((p) => !p.local);
-              if (needsRemoteCouncil && !routing.needsRemoteApproval) {
-                await new Promise((resolve, reject) => {
-                  const id = randomUUID();
-                  const finishAsk = (allowed) => {
-                    clearTimeout(timer);
-                    approvals.delete(id);
-                    allowed
-                      ? resolve()
-                      : reject(new Error("Remote AI use declined"));
-                  };
-                  const timer = setTimeout(() => finishAsk(false), 300000);
-                  approvals.set(id, {
-                    id,
-                    name: "remote_ai",
-                    args: {
-                      purpose: "council",
-                      models: councilPlan.participants
-                        .filter((p) => !p.local)
-                        .map((p) => `${p.providerId}/${p.modelId}`),
-                    },
-                    finish: finishAsk,
-                    userId: user.id,
+              const locked =
+                requestedModel && requestedModel !== "auto"
+                  ? requestedModel
+                  : null;
+              councilPlan = buildCouncilPlan({
+                text: routingText,
+                preferences:
+                  !turn.allowResearch || turn.conversational
+                    ? { ...preferences, councilMode: "off" }
+                    : preferences,
+                gaming,
+                effectiveMode: modeInfo.effectiveMode,
+                taskKind: routing.kind,
+                availableModels: available,
+                lockedModel: locked,
+                effectiveModel: routing.effectiveModel,
+                healthLookup: (providerId, modelId) =>
+                  registry.getModelHealth(providerId, modelId),
+              });
+              if (councilPlan.enabled) {
+                const needsRemoteCouncil =
+                  preferences.remoteAi === "ask" &&
+                  councilPlan.participants.some((p) => !p.local);
+                if (needsRemoteCouncil && !routing.needsRemoteApproval) {
+                  await new Promise((resolve, reject) => {
+                    const id = randomUUID();
+                    const finishAsk = (allowed) => {
+                      clearTimeout(timer);
+                      approvals.delete(id);
+                      allowed
+                        ? resolve()
+                        : reject(new Error("Remote AI use declined"));
+                    };
+                    const timer = setTimeout(() => finishAsk(false), 300000);
+                    approvals.set(id, {
+                      id,
+                      name: "remote_ai",
+                      args: {
+                        purpose: "council",
+                        models: councilPlan.participants
+                          .filter((p) => !p.local)
+                          .map((p) => `${p.providerId}/${p.modelId}`),
+                      },
+                      finish: finishAsk,
+                      userId: user.id,
+                    });
+                    emit({
+                      type: "approval",
+                      id,
+                      name: "remote_ai",
+                      args: {
+                        purpose: "council",
+                        models: councilPlan.participants
+                          .filter((p) => !p.local)
+                          .map((p) => `${p.providerId}/${p.modelId}`),
+                      },
+                    });
                   });
-                  emit({
-                    type: "approval",
-                    id,
-                    name: "remote_ai",
-                    args: {
-                      purpose: "council",
-                      models: councilPlan.participants
-                        .filter((p) => !p.local)
-                        .map((p) => `${p.providerId}/${p.modelId}`),
-                    },
-                  });
+                }
+                councilResult = await runCouncil({
+                  participants: councilPlan.participants,
+                  prompt: b.text,
+                  registry,
+                  signal: controller.signal,
+                  preferences,
+                });
+                emit({
+                  type: "council",
+                  ...councilUiSummary(councilResult, councilPlan),
                 });
               }
-              councilResult = await runCouncil({
-                participants: councilPlan.participants,
-                prompt: b.text,
-                registry,
-                signal: controller.signal,
-                preferences,
-              });
-              emit({
-                type: "council",
-                ...councilUiSummary(councilResult, councilPlan),
-              });
+              // Skipped council: do not emit a chat card (Activity log is enough).
+            } catch {
+              /* council failure is non-fatal for the main reply */
             }
-          } catch {
-            emit({
-              type: "council",
-              ...councilUiSummary({ skipped: true, reason: "error" }),
-            });
+            timing.mark("council_done");
+          } else {
+            councilPlan = {
+              enabled: false,
+              triggerReason: "fast_path",
+              participants: [],
+            };
+            timing.mark("council_start");
+            timing.mark("council_done");
           }
-          if (routing.provider === "ollama" || !routing.provider)
-            await ollama.prepare?.(routing.model, controller.signal);
+          timing.mark("context_done");
+          timing.mark("prepare_start");
+          if (routing.provider === "ollama" || !routing.provider) {
+            const prep = await ollama.prepare?.(routing.model, controller.signal, {
+              soft: useFastPath || routing.jeddawiQuality,
+            });
+            if (prep?.alreadyLoaded) timing.setFlag("model_already_loaded", true);
+          }
+          timing.mark("model_ready");
+          const priorEventId = latestEventId(
+            store
+              .events(user.id)
+              .filter((e) => e.chat_id === boundChat.id),
+          );
           await runAgent({
             store,
             ollama,
@@ -1285,18 +1756,48 @@ export async function createApp({
             memoryProposals,
             userId: user.id,
             user,
-            councilContext: councilResult?.synthesis || "",
+            turnPolicy: turn,
+            timing,
+            councilContext: useFastPath
+              ? turn.directive || ""
+              : [
+                  councilResult?.synthesis || "",
+                  turn.directive || "",
+                  selfRepairDiagnosis
+                    ? formatProposalForPrompt(selfRepairDiagnosis)
+                    : "",
+                  selfRepairProposal
+                    ? formatProposalForPrompt(selfRepairProposal)
+                    : "",
+                ]
+                  .filter(Boolean)
+                  .join("\n\n"),
             provider: routing.provider || "ollama",
-            fallbackModels: routing.fallbackModels || [],
+            fallbackModels: useFastPath ? [] : routing.fallbackModels || [],
           });
+          timing.mark("generation_done");
+          {
+            const snap = timing.snapshot({
+              model: routing.model,
+              kind: routing.kind,
+              requestedModel: routing.requestedModel,
+              fastPath: useFastPath,
+            });
+            selfRepair.recordLastTurn(snap);
+            // Always emit timing so live/ops can measure first_token / guard / renderer.
+            if (devTimingEnabled()) timing.log("turn", snap);
+            emit({ type: "timing", ...snap });
+          }
 
           // Automatic bounded Council evidence Round 2 (tool evidence only).
           let evidencePack = null;
           let evidenceRound = null;
-          try {
-            const turnEvents = store
-              .events(user.id)
-              .filter((e) => e.chat_id === boundChat.id);
+          if (!useFastPath) try {
+            // TURN-SCOPED: only events created during this agent turn.
+            const turnEvents = eventsForCurrentTurn(
+              store.events(user.id),
+              { chatId: boundChat.id, afterId: priorEventId },
+            );
             evidencePack = buildEvidencePack(turnEvents, {
               taskType: routing.kind || modeInfo.effectiveMode || "general",
               chatId: boundChat.id,
@@ -1306,9 +1807,12 @@ export async function createApp({
               gaming,
               round1Result: councilResult,
               participants: councilPlan?.participants || [],
-              preferences,
+              preferences:
+                turn.allowVerification === false
+                  ? { ...preferences, councilMode: "off" }
+                  : preferences,
             });
-            if (reviewDecision.run) {
+            if (reviewDecision.run && turn.allowVerification !== false) {
               evidenceRound = await runCouncilEvidenceRound({
                 priorRound: 1,
                 participants: councilPlan.participants,
@@ -1335,27 +1839,31 @@ export async function createApp({
             } else if (
               councilResult &&
               !councilResult.skipped &&
-              evidencePack?.meaningful
+              evidencePack?.meaningful &&
+              turn.allowVerification !== false
             ) {
-              emit({
-                type: "council",
-                title: "Council Review",
-                status: "skipped",
-                detail: reviewDecision.reason,
-                evidenceRound: true,
-                evidenceTypes: evidenceTypesFromPack(evidencePack),
-                testsVerified: evidencePack.tests?.passed === true,
-              });
+              // Do not emit skipped evidence cards into the chat UI.
             }
 
-            // Ground final note in verified evidence (wins over majority vote).
-            if (evidencePack?.meaningful) {
+            if (
+              shouldAttachVerification({
+                intent: turn,
+                text: b.text,
+                evidencePack,
+                explicitVerify: turn.explicitVerify,
+                allowVerification: turn.allowVerification,
+                turnScoped: true,
+              })
+            ) {
               const grounded = synthesizeFromEvidence({
                 pack: evidencePack,
                 round2Result: evidenceRound,
                 taskText: b.text,
               });
-              if (grounded) {
+              if (
+                grounded &&
+                !/^No decisive verification evidence/i.test(grounded)
+              ) {
                 const note = `\n\n---\nVerification\n${grounded}`;
                 store.message(boundChat.id, "assistant", note);
                 emit({ type: "token", text: note });
@@ -1440,10 +1948,17 @@ export async function createApp({
       } else if (
         [
           "/",
+          "/login",
+          "/signup",
+          "/forgot",
+          "/reset",
+          "/verify",
+          "/auth.js",
           "/app.js",
           "/branding.js",
           "/i18n.js",
           "/dropdown.js",
+          "/chat-visibility.js",
           "/jack/icon.png",
           "/jack/logo.png",
           "/jack/avatar.png",
@@ -1457,7 +1972,11 @@ export async function createApp({
         filename = path.join(
           root,
           "public",
-          route === "/" ? "index.html" : route.slice(1),
+          route === "/"
+            ? "index.html"
+            : ["/login", "/signup", "/forgot", "/reset", "/verify"].includes(route)
+              ? "auth.html"
+              : route.slice(1),
         );
       else return json(res, 404, { error: "Not found" });
       const content = await fs.readFile(filename);
@@ -1483,9 +2002,11 @@ export async function createApp({
     server,
     store,
     token,
+    root,
     ollama,
     registry,
     memoryProposals,
+    selfRepair,
     artifactsDirectory: artifacts,
     cleanupArtifacts: (opts) => cleanupArtifacts(store, artifacts, opts),
     close: async () => {
@@ -1506,6 +2027,7 @@ if (
   process.argv[1] &&
   path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
+  loadLocalEnv(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
   const app = await createApp();
   const port = Number(process.env.COFFEEJACK_PORT ?? 3210);
   app.server.listen(port, "127.0.0.1", () =>
