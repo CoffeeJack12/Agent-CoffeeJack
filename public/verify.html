@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Verify your CoffeeJack email</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/auth.css" />
+    <script type="module" src="/auth.js"></script>
+  </head>
+  <body data-page="verify">
+    <main class="auth-card">
+      <div class="brand">CoffeeJack</div>
+      <div class="tagline">Local intelligence. Your command.</div>
+
+      <section id="verifyCard" hidden>
+        <h1>Confirm your email</h1>
+        <p class="sub">
+          Enter the 6-digit verification code we emailed to
+          <span id="emailLabel" class="email-chip"></span>.
+        </p>
+        <form id="verifyForm" novalidate>
+          <label for="code">Verification code</label>
+          <input
+            id="code"
+            name="code"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            pattern="\d{6}"
+            placeholder="______"
+            required
+          />
+          <button id="verifySubmit" class="primary" type="submit">Verify email</button>
+        </form>
+        <div class="link-row">
+          Didn't get it? <button id="resend" class="linkbtn" type="button">Resend code</button>
+        </div>
+      </section>
+
+      <section id="expiredCard" hidden>
+        <h1>Session expired</h1>
+        <p id="expiredMessage" class="sub">Your session expired. Please log in again.</p>
+        <a class="primary" href="/login" style="display:block;text-align:center;text-decoration:none">Go to login</a>
+      </section>
+
+      <div id="message" class="message" hidden></div>
+    </main>
+  </body>
+</html>
