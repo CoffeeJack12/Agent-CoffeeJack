@@ -12,6 +12,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+      - run: npm.cmd install --ignore-scripts --omit=dev
       # The core suite intentionally uses built-in Node modules and a fake model.
       # Real GPU/model/browser tests are run on the local Windows installation.
       - run: node --test tests/*.test.mjs
