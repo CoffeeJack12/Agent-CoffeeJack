@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CoffeeJack — حسابك</title>
+    <link rel="icon" href="/favicon.svg" />
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/polish.css" />
+  </head>
+  <body class="auth-body">
+    <main class="auth-card">
+      <a class="brand" href="/"
+        ><span data-jack-slot="logo"></span
+        ><span>JACK<small>COFFEEJACK</small></span></a
+      >
+      <h1 id="authTitle">تسجيل الدخول</h1>
+      <p id="authLead" class="auth-lead">حساب CoffeeJack — ليس حساب Cloudflare.</p>
+      <form id="authForm" class="auth-form" autocomplete="on">
+        <label id="nameRow" class="hidden"
+          >الاسم
+          <input name="displayName" maxlength="80" />
+        </label>
+        <label id="emailRow"
+          >البريد
+          <input name="email" type="email" autocomplete="username" />
+        </label>
+        <label id="passwordRow"
+          >كلمة المرور
+          <input
+            name="password"
+            type="password"
+            required
+            minlength="10"
+            autocomplete="current-password"
+          />
+        </label>
+        <label id="confirmRow" class="hidden"
+          >تأكيد كلمة المرور
+          <input name="confirmPassword" type="password" minlength="10" />
+        </label>
+        <label id="tokenRow" class="hidden"
+          ><span id="tokenLabel">رمز تأكيد البريد</span>
+          <input name="code" autocomplete="one-time-code" />
+        </label>
+        <p id="authError" class="auth-error" hidden></p>
+        <p id="authNote" class="auth-note" hidden></p>
+        <button type="submit" id="authSubmit">دخول</button>
+        <button type="button" id="authResend" class="ghost hidden">إعادة إرسال الرمز</button>
+      </form>
+      <nav class="auth-links">
+        <a href="/login">دخول</a>
+        <a href="/signup">إنشاء حساب</a>
+        <a href="/forgot">نسيت كلمة المرور</a>
+        <a href="/verify">تأكيد البريد</a>
+      </nav>
+    </main>
+    <script type="module" src="/auth.js"></script>
+  </body>
+</html>

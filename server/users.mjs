@@ -69,6 +69,11 @@ export function migrateToMultiUser(store) {
     addColumn(db, "users", "status TEXT NOT NULL DEFAULT 'active'");
     addColumn(db, "users", "created TEXT");
     addColumn(db, "users", "updated TEXT");
+    addColumn(db, "users", "email TEXT");
+    addColumn(db, "users", "email_normalized TEXT");
+    addColumn(db, "users", "password_hash TEXT");
+    addColumn(db, "users", "email_verified INTEGER NOT NULL DEFAULT 0");
+    addColumn(db, "users", "password_set_at TEXT");
     addColumn(db, "sessions", "user_id TEXT REFERENCES users(id)");
     addColumn(db, "sessions", "created TEXT");
     addColumn(db, "sessions", "last_seen TEXT");
@@ -182,7 +187,7 @@ export function createUser(store, { displayName, role = ROLES.STANDARD }) {
 export function listUsers(store) {
   return store.db
     .prepare(
-      "SELECT id,display_name,role,status,created,updated FROM users ORDER BY created,id",
+      "SELECT id,display_name,role,status,created,updated,email,email_verified FROM users ORDER BY created,id",
     )
     .all();
 }
@@ -191,7 +196,7 @@ export function getUser(store, id) {
   if (!id) return undefined;
   return store.db
     .prepare(
-      "SELECT id,display_name,role,status,created,updated FROM users WHERE id=?",
+      "SELECT id,display_name,role,status,created,updated,email,email_verified FROM users WHERE id=?",
     )
     .get(id);
 }
@@ -349,7 +354,7 @@ export function audit(store, { userId = null, action, detail = {} }) {
 export function resolveLocalOwner(store) {
   const owner = store.db
     .prepare(
-      "SELECT id,display_name,role,status,created,updated FROM users WHERE role='owner' AND status='active' ORDER BY created,id LIMIT 1",
+      "SELECT id,display_name,role,status,created,updated,email,email_verified FROM users WHERE role='owner' AND status='active' ORDER BY created,id LIMIT 1",
     )
     .get();
   if (!owner) throw new Error("No active local owner exists");

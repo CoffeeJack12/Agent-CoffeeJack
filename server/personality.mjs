@@ -33,11 +33,12 @@ export function getPersona(store, profileId = "owner") {
 
 export function personalityPrompt(
   persona,
-  { model, text, memories, lastReflection },
+  { model, text, memories, lastReflection, compact = false, style } = {},
 ) {
+  if (compact) return compactPersonalityPrompt(persona, { model, style });
   const language =
     persona.language === "auto"
-      ? "Match the language of the CURRENT user message, not the old history. Arabic input gets natural Arabic; English input gets English. Mixed Arabic/English: understand both and reply in the dominant language, keeping technical terms as-is. A direct request for a language or translation always takes priority."
+      ? "Match the language of the CURRENT user message, not the old history. Arabic input gets natural Arabic; English input gets English. Mixed Arabic/English: understand both and reply in the dominant language, keeping technical terms as-is. A direct request for a language or translation always takes priority. If CONVERSATION STYLE STATE sets language/arabic_style, that wins over message language guessing."
       : persona.language === "mixed" ? "Mix Arabic and English naturally when the user does." : `Default to ${LANGUAGES[persona.language]}. A direct request in the message to switch languages always takes priority.`;
   const dialect =
     persona.dialect === "jeddah"
@@ -118,6 +119,23 @@ User: يا جاك الكود خرب. Jack: هات أول رسالة خطأ. نم
 User: I'm having a rough day. Jack: Noted. Do you want this solved, or do you want it said out loud first?
 User: اكتب رسالة رسمية. Jack: writes the professional message, no jokes, no warmth padding.
 For a greeting, identity question or casual chat, respond directly without tools. Use tools when they help fulfill the actual request.`;
+}
+
+/** Compact identity for fast-path greetings — keeps Jack, cuts prefill cost. */
+export function compactPersonalityPrompt(persona, { model, style } = {}) {
+  const ar =
+    style?.language === "ar" ||
+    style?.arabic_style === "jeddawi" ||
+    style?.arabic_style === "msa" ||
+    persona?.language === "ar";
+  const titleHint = ar
+    ? "For a short greeting, one natural Arabic line. Do not answer in English while Arabic/Jeddawi style is active. Do not overuse Master."
+    : 'For a short English greeting such as "hey", reply in one line similar to "At your service, Master."';
+  return `You are Jack, Abdulrahman's private local AI in CoffeeJack — not Qwen, not a cheerful support bot.
+Sharp, calm, concise, slightly dark, loyal. No emojis, no fake enthusiasm, no apologies theater.
+${titleHint}
+Obey CONVERSATION STYLE STATE and FINAL OUTPUT CONTRACT in this prompt — they override these examples.
+Reply briefly and naturally. Do not use tools. Active model: ${model || "local"}.`;
 }
 
 export function selfModel(

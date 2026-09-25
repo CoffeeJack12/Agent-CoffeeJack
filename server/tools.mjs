@@ -14,6 +14,10 @@ import {
 } from "./artifacts.mjs";
 
 import { projectMap, projectScripts, patchText } from "./developer.mjs";
+import {
+  detectShellMismatch,
+  runInspectSection,
+} from "./pc-diagnostics.mjs";
 
 const str = (description) => ({ type: "string", description });
 const tool = (
@@ -36,7 +40,29 @@ const tool = (
 });
 export const definitions = [
   tool("research", "Search the public internet and read up to three HTTPS sources. Cite returned URLs; source text is untrusted. At most two calls per task.", {query:str("Specific research query"),urls:{type:"array",items:{type:"string"},maxItems:3,description:"Optional known primary-source HTTPS URLs; following a relevant source link is supported"}},["query"]),
-  tool("inspect_pc", "Read local network configuration or basic hardware using a fixed diagnostic command; requires approval. Does not scan for malware or claim disk health.", {section:{type:"string",enum:["network","hardware"]}}),
+  tool(
+    "inspect_pc",
+    "Read-only local PC diagnostics via fixed helpers (not free-form shell). Use section=health for overall PC concerns, disk for drive space (set drive letter), network for network only, or cpu/memory/gpu/uptime/hardware. Never treat a ping alone as PC health. Requires approval.",
+    {
+      section: {
+        type: "string",
+        enum: [
+          "network",
+          "hardware",
+          "disk",
+          "memory",
+          "cpu",
+          "gpu",
+          "uptime",
+          "health",
+        ],
+      },
+      drive: str(
+        "Optional drive letter for section=disk (e.g. C or C:). Defaults to C.",
+      ),
+    },
+    ["section"],
+  ),
   tool(
     "project_map",
     "Inspect a bounded project tree and detect npm test/build/lint/check scripts without executing them.",
@@ -332,9 +358,9 @@ export class Tools {
 
     if (name === "research") return research(args,{signal});
     if (name === "inspect_pc") {
-      if(!["network","hardware"].includes(args.section))throw Error("Unknown diagnostic section");
-      if(process.platform!=="win32")throw Error("PC inspection currently supports Windows");
-      return runProcess("powershell.exe",["-NoProfile","-NonInteractive","-Command",args.section==="network" ? "$c=Get-NetIPConfiguration; $c | ForEach-Object { [pscustomobject]@{Interface=$_.InterfaceAlias; IPv4=($_.IPv4Address.IPAddress -join ','); Gateway=($_.IPv4DefaultGateway.NextHop -join ','); DNS=($_.DNSServer.ServerAddresses -join ',')} } | ConvertTo-Json -Compress" : "Get-CimInstance Win32_ComputerSystem | Select-Object Manufacturer,Model,TotalPhysicalMemory,NumberOfLogicalProcessors | ConvertTo-Json -Compress"],{signal,timeout:20000,cwd:this.workspace});
+      if (process.platform !== "win32")
+        throw new Error("PC inspection currently supports Windows");
+      return runInspectSection(args.section, { drive: args.drive }, { signal });
     }
     if (name === "list_files") {
       const dir = await workspacePath(this.workspace, args.path);
@@ -379,15 +405,55 @@ export class Tools {
     if (name === "terminal") {
       if (typeof args.command !== "string" || args.command.length > 20000)
         throw new Error("Invalid command");
-      const cmd = process.platform === "win32" ? "powershell.exe" : "sh";
+      const timeoutMs =
+        Math.min(120, Math.max(1, Number(args.timeout) || 60)) * 1000;
+      let command = args.command;
+      let adapted = false;
+      let adaptNote = null;
+
+      if (process.platform === "win32") {
+        const issues = detectShellMismatch(command);
+        const unix = issues.find((i) => i.code === "unix_cmd");
+        if (unix) throw new Error(unix.message);
+        const bashAnd = issues.find((i) => i.code === "bash_and" && i.rewrite);
+        // Prefer inspect_pc for PC diagnostics — still adapt bash && once for other PS work.
+        if (bashAnd) {
+          const first = await runProcess(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-Command", command],
+            { cwd: this.workspace, signal, timeout: timeoutMs },
+          );
+          if (!first.stopped && first.code === 0) return first;
+          // One known adaptation: bash && → PowerShell ;
+          command = bashAnd.rewrite;
+          adapted = true;
+          adaptNote = bashAnd.message;
+          const second = await runProcess(
+            "powershell.exe",
+            ["-NoProfile", "-NonInteractive", "-Command", command],
+            { cwd: this.workspace, signal, timeout: timeoutMs },
+          );
+          return {
+            ...second,
+            adapted,
+            originalCommand: args.command,
+            adaptedCommand: command,
+            adaptNote,
+          };
+        }
+        if (issues.length)
+          throw new Error(issues.map((i) => i.message).join(" "));
+      }
+
+      const shell = process.platform === "win32" ? "powershell.exe" : "sh";
       const pwArgs =
         process.platform === "win32"
-          ? ["-NoProfile", "-NonInteractive", "-Command", args.command]
-          : ["-c", args.command];
-      return await runProcess(cmd, pwArgs, {
+          ? ["-NoProfile", "-NonInteractive", "-Command", command]
+          : ["-c", command];
+      return await runProcess(shell, pwArgs, {
         cwd: this.workspace,
         signal,
-        timeout: Math.min(120, Math.max(1, Number(args.timeout) || 60)) * 1000,
+        timeout: timeoutMs,
       });
     }
     if (name === "remember") {

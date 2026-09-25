@@ -4,8 +4,9 @@ export function buildChatRequest({ model, messages, tools, profile = {} }) {
     messages,
     ...(tools?.length ? { tools } : {}),
     stream: true,
+    // Keep chain-of-thought internal to the model runtime; never surface it.
     think: profile.think ?? false,
-    keep_alive: "3m",
+    keep_alive: profile.keepAlive ?? "10m",
     options: {
       num_ctx: profile.context ?? 8192,
       num_predict: profile.predict ?? 3072,
@@ -61,19 +62,36 @@ export class Ollama {
   async inspect(model, signal) {
     return (await this.request("/api/show", { model }, signal)).json();
   }
-  async prepare(model, signal) {
+  async prepare(model, signal, { soft = false } = {}) {
     const loaded =
       (await (await this.request("/api/ps", undefined, signal)).json())
         .models ?? [];
-    for (const entry of loaded) {
-      signal?.throwIfAborted();
-      if (entry.name !== model)
-        await this.request(
-          "/api/generate",
-          { model: entry.name, keep_alive: 0 },
-          signal,
-        );
+    const target = String(model || "");
+    const alreadyLoaded = loaded.some(
+      (entry) => (entry.name || entry.model) === target,
+    );
+    // Fast-path soft prepare: if the target is already resident, do not unload
+    // siblings (avoids multi-second VRAM thrash before first token).
+    if (soft && alreadyLoaded) {
+      return { alreadyLoaded: true, unloaded: [] };
     }
+    const others = loaded.filter((entry) => {
+      const name = entry.name || entry.model || "";
+      return name && name !== target;
+    });
+    // Only unload siblings when another resident model would compete for VRAM.
+    for (const entry of others) {
+      signal?.throwIfAborted();
+      await this.request(
+        "/api/generate",
+        { model: entry.name || entry.model, keep_alive: 0 },
+        signal,
+      );
+    }
+    return {
+      alreadyLoaded,
+      unloaded: others.map((entry) => entry.name || entry.model),
+    };
   }
   async unload() {
     const loaded = (await (await this.request("/api/ps")).json()).models ?? [];
@@ -88,7 +106,7 @@ export class Ollama {
     );
     return loaded.map((m) => m.name);
   }
-  async chat({ model, messages, tools, profile, signal, onToken }) {
+  async chat({ model, messages, tools, profile, signal, onToken, onFirstToken }) {
     const response = await this.request(
       "/api/chat",
       buildChatRequest({ model, messages, tools, profile }),
@@ -98,7 +116,8 @@ export class Ollama {
     let buffer = "",
       content = "",
       toolCalls = [],
-      tokens = 0;
+      tokens = 0,
+      firstToken = false;
     for await (const bytes of response.body) {
       buffer += decoder.decode(bytes, { stream: true });
       let index;
@@ -110,8 +129,15 @@ export class Ollama {
         if (part.error) throw new Error(part.error);
         if (part.message?.content) {
           content += part.message.content;
+          if (!firstToken) {
+            firstToken = true;
+            onFirstToken?.(part.message.content);
+          }
           onToken?.(part.message.content);
         }
+        // Drop thinking/reasoning payloads — never leak into UI or stored transcript.
+        if (part.message?.thinking) delete part.message.thinking;
+        if (part.message?.reasoning) delete part.message.reasoning;
         if (part.message?.tool_calls)
           toolCalls.push(...part.message.tool_calls);
         if (part.eval_count) tokens = part.eval_count;

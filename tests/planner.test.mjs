@@ -56,6 +56,7 @@ async function fixture(t) {
     signal: new AbortController().signal,
     emit: (e) => {
       if (e.type === "token") output += e.text;
+      if (e.type === "revise") output = e.text || "";
     },
   };
   return { base, store, chatId, output: () => output };

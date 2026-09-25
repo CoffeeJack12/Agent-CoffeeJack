@@ -19,6 +19,7 @@ const CAPABILITIES = new Set([
   "sensitive_settings",
   "user_management",
   "gaming_toggle",
+  "self_repair",
 ]);
 
 const APPROVAL = new Set([
@@ -45,6 +46,7 @@ const OWNER_ALLOW = new Set([
   "sensitive_settings",
   "user_management",
   "gaming_toggle",
+  "self_repair",
 ]);
 
 const TRUSTED_ALLOW = new Set([
@@ -54,18 +56,24 @@ const TRUSTED_ALLOW = new Set([
 TRUSTED_ALLOW.delete("user_management");
 TRUSTED_ALLOW.delete("sensitive_settings");
 
+/** Explicit Standard allow-list — does not inherit Owner tools. */
 const STANDARD_ALLOW = new Set([
   "chat",
   "research",
   "web_search",
   "files_read",
 ]);
-const STANDARD_APPROVAL = new Set([
-  "files_write",
-  "git_read",
-  "terminal_safe",
-  "sensitive_settings",
-]);
+const STANDARD_APPROVAL = new Set(["files_write"]);
+
+export function standardCapabilityList() {
+  return [...STANDARD_ALLOW];
+}
+
+/** Public registered accounts must verify email before any AI/tool work. Owner/local bootstrap is unchanged. */
+export function publicAccountNeedsVerification(user) {
+  if (!user || user.role === "owner") return false;
+  return Boolean(user.email) && !user.email_verified;
+}
 
 const GUEST_ALLOW = new Set(["chat", "research", "web_search"]);
 const GUEST_APPROVAL = new Set(["files_read"]);
@@ -109,6 +117,8 @@ export function authorize({
       );
   }
   if (role === "standard") {
+    if (publicAccountNeedsVerification(user))
+      return result("deny", "Email verification required");
     if (STANDARD_ALLOW.has(capability))
       return result("allow", "Allowed by standard-user policy");
     if (STANDARD_APPROVAL.has(capability))
@@ -204,6 +214,7 @@ export function permissionSummary(user) {
     "system_inspect",
     "gaming_toggle",
     "user_management",
+    "self_repair",
   ];
   return keys
     .map((capability) => {
@@ -219,6 +230,10 @@ export function canToggleGaming(user) {
 
 export function canManageUsers(user) {
   return authorize({ user, capability: "user_management" }).decision === "allow";
+}
+
+export function canSelfRepair(user) {
+  return authorize({ user, capability: "self_repair" }).decision === "allow";
 }
 
 /**

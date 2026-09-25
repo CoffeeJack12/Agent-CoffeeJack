@@ -72,7 +72,18 @@ function scoreSignals(text, attachments, history) {
   if (attachments.some((p) => /\.(m?js|tsx?|py|html|css|json|sql|cjs|mjs)$/i.test(p)))
     scores.developer += 4;
   if (attachments.some((p) => /\.(png|jpe?g|webp)$/i.test(p))) scores.hacker += 1;
+  // Short confirm/continue follow-ups must not inherit research from a prior
+  // user turn — that caused "yea"/"do it" to re-trigger web research.
   if (
+    /^(continue|fix it|try again|go on|do it|yea|yeah|yes|ok|sure|كمل|تابع|صلحه|ايوه|نعم|سويه|يلا|الثاني(?:\s+أفضل)?|الأول(?:\s+أفضل)?)[.!؟\s]*$/i.test(
+      text.trim(),
+    )
+  ) {
+    const previous = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
+    if (developer.test(previous)) scores.developer += 4;
+    if (hacker.test(previous)) scores.hacker += 3;
+    // Intentionally do NOT boost research here.
+  } else if (
     /^(continue|fix it|try again|go on|كمل|تابع|صلحه)[.!؟\s]*$/i.test(text.trim())
   ) {
     const previous = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
@@ -126,7 +137,9 @@ export function modelTaskKind({
   )
     return "coding";
   if (
-    /^(continue|fix it|try again|go on|كمل|تابع|صلحه)[.!؟\s]*$/i.test(text.trim())
+    /^(continue|fix it|try again|go on|do it|yea|yeah|yes|ok|sure|كمل|تابع|صلحه|ايوه|نعم)[.!؟\s]*$/i.test(
+      text.trim(),
+    )
   ) {
     const previous = history.filter((m) => m.role === "user").at(-1);
     if (previous && developer.test(previous.content)) return "coding";

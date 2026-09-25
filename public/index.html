@@ -53,6 +53,10 @@
           <div><span id="profileName">عبدالرحمن</span><small id="profileRole" data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
           <span class="version">v0.2</span>
         </div>
+        <div class="auth-account-links">
+          <a href="/login">حساب</a>
+          <button type="button" id="accountLogout" class="ghost">خروج</button>
+        </div>
       </div>
     </aside>
     <main>
@@ -131,25 +135,46 @@
         <div class="composer-area">
           <div id="notice" class="notice hidden" role="status"></div>
           <div id="attachments" class="attachments"></div>
-          <form id="chatForm" class="composer">
-            <div class="composer-main">
-              <textarea
-                id="prompt"
-                dir="auto"
-                rows="1"
-                placeholder="اكتب لـ Jack..."
-                data-i18n-placeholder="composer.placeholder"
-                aria-label="رسالتك إلى Jack"
-                data-i18n-aria="composer.ariaLabel"
-              ></textarea>
-              <div class="composer-actions">
+          <form id="chatForm" class="composer" autocomplete="off">
+            <textarea
+              id="prompt"
+              dir="auto"
+              rows="1"
+              placeholder="Message Jack..."
+              data-i18n-placeholder="composer.placeholder"
+              aria-label="Your message to Jack"
+              data-i18n-aria="composer.ariaLabel"
+            ></textarea>
+            <div class="composer-bar">
+              <div class="composer-bar-left">
+                <button
+                  type="button"
+                  id="attach"
+                  class="composer-icon-btn"
+                  title="Attach file"
+                  data-i18n-title="composer.attach"
+                  aria-label="Attach file"
+                  data-i18n-aria="composer.attach"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 5v14M5 12h14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <div class="composer-bar-right">
                 <button
                   id="stop"
                   type="button"
                   class="stop hidden"
-                  aria-label="إيقاف"
+                  aria-label="Stop"
                   data-i18n-aria="composer.stop"
-                  title="إيقاف"
+                  title="Stop"
                   data-i18n-title="composer.stop"
                 >
                   <span class="stop-icon"></span>
@@ -158,7 +183,7 @@
                   id="send"
                   type="submit"
                   class="send is-idle"
-                  aria-label="إرسال"
+                  aria-label="Send"
                   data-i18n-aria="composer.send"
                   aria-disabled="true"
                 >
@@ -175,36 +200,8 @@
                 </button>
               </div>
             </div>
-            <div class="composer-toolbar">
-              <button
-                type="button"
-                id="attach"
-                class="attach"
-                title="إرفاق ملف"
-                data-i18n-title="composer.attach"
-                aria-label="إرفاق ملف"
-                data-i18n-aria="composer.attach"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M12 5v14M5 12h14"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </button>
-              <label class="toolbar-dropdown"><span data-i18n="composer.currentMode">النمط الحالي</span><div id="jackModeHost" class="dropdown-host"></div></label>
-              <label class="toolbar-dropdown"><span data-i18n="composer.taskType">نوع المهمة</span><div id="taskModeHost" class="dropdown-host"></div></label>
-              <label class="toolbar-dropdown"><span data-i18n="settings.autoModel">موديل تلقائي</span><div id="modelHost" class="dropdown-host"></div></label>
-              <span id="modelLabel" class="model-label">qwen3:8b · Local</span>
-              <span id="runStatus" class="composer-status"></span>
-            </div>
+            <span id="runStatus" class="sr-only" aria-live="polite"></span>
           </form>
-          <p class="composer-footnote">
-            <span data-i18n="composer.footnote">محلي أولًا · الأدوات تحت سيطرتك · Enter للإرسال</span>
-          </p>
         </div>
         <input
           type="file"
@@ -340,6 +337,23 @@
           <h3 data-i18n="users.title">Users</h3>
           <p id="accountIdentity" class="hint"></p>
           <p id="currentUser"></p>
+          <form id="ownerCredentialsForm" class="owner-credentials hidden">
+            <p class="hint">
+              اربط بريد CoffeeJack بالحساب الحالي. لن يُنشأ Owner ثانٍ، ولن تُحذف
+              المحادثات أو الذاكرة أو الملفات.
+            </p>
+            <label>البريد
+              <input name="email" type="email" required autocomplete="username" />
+            </label>
+            <label>كلمة المرور
+              <input name="password" type="password" required minlength="10" autocomplete="new-password" />
+            </label>
+            <label>تأكيد كلمة المرور
+              <input name="confirmPassword" type="password" required minlength="10" autocomplete="new-password" />
+            </label>
+            <button type="submit" class="primary">حفظ بيانات الدخول</button>
+            <span id="ownerCredentialsMessage" role="status"></span>
+          </form>
           <label class="workspace-select"
             ><span data-i18n="workspaces.label">Workspace</span>
             <select id="workspaceSelect" dir="ltr"></select>
@@ -424,6 +438,52 @@
             ><span id="settingsMessage" role="status"></span>
           </div>
         </form>
+        <section id="advancedRoutingSection" class="setting-card">
+          <h3 data-i18n="settings.advancedTitle">Advanced</h3>
+          <h4 data-i18n="settings.aiRoutingTitle">AI Routing</h4>
+          <p class="hint" data-i18n="settings.aiRoutingIntro">
+            Optional manual overrides. Leave all on Auto for normal use — Jack detects mode, task, and model automatically.
+          </p>
+          <label class="toolbar-dropdown"
+            ><span data-i18n="composer.currentMode">Current mode</span
+            ><div id="jackModeHost" class="dropdown-host"></div
+          ></label>
+          <label class="toolbar-dropdown"
+            ><span data-i18n="composer.taskType">Task type</span
+            ><div id="taskModeHost" class="dropdown-host"></div
+          ></label>
+          <label class="toolbar-dropdown"
+            ><span data-i18n="settings.autoModel">Auto model</span
+            ><div id="modelHost" class="dropdown-host"></div
+          ></label>
+        </section>
+        <section id="selfRepairSection" class="setting-card owner-only hidden">
+          <h3 data-i18n="selfRepair.title">Self Repair</h3>
+          <p class="hint" data-i18n="selfRepair.intro">
+            Owner-only: Jack can diagnose CoffeeJack issues and propose fixes. Source changes always need your approval.
+          </p>
+          <label class="toggle-row"
+            ><input type="checkbox" id="selfRepairEnabled" checked /><span
+              data-i18n="selfRepair.enabled"
+              >Self Repair: Enabled</span
+            ></label
+          >
+          <label class="toggle-row"
+            ><input type="checkbox" id="selfRepairAutoDiagnose" checked /><span
+              data-i18n="selfRepair.autoDiagnose"
+              >Auto-diagnose: Enabled</span
+            ></label
+          >
+          <p class="hint" data-i18n="selfRepair.askAlways">
+            Ask before modifying code: Always
+          </p>
+          <button type="button" id="selfRepairSave" class="ghost" data-i18n="selfRepair.save">
+            Save Self Repair settings
+          </button>
+          <span id="selfRepairMessage" role="status"></span>
+          <h4 data-i18n="selfRepair.historyTitle">Repair history</h4>
+          <div id="selfRepairHistory" class="card-list"></div>
+        </section>
       </section>
     </main>
     <script type="module" src="/app.js"></script>
