@@ -459,10 +459,7 @@ export async function createApp({
           source: isLocal ? "account" : "remote",
         });
         setSessionCookie(res, session.token, { remote: !isLocal });
-        return json(res, 201, {
-          ...created,
-          token: session.token,
-        });
+        return json(res, 201, created);
       }
       if (route === "/api/auth/login" && req.method === "POST") {
         if (
@@ -490,7 +487,6 @@ export async function createApp({
           detail: { source: isLocal ? "local" : "remote" },
         });
         return json(res, 200, {
-          token: session.token,
           user: publicUser(result.user),
         });
       }
@@ -536,7 +532,8 @@ export async function createApp({
           return;
         const b = await body(req);
         await resetPassword(store, {
-          token: b.token,
+          email: b.email,
+          code: b.code || b.token,
           password: b.password,
           confirmPassword: b.confirmPassword,
         });
@@ -550,8 +547,11 @@ export async function createApp({
           )
         )
           return;
+        if (!identity?.user) return sessionExpired();
         const b = await body(req);
-        const user = await verifyEmail(store, b.code || b.token);
+        const user = await verifyEmail(store, b.code || b.token, {
+          user: identity.user,
+        });
         return json(res, 200, { user });
       }
       if (route === "/api/auth/resend" && req.method === "POST") {

@@ -63,7 +63,7 @@ export const REMOTE_RATE = {
 export const AUTH_RATE = {
   signup: { category: "auth_signup", max: 5 },
   login: { category: "auth_login", max: 8 },
-  verify: { category: "auth_verify", max: 8 },
-  reset: { category: "auth_reset", max: 5 },
+  verify: { category: "auth_verify", max: 20 },
+  reset: { category: "auth_reset", max: 12 },
   chatStandard: { category: "chat_standard", max: 20 },
 };

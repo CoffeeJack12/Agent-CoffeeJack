@@ -41,7 +41,13 @@
         </label>
         <label id="tokenRow" class="hidden"
           ><span id="tokenLabel">رمز تأكيد البريد</span>
-          <input name="code" autocomplete="one-time-code" />
+          <input
+            name="code"
+            inputmode="numeric"
+            autocomplete="one-time-code"
+            maxlength="6"
+            pattern="[0-9]{6}"
+          />
         </label>
         <p id="authError" class="auth-error" hidden></p>
         <p id="authNote" class="auth-note" hidden></p>

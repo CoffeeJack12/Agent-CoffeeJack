@@ -310,7 +310,7 @@ export function revokeSession(store, token) {
 
 function safeAuditDetail(detail) {
   const redact = (value, key = "") => {
-    if (/content|message|body|password|secret|token|credential|api.?key/i.test(key))
+    if (/content|message|body|password|secret|token|code|credential|api.?key/i.test(key))
       return "[redacted]";
     if (Array.isArray(value)) return value.slice(0, 20).map((item) => redact(item));
     if (value && typeof value === "object")

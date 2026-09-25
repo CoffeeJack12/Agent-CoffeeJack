@@ -2,9 +2,19 @@
  * CoffeeJack-native accounts (email + password).
  * Presentation/persona is separate. Client-supplied role is ignored on signup.
  */
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  generateSixDigitCode,
+  hashAuthCode,
+  hmacEquals,
+  isSixDigitCode,
+  ensureAuthHmacSecret,
+  MAX_CODE_ATTEMPTS,
+  RESET_TTL_MS,
+  VERIFY_TTL_MS,
+} from "./auth-codes.mjs";
 import {
   hashPassword,
   looksLikePasswordHash,
@@ -12,7 +22,7 @@ import {
   verifyPassword,
   verifyPasswordDummy,
 } from "./password.mjs";
-import { buildAuthEmail, deliverAuthMessage, mailStatus } from "./email.mjs";
+import { deliverAuthMessage, mailStatus } from "./email.mjs";
 import { ROLES, audit, createUser } from "./users.mjs";
 import { ensureUserWorkspace } from "./workspaces.mjs";
 
@@ -23,10 +33,6 @@ export function normalizeEmail(email) {
   if (!EMAIL_RE.test(value) || value.length > 190)
     throw new Error("Invalid email");
   return value;
-}
-
-function tokenHash(raw) {
-  return createHash("sha256").update(String(raw)).digest("hex");
 }
 
 export function ensureAuthSchema(store) {
@@ -52,10 +58,26 @@ export function ensureAuthSchema(store) {
       token_hash TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       used_at TEXT,
-      created TEXT NOT NULL
+      created TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0
     );
     CREATE INDEX IF NOT EXISTS auth_tokens_hash ON auth_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS auth_tokens_user_purpose
+      ON auth_tokens(user_id, purpose);
   `);
+  const tokenCols = db.prepare("PRAGMA table_info(auth_tokens)").all();
+  const tokenNames = new Set(tokenCols.map((c) => c.name));
+  if (!tokenNames.has("attempts")) {
+    // Additive: keep users/password hashes. Outstanding long-token
+    // verify/reset values cannot be reused as 6-digit HMAC codes.
+    db.exec(
+      "ALTER TABLE auth_tokens ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0",
+    );
+    db.prepare("UPDATE auth_tokens SET used_at=? WHERE used_at IS NULL").run(
+      new Date().toISOString(),
+    );
+  }
+  ensureAuthHmacSecret(store);
 }
 
 export async function backupSqliteOnce(dataDirectory) {
@@ -111,36 +133,79 @@ export function publicUser(user) {
   };
 }
 
-function issueToken(store, { userId, purpose, ttlMs }) {
-  const raw = randomBytes(32).toString("base64url");
-  const now = new Date().toISOString();
-  const expires = new Date(Date.now() + ttlMs).toISOString();
-  store.db
-    .prepare(
-      "INSERT INTO auth_tokens(id,user_id,purpose,token_hash,expires_at,used_at,created) VALUES(?,?,?,?,?,NULL,?)",
-    )
-    .run(cryptoRandomId(), userId, purpose, tokenHash(raw), expires, now);
-  return { raw, expires };
-}
-
 function cryptoRandomId() {
   return randomBytes(16).toString("hex");
 }
 
-function consumeToken(store, { raw, purpose }) {
-  if (typeof raw !== "string" || raw.length < 20) return null;
-  const row = store.db
+function invalidateOpenCodes(store, userId, purpose) {
+  store.db
     .prepare(
-      `SELECT * FROM auth_tokens WHERE token_hash=? AND purpose=?`,
+      "UPDATE auth_tokens SET used_at=? WHERE user_id=? AND purpose=? AND used_at IS NULL",
     )
-    .get(tokenHash(raw), purpose);
-  if (!row) return null;
-  if (row.used_at) return null;
-  if (Date.parse(row.expires_at) <= Date.now()) return null;
+    .run(new Date().toISOString(), userId, purpose);
+}
+
+function issueAuthCode(store, { userId, purpose, ttlMs }) {
+  invalidateOpenCodes(store, userId, purpose);
+  const raw = generateSixDigitCode();
+  const secret = ensureAuthHmacSecret(store);
+  const now = new Date().toISOString();
+  const expires = new Date(Date.now() + ttlMs).toISOString();
+  store.db
+    .prepare(
+      "INSERT INTO auth_tokens(id,user_id,purpose,token_hash,expires_at,used_at,created,attempts) VALUES(?,?,?,?,?,NULL,?,0)",
+    )
+    .run(
+      cryptoRandomId(),
+      userId,
+      purpose,
+      hashAuthCode(secret, { purpose, userId, code: raw }),
+      expires,
+      now,
+    );
+  return { raw, expires };
+}
+
+function consumeAuthCode(store, { userId, purpose, raw }) {
+  if (!isSixDigitCode(raw)) return { ok: false, reason: "invalid" };
+  const active = store.db
+    .prepare(
+      `SELECT * FROM auth_tokens
+       WHERE user_id=? AND purpose=? AND used_at IS NULL
+       ORDER BY created DESC LIMIT 1`,
+    )
+    .get(userId, purpose);
+  if (!active) return { ok: false, reason: "invalid" };
+  if (Date.parse(active.expires_at) <= Date.now())
+    return { ok: false, reason: "expired" };
+  if ((active.attempts || 0) >= MAX_CODE_ATTEMPTS)
+    return { ok: false, reason: "locked" };
+  const secret = ensureAuthHmacSecret(store);
+  const expected = hashAuthCode(secret, { purpose, userId, code: raw });
+  if (!hmacEquals(expected, active.token_hash)) {
+    store.db
+      .prepare("UPDATE auth_tokens SET attempts=attempts+1 WHERE id=?")
+      .run(active.id);
+    const attempts = (active.attempts || 0) + 1;
+    return {
+      ok: false,
+      reason: attempts >= MAX_CODE_ATTEMPTS ? "locked" : "invalid",
+    };
+  }
   store.db
     .prepare("UPDATE auth_tokens SET used_at=? WHERE id=? AND used_at IS NULL")
-    .run(new Date().toISOString(), row.id);
-  return row;
+    .run(new Date().toISOString(), active.id);
+  return { ok: true, row: active };
+}
+
+function codeError(kind, purpose) {
+  if (kind === "locked")
+    return new Error("Too many incorrect attempts. Request a new code.");
+  return new Error(
+    purpose === "reset"
+      ? "Invalid or expired reset code"
+      : "Invalid or expired verification code",
+  );
 }
 
 export async function registerAccount(
@@ -169,26 +234,20 @@ export async function registerAccount(
     .run(normalized, normalized, passwordHash, now, now, created.id);
   if (dataDirectory)
     await ensureUserWorkspace(store, created.id, dataDirectory);
-  const token = issueToken(store, {
+  const token = issueAuthCode(store, {
     userId: created.id,
     purpose: "verify",
-    ttlMs: 24 * 60 * 60 * 1000,
+    ttlMs: VERIFY_TTL_MS,
   });
   const delivered = await deliverAuthMessage(
     dataDirectory,
     {
       to: normalized,
       subject: "Verify your CoffeeJack account",
-      text: buildAuthEmail({
-        purpose: "verify",
-        rawToken: token.raw,
-        publicBase,
-        expiresHours: 24,
-      }),
       purpose: "verify",
       rawToken: token.raw,
       publicBase,
-      expiresHours: 24,
+      expiresMinutes: 15,
     },
     mail,
   );
@@ -230,20 +289,25 @@ export async function authenticateAccount(store, { email, password }) {
   return { ok: true, user };
 }
 
-export async function verifyEmail(store, rawToken) {
+export async function verifyEmail(store, rawCode, { user } = {}) {
   ensureAuthSchema(store);
-  const row = consumeToken(store, { raw: rawToken, purpose: "verify" });
-  if (!row) throw new Error("Invalid or expired verification token");
+  if (!user?.id) throw new Error("Your session expired. Please log in again.");
+  const result = consumeAuthCode(store, {
+    userId: user.id,
+    purpose: "verify",
+    raw: rawCode,
+  });
+  if (!result.ok) throw codeError(result.reason, "verify");
   store.db
     .prepare("UPDATE users SET email_verified=1,updated=? WHERE id=?")
-    .run(new Date().toISOString(), row.user_id);
+    .run(new Date().toISOString(), user.id);
   audit(store, {
-    userId: row.user_id,
+    userId: user.id,
     action: "email_verified",
     detail: {},
   });
-  const user = store.db.prepare("SELECT * FROM users WHERE id=?").get(row.user_id);
-  return publicUser(user);
+  const next = store.db.prepare("SELECT * FROM users WHERE id=?").get(user.id);
+  return publicUser(next);
 }
 
 export async function resendVerification(
@@ -259,32 +323,20 @@ export async function resendVerification(
       user: publicUser(user),
       mail: mailStatus(mail?.env),
     };
-  const now = new Date().toISOString();
-  store.db
-    .prepare(
-      "UPDATE auth_tokens SET used_at=? WHERE user_id=? AND purpose='verify' AND used_at IS NULL",
-    )
-    .run(now, user.id);
-  const token = issueToken(store, {
+  const token = issueAuthCode(store, {
     userId: user.id,
     purpose: "verify",
-    ttlMs: 24 * 60 * 60 * 1000,
+    ttlMs: VERIFY_TTL_MS,
   });
   const delivered = await deliverAuthMessage(
     dataDirectory,
     {
       to: user.email_normalized || user.email,
       subject: "Verify your CoffeeJack account",
-      text: buildAuthEmail({
-        purpose: "verify",
-        rawToken: token.raw,
-        publicBase,
-        expiresHours: 24,
-      }),
       purpose: "verify",
       rawToken: token.raw,
       publicBase,
-      expiresHours: 24,
+      expiresMinutes: 15,
     },
     mail,
   );
@@ -323,26 +375,20 @@ export async function requestPasswordReset(
     user = undefined;
   }
   if (!user?.password_hash) return { ...neutral, issued: false };
-  const token = issueToken(store, {
+  const token = issueAuthCode(store, {
     userId: user.id,
     purpose: "reset",
-    ttlMs: 60 * 60 * 1000,
+    ttlMs: RESET_TTL_MS,
   });
   const delivered = await deliverAuthMessage(
     dataDirectory,
     {
       to: user.email_normalized,
       subject: "Reset your CoffeeJack password",
-      text: buildAuthEmail({
-        purpose: "reset",
-        rawToken: token.raw,
-        publicBase,
-        expiresHours: 1,
-      }),
       purpose: "reset",
       rawToken: token.raw,
       publicBase,
-      expiresHours: 1,
+      expiresMinutes: 30,
     },
     mail,
   );
@@ -363,27 +409,36 @@ export async function requestPasswordReset(
   };
 }
 
-export async function resetPassword(store, { token, password, confirmPassword }) {
+export async function resetPassword(
+  store,
+  { email, code, token, password, confirmPassword },
+) {
   ensureAuthSchema(store);
   if (password !== confirmPassword) throw new Error("Passwords do not match");
   const policy = validatePasswordPolicy(password);
   if (!policy.ok) throw new Error(policy.error);
-  const row = consumeToken(store, { raw: token, purpose: "reset" });
-  if (!row) throw new Error("Invalid or expired reset token");
+  const user = getUserByEmail(store, email);
+  if (!user) throw new Error("Invalid or expired reset code");
+  const result = consumeAuthCode(store, {
+    userId: user.id,
+    purpose: "reset",
+    raw: code || token,
+  });
+  if (!result.ok) throw codeError(result.reason, "reset");
   const passwordHash = await hashPassword(password);
   const now = new Date().toISOString();
   store.db
     .prepare(
       "UPDATE users SET password_hash=?,password_set_at=?,updated=? WHERE id=?",
     )
-    .run(passwordHash, now, now, row.user_id);
-  const revoked = revokeSessionsForUser(store, row.user_id);
+    .run(passwordHash, now, now, user.id);
+  const revoked = revokeSessionsForUser(store, user.id);
   audit(store, {
-    userId: row.user_id,
+    userId: user.id,
     action: "password_reset",
     detail: { sessionsRevoked: revoked },
   });
-  return { userId: row.user_id, sessionsRevoked: revoked };
+  return { userId: user.id, sessionsRevoked: revoked };
 }
 
 export async function attachOwnerCredentials(

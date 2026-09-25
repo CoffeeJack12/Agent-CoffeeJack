@@ -9,7 +9,6 @@ const lead = document.querySelector("#authLead");
 const submit = document.querySelector("#authSubmit");
 const errorEl = document.querySelector("#authError");
 const noteEl = document.querySelector("#authNote");
-const params = new URLSearchParams(location.search);
 const MAIL_UNCONFIGURED =
   "Email delivery is not configured yet. Contact the administrator.";
 const SESSION_EXPIRED = "Your session expired. Please log in again.";
@@ -55,10 +54,7 @@ title.textContent = copy.title;
 lead.textContent = copy.lead;
 submit.textContent = copy.submit;
 document.querySelector("#nameRow").classList.toggle("hidden", page !== "/signup");
-document.querySelector("#emailRow").classList.toggle(
-  "hidden",
-  page === "/reset" || page === "/verify",
-);
+document.querySelector("#emailRow").classList.toggle("hidden", page === "/verify");
 document.querySelector("#confirmRow").classList.toggle(
   "hidden",
   page !== "/signup" && page !== "/reset",
@@ -77,18 +73,13 @@ if (copy.tokenLabel) {
 }
 if (copy.password)
   form.elements.password?.setAttribute("autocomplete", copy.password);
-if (form.elements.email)
-  form.elements.email.required = page !== "/reset" && page !== "/verify";
+if (form.elements.email) form.elements.email.required = page !== "/verify";
 if (form.elements.password)
   form.elements.password.required = page !== "/forgot" && page !== "/verify";
 const codeField = form.elements.code;
 if (codeField) {
-  const prefilled =
-    params.get("code") ||
-    (page === "/reset" ? params.get("token") : "") ||
-    sessionStorage.getItem("cj_dev_verify") ||
-    "";
-  if (prefilled) codeField.value = prefilled;
+  const prefilled = sessionStorage.getItem("cj_dev_verify") || "";
+  if (/^\d{6}$/.test(prefilled)) codeField.value = prefilled;
   sessionStorage.removeItem("cj_dev_verify");
 }
 const resendBtn = document.querySelector("#authResend");
@@ -170,7 +161,8 @@ resendBtn?.addEventListener("click", async () => {
       return;
     }
     showNote(mailNote(data.mail, data.mail?.message));
-    if (data.devToken && codeField) codeField.value = data.devToken;
+    if (/^\d{6}$/.test(data.devToken || "") && codeField)
+      codeField.value = data.devToken;
   } catch (error) {
     showError(error.message);
   } finally {
@@ -188,7 +180,8 @@ form.addEventListener("submit", async (event) => {
     if (page === "/signup") {
       const { res, data } = await authFetch("/api/auth/register", body);
       if (!res.ok) throw new Error(data.error || "تعذر إنشاء الحساب");
-      if (data.devToken) sessionStorage.setItem("cj_dev_verify", data.devToken);
+      if (/^\d{6}$/.test(data.devToken || ""))
+        sessionStorage.setItem("cj_dev_verify", data.devToken);
       if (data.mail?.configured === false) showNote(MAIL_UNCONFIGURED);
       location.assign("/verify");
       return;
@@ -218,7 +211,8 @@ form.addEventListener("submit", async (event) => {
     }
     if (page === "/reset") {
       const { res, data } = await authFetch("/api/auth/reset", {
-        token: body.code,
+        email: body.email,
+        code: body.code,
         password: body.password,
         confirmPassword: body.confirmPassword,
       });
