@@ -6,6 +6,7 @@ import { randomUUID } from "node:crypto";
 import { projectKey, validateMemory, retrieveMemories } from "./memory.mjs";
 import { scrubStoredCapabilityClaims } from "./capabilities.mjs";
 import { migrateToMultiUser, resolveLocalOwner } from "./users.mjs";
+import { ensureGameSaveSchema } from "./game-saves/jobs.mjs";
 
 export class Store {
   constructor(directory) {
@@ -48,6 +49,7 @@ export class Store {
     }
     scrubStoredCapabilityClaims(this);
     migrateToMultiUser(this);
+    ensureGameSaveSchema(this);
   }
   profilePreferences(profileId) {
     let row = this.db.prepare("SELECT value FROM profile_preferences WHERE profile_id=?").get(profileId);

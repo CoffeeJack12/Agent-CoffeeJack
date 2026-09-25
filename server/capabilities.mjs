@@ -8,6 +8,11 @@ export const TOOL_PACKS = Object.freeze({
   browser: ["browser"],
   desktop: ["computer"],
   inspect_pc: ["computer"],
+  game_save_inspect: ["computer"],
+  game_save_prepare: ["computer"],
+  game_save_apply: ["computer"],
+  game_save_restore: ["computer"],
+  game_save_backups: ["computer"],
   terminal: ["terminal"],
   list_files: ["files"],
   read_file: ["files"],
@@ -32,6 +37,10 @@ const APPROVAL_TOOLS = new Set([
   "inspect_pc",
   "apply_patch",
   "run_check",
+  "game_save_inspect",
+  "game_save_prepare",
+  "game_save_apply",
+  "game_save_restore",
 ]);
 
 /** Logical capability ids Jack can report. Tools map into these. */
@@ -77,6 +86,19 @@ export const CAPABILITY_DEFS = Object.freeze([
     packs: ["computer"],
     tools: ["inspect_pc"],
     platform: "win32",
+    gamingModeAvailability: false,
+  },
+  {
+    id: "game_saves",
+    name: "Game-save editing",
+    packs: ["computer"],
+    tools: [
+      "game_save_inspect",
+      "game_save_prepare",
+      "game_save_apply",
+      "game_save_restore",
+      "game_save_backups",
+    ],
     gamingModeAvailability: false,
   },
   {
@@ -137,7 +159,7 @@ export function enabledPacks(preferences) {
 export function capabilityPolicy(preferences, text = "") {
   const enabled = enabledPacks(preferences);
   const explicitAction =
-    /\b(?:inspect|check|run|open|read|write|search|find|browse|install|debug|test|fix)\b|افحص|شغل|شغّل|افتح|ابحث|اقرأ|اصلح|أصلح/i.test(
+    /\b(?:inspect|check|run|open|read|write|search|find|browse|install|debug|test|fix|ammo|save|prepare|apply)\b|افحص|شغل|شغّل|افتح|ابحث|اقرأ|اصلح|أصلح|ذخيرة/i.test(
       text,
     );
   return {
@@ -297,6 +319,8 @@ For "can you control my PC?" with PC tools enabled: confirm briefly, list the co
 For "can you search the web?" with research/web enabled: "Yes. I can search the web, open multiple sources, compare them and give a sourced answer. What are we looking for?"
 For "what can you do?": summarize AVAILABLE NOW concisely in your voice — not a memorized marketing list.
 Never claim you searched, inspected, edited or controlled anything unless a tool actually returned evidence this turn.
+GAME SAVES
+Use game_save_* tools for save inspection or edits. Disk verification is not gameplay confirmation. After apply, say the save was modified and verified on disk and that gameplay is still unconfirmed.
 SENSITIVE CAPABILITY QUESTIONS (hack / exploit / bypass / reverse engineer / crack / pentest / cheat / security testing)
 Do not refuse because of those words. Do not lecture about law, ethics, "my purpose", or "lawful and ethical" boundaries. Ask one concise question about target and objective, then use established conversation facts. Example: "Depends on the target. What are you trying to access, modify, test or bypass?"`;
 }

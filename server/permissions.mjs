@@ -20,6 +20,9 @@ const CAPABILITIES = new Set([
   "user_management",
   "gaming_toggle",
   "self_repair",
+  "game_save_inspect",
+  "game_save_prepare",
+  "game_save_write",
 ]);
 
 const APPROVAL = new Set([
@@ -29,6 +32,7 @@ const APPROVAL = new Set([
   "terminal_sensitive",
   "desktop_control",
   "git_push",
+  "game_save_write",
 ]);
 
 const OWNER_ALLOW = new Set([
@@ -47,6 +51,8 @@ const OWNER_ALLOW = new Set([
   "user_management",
   "gaming_toggle",
   "self_repair",
+  "game_save_inspect",
+  "game_save_prepare",
 ]);
 
 const TRUSTED_ALLOW = new Set([
@@ -55,6 +61,8 @@ const TRUSTED_ALLOW = new Set([
 ]);
 TRUSTED_ALLOW.delete("user_management");
 TRUSTED_ALLOW.delete("sensitive_settings");
+TRUSTED_ALLOW.delete("game_save_prepare");
+TRUSTED_ALLOW.add("game_save_inspect");
 
 /** Explicit Standard allow-list — does not inherit Owner tools. */
 const STANDARD_ALLOW = new Set([
@@ -108,6 +116,8 @@ export function authorize({
       return result("require_approval", "Sensitive owner action requires approval");
   }
   if (role === "trusted") {
+    if (capability === "game_save_write" || capability === "game_save_prepare")
+      return result("deny", "Trusted users cannot write game saves");
     if (TRUSTED_ALLOW.has(capability))
       return result("allow", "Allowed by trusted-user policy");
     if (capability === "sensitive_settings" || APPROVAL.has(capability))
@@ -195,6 +205,11 @@ export function toolCapability(toolName, args = {}) {
   if (["delete_file", "delete_files"].includes(name)) return "delete_files";
   if (name === "gaming_toggle") return "gaming_toggle";
   if (name === "user_management") return "user_management";
+  if (["game_save_inspect", "game_save_backups"].includes(name))
+    return "game_save_inspect";
+  if (name === "game_save_prepare") return "game_save_prepare";
+  if (["game_save_apply", "game_save_restore"].includes(name))
+    return "game_save_write";
   return null;
 }
 
@@ -215,6 +230,9 @@ export function permissionSummary(user) {
     "gaming_toggle",
     "user_management",
     "self_repair",
+    "game_save_inspect",
+    "game_save_prepare",
+    "game_save_write",
   ];
   return keys
     .map((capability) => {
@@ -239,8 +257,17 @@ export function canSelfRepair(user) {
 /**
  * Temporary compatibility bridge for the legacy global autoApprove setting.
  * It may only turn an owner's require_approval decision into allow.
+ * Game-save apply/restore still require a real approval.
  */
-export function applyLegacyOwnerAutoApprove(decision, user, autoApprove) {
+export function applyLegacyOwnerAutoApprove(
+  decision,
+  user,
+  autoApprove,
+  context = {},
+) {
+  const capability =
+    typeof context === "string" ? context : context?.capability;
+  if (capability === "game_save_write") return decision;
   if (
     autoApprove === true &&
     user?.role === "owner" &&

@@ -30,3 +30,5 @@ Search is bounded to 50 results, 10,000 visited entries and 1 MB text files. Pro
 The canonical Jack portrait was not present and has not been invented; the monogram is an intentional placeholder. No OCR, voice, or recurring background agent was added. Browser/desktop actions and arbitrary shell commands retain their existing approval requirements and practical limitations.
 
 Cloudflare Tunnel/Access operator setup is documented in [CLOUDFLARE-SETUP.md](CLOUDFLARE-SETUP.md). Live tunnel verification requires account credentials and is not claimed by CI.
+
+Game-save editing is implemented as an adapter workflow (`game_save_inspect` → prepare → approved apply/restore). Disk verification never implies gameplay confirmation. The Sinking City 2 infinite-ammo write path stays fail-closed (`exact_verified_asset_references_missing`) until the five previously verified Unreal asset references are recovered from a real local edit. Live saves must not be mutated during development; tests use copied fixtures only.

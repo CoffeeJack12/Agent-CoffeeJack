@@ -18,6 +18,11 @@ import {
   detectShellMismatch,
   runInspectSection,
 } from "./pc-diagnostics.mjs";
+import {
+  createManagerFromTools,
+  rejectedAbsolutePathArgs,
+} from "./game-saves/index.mjs";
+import { getUser, resolveLocalOwner } from "./users.mjs";
 
 const str = (description) => ({ type: "string", description });
 const tool = (
@@ -173,6 +178,40 @@ export const definitions = [
     },
     [],
   ),
+  tool(
+    "game_save_inspect",
+    "Read-only game-save discovery. Finds the installed game, Steam build, running process, and a confident autosave. Do not pass absolute save paths. Use this instead of terminal/write_file for save work.",
+    {
+      game: str("Game id or title, e.g. sinking-city-2"),
+      editId: str("Optional edit id such as infinite_ammo"),
+    },
+    [],
+  ),
+  tool(
+    "game_save_prepare",
+    "Create an immutable backup and a modified PREPARED copy only. Does not overwrite the live save. Requires a compatible adapter and a stable source. Do not pass absolute save paths.",
+    {
+      game: str("Game id or title"),
+      editId: str("Edit id such as infinite_ammo"),
+    },
+    ["editId"],
+  ),
+  tool(
+    "game_save_apply",
+    "Atomically install a prepared save after Owner approval. Re-hashes the live source, aborts on conflict, and never claims gameplay confirmation. Requires jobId from prepare.",
+    { jobId: str("Job id returned by game_save_prepare") },
+  ),
+  tool(
+    "game_save_restore",
+    "Restore an immutable backup for the current user's job after Owner approval. Creates a restore-undo copy of the current file first.",
+    { jobId: str("Job id that owns the backup") },
+  ),
+  tool(
+    "game_save_backups",
+    "List this user's persisted game-save jobs and backup hashes.",
+    { jobId: str("Optional job id to filter") },
+    [],
+  ),
 ];
 
 export function runProcess(
@@ -254,6 +293,7 @@ export class Tools {
     approve,
     artifactDirectory,
     artifactBase,
+    gameSave,
   }) {
     Object.assign(this, {
       root,
@@ -264,6 +304,7 @@ export class Tools {
       artifactDirectory,
       artifactBase: artifactBase || artifactDirectory,
       artifactContext: null,
+      gameSave: gameSave || {},
     });
   }
 
@@ -348,6 +389,10 @@ export class Tools {
       "inspect_pc",
       "apply_patch",
       "run_check",
+      "game_save_inspect",
+      "game_save_prepare",
+      "game_save_apply",
+      "game_save_restore",
     ];
     if (
       writeActions.includes(name) ||
@@ -356,6 +401,45 @@ export class Tools {
       await this.approve(name, args, signal);
     if (signal.aborted) throw new Error("Cancelled");
 
+    if (
+      [
+        "game_save_inspect",
+        "game_save_prepare",
+        "game_save_apply",
+        "game_save_restore",
+        "game_save_backups",
+      ].includes(name)
+    ) {
+      const blocked = rejectedAbsolutePathArgs(args);
+      if (blocked.length)
+        throw new Error(
+          "Game-save tools do not accept caller-provided absolute save paths; the adapter discovers authorized locations.",
+        );
+      const userId = this.artifactContext?.userId;
+      const user = this.store
+        ? userId
+          ? getUser(this.store, userId)
+          : resolveLocalOwner(this.store)
+        : { id: userId || "owner", role: "owner", status: "active" };
+      const manager = createManagerFromTools(this, { user });
+      if (name === "game_save_inspect")
+        return manager.inspect({
+          game: args.game,
+          editId: args.editId || "infinite_ammo",
+          signal,
+        });
+      if (name === "game_save_prepare")
+        return manager.prepare({
+          game: args.game,
+          editId: args.editId || "infinite_ammo",
+          signal,
+        });
+      if (name === "game_save_apply")
+        return manager.apply({ jobId: args.jobId, signal });
+      if (name === "game_save_restore")
+        return manager.restore({ jobId: args.jobId, signal });
+      return manager.backups({ jobId: args.jobId });
+    }
     if (name === "research") return research(args,{signal});
     if (name === "inspect_pc") {
       if (process.platform !== "win32")
