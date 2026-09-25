@@ -30,6 +30,32 @@ test("classifyRequest: direct loopback is local", () => {
   assert.equal(c.reason, "direct_loopback");
 });
 
+test("classifyRequest: spoofed CF markers on local-only loopback stay local", () => {
+  const c = classifyRequest(
+    {
+      headers: {
+        host: "127.0.0.1:3210",
+        "cf-ray": "abc",
+        "cf-access-jwt-assertion": "not.a.jwt",
+      },
+    },
+    { accessConfigured: false, accessHostname: null },
+  );
+  assert.equal(c.mode, "local");
+  assert.equal(c.reason, "direct_loopback");
+});
+
+test("validateAccessEnvironment accepts native remote without CF Access vars", () => {
+  const native = validateAccessEnvironment({
+    COFFEEJACK_REMOTE_AUTH: "native",
+    COFFEEJACK_REMOTE_HOST: "coffeejack-agent.com",
+  });
+  assert.equal(native.ok, true);
+  assert.equal(native.mode, "ready");
+  assert.equal(native.remoteAuth, "native");
+  assert.equal(native.summary.CF_ACCESS_AUD, "not_required");
+});
+
 test("classifyRequest: CF markers on loopback are remote (never local owner)", () => {
   const c = classifyRequest(
     {

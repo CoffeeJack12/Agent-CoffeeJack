@@ -6,7 +6,10 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomUUID } from "node:crypto";
-import { accessFromEnvironment } from "./access.mjs";
+import {
+  accessFromEnvironment,
+  isNativeRemoteAccess,
+} from "./access.mjs";
 import { classifyRequest, expectedOrigin } from "./trust.mjs";
 import { createRateLimiter, AUTH_RATE, REMOTE_RATE } from "./rate-limit.mjs";
 import { Store } from "./store.mjs";
@@ -328,8 +331,10 @@ export async function createApp({
     res.setHeader("Cross-Origin-Opener-Policy", "same-origin");
     res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
     const host = req.headers.host ?? "";
+    const nativeRemote = isNativeRemoteAccess(access);
+    const remoteHostname = access?.hostname || null;
     const trust = classifyRequest(req, {
-      accessHostname: access?.hostname || null,
+      accessHostname: remoteHostname,
       accessConfigured: Boolean(access),
     });
     const isLocal = trust.mode === "local";
@@ -346,39 +351,42 @@ export async function createApp({
           code: "access_not_configured",
         });
       const hostName = host.split(":")[0].toLowerCase();
-      const accessHost = access.hostname.toLowerCase();
+      const accessHost = String(access.hostname).toLowerCase();
       // Public hostname must match; loopback+CF markers allowed only as tunnel rewrite.
       if (
         trust.reason !== "cloudflare_markers_on_loopback" &&
         hostName !== accessHost
       )
         return json(res, 403, { error: "Invalid host" });
-      const verified = await access.authorize(req);
-      if (!verified) {
-        const limited = remoteLimiter.check(
-          req,
-          REMOTE_RATE.loginDenied.category,
-          REMOTE_RATE.loginDenied.max,
-        );
-        if (!limited.ok) {
-          res.setHeader(
-            "Retry-After",
-            String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+      if (!nativeRemote) {
+        const verified = await access.authorize(req);
+        if (!verified) {
+          const limited = remoteLimiter.check(
+            req,
+            REMOTE_RATE.loginDenied.category,
+            REMOTE_RATE.loginDenied.max,
           );
-          return json(res, 429, { error: "Too many requests" });
+          if (!limited.ok) {
+            res.setHeader(
+              "Retry-After",
+              String(Math.ceil(limited.retryAfterMs / 1000) || 1),
+            );
+            return json(res, 429, { error: "Too many requests" });
+          }
+          audit(store, {
+            action: "remote_login_denied",
+            detail: { reason: "invalid_token", host: host.slice(0, 120) },
+          });
+          return json(res, 403, { error: "Remote authentication required" });
         }
-        audit(store, {
-          action: "remote_login_denied",
-          detail: { reason: "invalid_token", host: host.slice(0, 120) },
-        });
-        return json(res, 403, { error: "Remote authentication required" });
+        remoteIdentity = verified;
       }
-      remoteIdentity = verified;
     }
-    // Spoofed CF email headers never authorize — only verified JWT claims.
+    // Spoofed CF email/identity headers never authorize — only verified JWT
+    // claims (Cloudflare Access mode) or a CoffeeJack session (native mode).
     const expected = expectedOrigin(req, {
       mode: trust.mode,
-      accessHostname: access?.hostname,
+      accessHostname: remoteHostname,
     });
     // Access redirects can retain cross-site Fetch Metadata. Only the verified
     // remote app entry document may cross that boundary; APIs and writes may not.
@@ -409,18 +417,30 @@ export async function createApp({
       let identity = route.startsWith("/api/")
         ? sessionIdentity(req)
         : undefined;
-      const publicBase = !isLocal && access?.hostname
-        ? `https://${access.hostname}`
-        : `http://${host || "127.0.0.1:3210"}`;
+      const publicBase =
+        !isLocal && remoteHostname
+          ? `https://${remoteHostname}`
+          : `http://${host || "127.0.0.1:3210"}`;
       const sessionExpired = () =>
         json(res, 401, {
           error: "Your session expired. Please log in again.",
           code: "session_expired",
         });
+      const authenticationRequired = () =>
+        json(res, 401, {
+          error: "Authentication required. Please log in again.",
+          code: "authentication_required",
+        });
       if (route === "/api/auth/config" && req.method === "GET") {
         return json(res, 200, {
           mail: mailStatus(mail.env),
           publicRegistration: true,
+          remoteAuth: nativeRemote
+            ? "native"
+            : access
+              ? "cloudflare_access"
+              : "disabled",
+          publicHost: remoteHostname,
         });
       }
       if (route === "/api/auth/me" && req.method === "GET") {
@@ -696,6 +716,7 @@ export async function createApp({
       if (route === "/api/status" && req.method === "GET") {
         if (!identity) {
           if (!isLocal) {
+            if (nativeRemote) return authenticationRequired();
             return json(res, 403, { error: "Remote authentication required" });
           } else {
             const localSession = createSession(store, owner.id, {

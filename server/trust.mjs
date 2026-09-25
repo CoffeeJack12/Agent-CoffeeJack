@@ -40,7 +40,9 @@ export function classifyRequest(
     return { mode: "remote", reason: "configured_hostname", loopbackHost };
   }
 
-  // Tunnel/proxy markers on loopback: fail into remote path (JWT required).
+  // Tunnel/proxy markers on loopback: fail into remote path.
+  // Only when remote auth is configured — local-only spoofed CF headers
+  // must not flip classification or block Owner bootstrap.
   if (loopbackHost && accessConfigured && hasCloudflareForwardingMarkers(req)) {
     return {
       mode: "remote",
