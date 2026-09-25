@@ -79,12 +79,29 @@ import {
   cleanupArtifacts,
   migrateLegacyArtifacts,
 } from "./artifacts.mjs";
+import {
+  createMailer,
+  verificationEmail,
+  passwordResetEmail,
+} from "./mail.mjs";
+import {
+  ensureAuthSchema,
+  signup as signupAccount,
+  authenticate,
+  getAuthUser,
+  findUserByEmail,
+  issueCode,
+  verifyCode,
+  markEmailVerified,
+  setPassword,
+} from "./auth.mjs";
 
 export async function createApp({
   root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."),
   dataDirectory,
   ollama: providedOllama,
   remoteAccess,
+  mailer: providedMailer,
 } = {}) {
   const access = remoteAccess ?? accessFromEnvironment();
   const data = dataDirectory ?? path.join(root, ".local");
@@ -94,6 +111,10 @@ export async function createApp({
   ensureIdentitySchema(store);
   ensureWorkspaceSchema(store);
   ensureArtifactSchema(store);
+  ensureAuthSchema(store);
+  // In-memory dev mailbox; only used when COFFEEJACK_AUTH_DEV=1 and no SMTP set.
+  const devMailbox = [];
+  const mailer = providedMailer ?? createMailer({ env: process.env, devMailbox });
   const owner = resolveLocalOwner(store);
   await ensureOwnerWorkspace(store, { root, dataDirectory: data });
   await migrateLegacyArtifacts(store, artifacts, { root });
@@ -274,6 +295,34 @@ export async function createApp({
       "coffeejack_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0",
     );
   };
+  // Account login/signup sets the session cookie for local and remote alike, so
+  // the browser carries it to /verify without ever putting a token in the URL.
+  // Secure is only added off-loopback (a Secure cookie is dropped over http).
+  const setLoginCookie = (res, sessionToken, { secure }) => {
+    if (!sessionToken) return;
+    res.setHeader(
+      "Set-Cookie",
+      `coffeejack_session=${encodeURIComponent(sessionToken)}; Path=/; HttpOnly;${secure ? " Secure;" : ""} SameSite=Lax; Max-Age=604800`,
+    );
+  };
+  const authBaseUrl = (req, isLocal) => {
+    const configured = (process.env.COFFEEJACK_BASE_URL || "").trim();
+    if (configured) return configured.replace(/\/+$/, "");
+    return `${isLocal ? "http" : "https"}://${req.headers.host || "127.0.0.1:3210"}`;
+  };
+  const sendAccountEmail = async (message) => {
+    // Never let a mail-provider failure crash signup; report honestly instead.
+    try {
+      const result = await mailer.send(message);
+      return {
+        mode: mailer.mode,
+        configured: mailer.mode !== "unconfigured",
+        delivered: Boolean(result?.delivered),
+      };
+    } catch {
+      return { mode: mailer.mode, configured: mailer.mode !== "unconfigured", delivered: false };
+    }
+  };
   const server = http.createServer(async (req, res) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -353,6 +402,214 @@ export async function createApp({
       let identity = route.startsWith("/api/")
         ? sessionIdentity(req)
         : undefined;
+      // ---- Account & email verification -------------------------------------
+      // These routes use the httpOnly session cookie (not the X-CoffeeJack API
+      // token), so they are handled before the generic token guard. A missing
+      // session reports "session expired", never "Invalid session token".
+      if (route.startsWith("/api/auth/")) {
+        const sessionExpired = () =>
+          json(res, 401, {
+            authenticated: false,
+            code: "session_expired",
+            error: "Your session expired. Please log in again.",
+          });
+        if (route === "/api/auth/config" && req.method === "GET") {
+          return json(res, 200, {
+            mode: mailer.mode,
+            emailConfigured: mailer.mode !== "unconfigured",
+            devMode: mailer.mode === "dev",
+          });
+        }
+        if (route === "/api/auth/signup" && req.method === "POST") {
+          const b = await body(req);
+          let account;
+          try {
+            account = signupAccount(store, { email: b.email, password: b.password });
+          } catch (error) {
+            return json(res, 400, { error: error.message });
+          }
+          const session = createSession(store, account.id, {
+            source: isLocal ? "local" : "remote",
+          });
+          setLoginCookie(res, session.token, { secure: !isLocal });
+          audit(store, {
+            userId: account.id,
+            action: "account_signup",
+            detail: { role: account.role },
+          });
+          const { code, expiresMinutes } = issueCode(store, account.id, "verify");
+          const email = await sendAccountEmail({
+            to: account.email,
+            purpose: "verify",
+            ...verificationEmail({
+              code,
+              expiresMinutes,
+              baseUrl: authBaseUrl(req, isLocal),
+            }),
+          });
+          return json(res, 201, {
+            ok: true,
+            redirect: "/verify",
+            user: {
+              id: account.id,
+              email: account.email,
+              role: account.role,
+              verified: false,
+            },
+            email,
+          });
+        }
+        if (route === "/api/auth/login" && req.method === "POST") {
+          const b = await body(req);
+          const account = authenticate(store, { email: b.email, password: b.password });
+          if (!account)
+            return json(res, 401, {
+              code: "invalid_credentials",
+              error: "Invalid email or password.",
+            });
+          if (account.status !== "active")
+            return json(res, 403, { error: "This account is disabled." });
+          const session = createSession(store, account.id, {
+            source: isLocal ? "local" : "remote",
+          });
+          setLoginCookie(res, session.token, { secure: !isLocal });
+          audit(store, { userId: account.id, action: "account_login", detail: {} });
+          return json(res, 200, {
+            ok: true,
+            redirect: account.email_verified ? "/" : "/verify",
+            user: {
+              id: account.id,
+              email: account.email,
+              role: account.role,
+              verified: Boolean(account.email_verified),
+            },
+          });
+        }
+        if (route === "/api/auth/session" && req.method === "GET") {
+          if (!identity) return sessionExpired();
+          const account = getAuthUser(store, identity.user.id);
+          return json(res, 200, {
+            authenticated: true,
+            user: {
+              id: account.id,
+              email: account.email || null,
+              role: account.role,
+              verified: Boolean(account.email_verified),
+            },
+            emailMode: mailer.mode,
+            emailConfigured: mailer.mode !== "unconfigured",
+          });
+        }
+        if (route === "/api/auth/verify" && req.method === "POST") {
+          if (!identity) return sessionExpired();
+          const b = await body(req);
+          const code = typeof b.code === "string" ? b.code.trim() : "";
+          if (!/^\d{6}$/.test(code))
+            return json(res, 400, {
+              code: "invalid_code",
+              error: "Enter the 6-digit verification code from your email.",
+            });
+          const result = verifyCode(store, identity.user.id, "verify", code);
+          if (!result.ok) {
+            const expired = result.reason === "expired";
+            const tooMany = result.reason === "too_many";
+            return json(res, 400, {
+              code: expired ? "code_expired" : tooMany ? "too_many" : "invalid_code",
+              error: expired
+                ? "That verification code has expired. Request a new one."
+                : tooMany
+                  ? "Too many attempts. Request a new verification code."
+                  : "That verification code is incorrect.",
+            });
+          }
+          markEmailVerified(store, identity.user.id);
+          audit(store, {
+            userId: identity.user.id,
+            action: "email_verified",
+            detail: {},
+          });
+          return json(res, 200, { ok: true, redirect: "/" });
+        }
+        if (route === "/api/auth/resend" && req.method === "POST") {
+          if (!identity) return sessionExpired();
+          const account = getAuthUser(store, identity.user.id);
+          if (!account?.email)
+            return json(res, 400, { error: "No email address on file." });
+          if (account.email_verified)
+            return json(res, 200, { ok: true, alreadyVerified: true, redirect: "/" });
+          const { code, expiresMinutes } = issueCode(store, account.id, "verify");
+          const email = await sendAccountEmail({
+            to: account.email,
+            purpose: "verify",
+            ...verificationEmail({
+              code,
+              expiresMinutes,
+              baseUrl: authBaseUrl(req, isLocal),
+            }),
+          });
+          return json(res, 200, { ok: true, email });
+        }
+        if (route === "/api/auth/reset/request" && req.method === "POST") {
+          const b = await body(req);
+          const account = findUserByEmail(store, b.email);
+          if (account?.email) {
+            const { code, expiresMinutes } = issueCode(store, account.id, "reset");
+            await sendAccountEmail({
+              to: account.email,
+              purpose: "reset",
+              ...passwordResetEmail({
+                code,
+                expiresMinutes,
+                baseUrl: authBaseUrl(req, isLocal),
+              }),
+            });
+          }
+          // Always the same response so callers cannot probe which emails exist.
+          return json(res, 200, {
+            ok: true,
+            emailConfigured: mailer.mode !== "unconfigured",
+          });
+        }
+        if (route === "/api/auth/reset/confirm" && req.method === "POST") {
+          const b = await body(req);
+          const account = findUserByEmail(store, b.email);
+          const code = typeof b.code === "string" ? b.code.trim() : "";
+          if (!account || !/^\d{6}$/.test(code))
+            return json(res, 400, { error: "Invalid reset request." });
+          const result = verifyCode(store, account.id, "reset", code);
+          if (!result.ok)
+            return json(res, 400, {
+              code: result.reason === "expired" ? "code_expired" : "invalid_code",
+              error:
+                result.reason === "expired"
+                  ? "That reset code has expired."
+                  : "That reset code is incorrect.",
+            });
+          try {
+            setPassword(store, account.id, b.password);
+          } catch (error) {
+            return json(res, 400, { error: error.message });
+          }
+          store.db
+            .prepare(
+              "UPDATE sessions SET revoked=? WHERE user_id=? AND revoked IS NULL",
+            )
+            .run(new Date().toISOString(), account.id);
+          audit(store, {
+            userId: account.id,
+            action: "password_reset",
+            detail: {},
+          });
+          return json(res, 200, { ok: true, redirect: "/login" });
+        }
+        if (route === "/api/auth/dev/mailbox" && req.method === "GET") {
+          // Local dev convenience only; never exposed in production modes.
+          if (mailer.mode !== "dev" || !isLocal)
+            return json(res, 404, { error: "Not found" });
+          return json(res, 200, { messages: devMailbox.slice(-20) });
+        }
+        return json(res, 404, { error: "Not found" });
+      }
       // Remote: Cloudflare-verified identity must map to the session user.
       // Never let a stolen local session token impersonate another CF subject.
       if (!isLocal && remoteIdentity && route.startsWith("/api/")) {
@@ -1437,6 +1694,8 @@ export async function createApp({
             error: error.message || "Not found",
           });
         }
+      } else if (route === "/verify" || route === "/login" || route === "/signup") {
+        filename = path.join(root, "public", `${route.slice(1)}.html`);
       } else if (
         [
           "/",
@@ -1444,6 +1703,8 @@ export async function createApp({
           "/branding.js",
           "/i18n.js",
           "/dropdown.js",
+          "/auth.js",
+          "/auth.css",
           "/jack/icon.png",
           "/jack/logo.png",
           "/jack/avatar.png",
