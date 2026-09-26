@@ -36,6 +36,13 @@ const GOOGLE_MODELS = [
     "fast",
   ),
   model(
+    "gemini-3.1-flash-lite",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
+  model(
     "gemini-flash-latest",
     ["tools", "vision", "reasoning"],
     1048576,

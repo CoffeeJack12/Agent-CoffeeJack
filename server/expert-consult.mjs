@@ -4,6 +4,7 @@ const DEFAULT_GOOGLE_MODELS = [
   "gemini-3.8-flash",
   "gemini-3.7-flash",
   "gemini-3.6-flash",
+  "gemini-3.1-flash-lite",
   "gemini-flash-latest",
 ];
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
