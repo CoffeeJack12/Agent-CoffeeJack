@@ -269,6 +269,109 @@ export const definitions = [
     },
     ["action"],
   ),
+  tool(
+    "security_firewall_inspect",
+    "Read-only Windows Firewall assessment: active profiles, inbound/outbound policy, logging, and matching rules. Never changes rules.",
+    {
+      profile: str("domain, private, or public"),
+      direction: str("inbound or outbound"),
+      port: { type: "number" },
+      protocol: str("tcp, udp, or any"),
+      expected: str("Optional expected allow or deny"),
+    },
+    [],
+  ),
+  tool(
+    "security_firewall_rules",
+    "List or change Windows Firewall rules. list/inspect/backup are read-only. add/remove/enable/disable/rollback require Owner approval, backup first, and support rollback.",
+    {
+      action: {
+        type: "string",
+        enum: ["list", "inspect", "export", "backup", "add", "remove", "enable", "disable", "rollback"],
+      },
+      direction: str("inbound or outbound"),
+      profile: str("Firewall profile"),
+      rule: { type: "object", description: "Rule to add or select" },
+      backupId: str("Backup id for rollback"),
+    },
+    ["action"],
+  ),
+  tool(
+    "security_port_test",
+    "Bounded TCP/UDP connect checks with latency and timeout classification. Max 32 ports. Distinguishes local vs remote failure when the error allows it.",
+    {
+      host: str("Hostname or IP"),
+      port: { type: "number" },
+      ports: { type: "array", items: { type: "number" } },
+      protocol: str("tcp or udp"),
+      timeoutMs: { type: "number" },
+    },
+    ["host"],
+  ),
+  tool(
+    "security_route_trace",
+    "Route/path diagnostics: hops, gateway, interface, MTU symptoms, proxy detection. Does not classify a hop as malicious.",
+    {
+      target: str("Hostname or IP"),
+      host: str("Alias for target"),
+      gateway: str("Optional gateway"),
+      interfaceName: str("Optional interface"),
+      mtu: { type: "number" },
+    },
+    [],
+  ),
+  tool(
+    "security_dns_test",
+    "DNS resolution chain and failure reason.",
+    {
+      name: str("DNS name"),
+      host: str("Alias for name"),
+    },
+    [],
+  ),
+  tool(
+    "security_tls_inspect",
+    "TLS handshake and certificate inspection: chain, SNI, protocol, cipher, expiry, hostname validation, handshake failure reason.",
+    {
+      host: str("Hostname"),
+      port: { type: "number" },
+      sni: str("Optional SNI"),
+      pem: str("Optional PEM to parse without connecting"),
+    },
+    ["host"],
+  ),
+  tool(
+    "security_segmentation_test",
+    "Compare intended allow/deny policy with observed reachability. Returns source → destination → port → expected → observed.",
+    {
+      intended: { type: "array", items: { type: "object" } },
+      observed: { type: "array", items: { type: "object" } },
+    },
+    ["intended", "observed"],
+  ),
+  tool(
+    "security_waf_test",
+    "Benign WAF validation against an Owner-authorized target only. Header handling, path normalization, methods, body-size, rate-limit. No evasion or exploits.",
+    {
+      target: str("Authorized https URL or host"),
+    },
+    ["target"],
+  ),
+  tool(
+    "security_ids_validation",
+    "Safe synthetic IDS/IPS canary (catalog IDs only). Reports sent test, expected detection, observed result, timestamp, evidence.",
+    {
+      testId: str("CJ-SYNTH-HTTP-CANARY or CJ-SYNTH-DNS-CANARY"),
+      target: str("Authorized target for HTTP canary"),
+    },
+    ["testId"],
+  ),
+  tool(
+    "security_service_map",
+    "Map local listening ports to process owner, service identification, TLS and banner metadata. No exploit execution.",
+    {},
+    [],
+  ),
 ];
 
 export function runProcess(

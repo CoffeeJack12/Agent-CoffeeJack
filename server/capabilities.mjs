@@ -32,6 +32,16 @@ export const TOOL_PACKS = Object.freeze({
   security_disassemble: ["reverse_security"],
   security_decompile: ["reverse_security"],
   security_packet_capture: ["reverse_security"],
+  security_firewall_inspect: ["network_defense"],
+  security_firewall_rules: ["network_defense"],
+  security_port_test: ["network_defense"],
+  security_route_trace: ["network_defense"],
+  security_dns_test: ["network_defense"],
+  security_tls_inspect: ["network_defense"],
+  security_segmentation_test: ["network_defense"],
+  security_waf_test: ["network_defense"],
+  security_ids_validation: ["network_defense"],
+  security_service_map: ["network_defense"],
 });
 
 const APPROVAL_TOOLS = new Set([
@@ -43,6 +53,7 @@ const APPROVAL_TOOLS = new Set([
   "apply_patch",
   "run_check",
   "security_packet_capture",
+  "security_firewall_rules",
 ]);
 
 /** Logical capability ids Jack can report. Tools map into these. */
@@ -149,6 +160,24 @@ export const CAPABILITY_DEFS = Object.freeze([
       "security_disassemble",
       "security_decompile",
       "security_packet_capture",
+    ],
+    gamingModeAvailability: false,
+  },
+  {
+    id: "network_defense",
+    name: "Firewall / network defense",
+    packs: ["network_defense"],
+    tools: [
+      "security_firewall_inspect",
+      "security_firewall_rules",
+      "security_port_test",
+      "security_route_trace",
+      "security_dns_test",
+      "security_tls_inspect",
+      "security_segmentation_test",
+      "security_waf_test",
+      "security_ids_validation",
+      "security_service_map",
     ],
     gamingModeAvailability: false,
   },
@@ -383,7 +412,8 @@ export function capabilityPrompt(
     enabled.includes("inspect_pc") ||
     enabled.includes("desktop") ||
     enabled.includes("browser") ||
-    enabled.includes("reverse_security");
+    enabled.includes("reverse_security") ||
+    enabled.includes("network_defense");
   const web =
     enabled.includes("research") ||
     enabled.includes("web") ||

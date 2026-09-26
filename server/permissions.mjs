@@ -22,6 +22,7 @@ const CAPABILITIES = new Set([
   "self_repair",
   "security_inspect",
   "security_capture",
+  "security_firewall_modify",
 ]);
 
 const APPROVAL = new Set([
@@ -117,6 +118,14 @@ export function authorize({
       "deny",
       "Host-level reverse-engineering tools are unavailable",
     );
+  }
+  if (capability === "security_firewall_modify") {
+    if (roleEarly === "owner")
+      return result(
+        "require_approval",
+        "Firewall rule changes require explicit Owner approval",
+      );
+    return result("deny", "Firewall rule changes are Owner-only");
   }
   if (
     capability === "chat" &&
@@ -229,6 +238,26 @@ export function toolCapability(toolName, args = {}) {
     ].includes(name)
   )
     return "security_inspect";
+  if (
+    [
+      "security_firewall_inspect",
+      "security_port_test",
+      "security_route_trace",
+      "security_dns_test",
+      "security_tls_inspect",
+      "security_segmentation_test",
+      "security_waf_test",
+      "security_ids_validation",
+      "security_service_map",
+    ].includes(name)
+  )
+    return "security_inspect";
+  if (name === "security_firewall_rules") {
+    const action = String(args?.action || "list").toLowerCase();
+    if (["add", "remove", "enable", "disable", "rollback"].includes(action))
+      return "security_firewall_modify";
+    return "security_inspect";
+  }
   if (name === "security_packet_capture") return "security_capture";
   if (name === "remember") return "chat";
   if (["delete_file", "delete_files"].includes(name)) return "delete_files";
@@ -267,6 +296,8 @@ export function approvalConsequence(toolName, args = {}) {
       return `This clicks or types on the live Windows desktop${labeled}. The UI changes immediately.`;
     case "files_write":
       return `This writes a workspace file${labeled}. An existing file is backed up first.`;
+    case "security_firewall_modify":
+      return `This changes Windows Firewall rules${labeled}. The current policy is backed up first. Connectivity may change immediately. Rollback is a separate approved action.`;
     case "security_capture":
       return args?.includePayload
         ? `This captures live network packets including payloads${labeled}. Captures may contain private data and are stored only under .local/security/captures. They are not automatically deleted.`
@@ -295,6 +326,7 @@ export function permissionSummary(user) {
     "self_repair",
     "security_inspect",
     "security_capture",
+    "security_firewall_modify",
   ];
   return keys
     .map((capability) => {
@@ -320,8 +352,13 @@ export function canSelfRepair(user) {
  * Temporary compatibility bridge for the legacy global autoApprove setting.
  * It may only turn an owner's require_approval decision into allow.
  */
-export function shouldSkipLegacyAutoApprove(toolName) {
-  return String(toolName || "") === "security_packet_capture";
+export function shouldSkipLegacyAutoApprove(toolName, args = {}) {
+  if (String(toolName || "") === "security_packet_capture") return true;
+  if (String(toolName || "") === "security_firewall_rules") {
+    const action = String(args?.action || "").toLowerCase();
+    return ["add", "remove", "enable", "disable", "rollback"].includes(action);
+  }
+  return false;
 }
 
 /**
@@ -334,8 +371,10 @@ export function applyLegacyOwnerAutoApprove(
   user,
   autoApprove,
   toolName,
+  args = {},
 ) {
-  if (shouldSkipLegacyAutoApprove(toolName)) return decision;
+  if (shouldSkipLegacyAutoApprove(toolName, args))
+    return decision;
   if (
     autoApprove === true &&
     user?.role === "owner" &&

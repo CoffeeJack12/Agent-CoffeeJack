@@ -9,20 +9,25 @@
 const FORBIDDEN_ABSOLUTES =
   /\b(?:malware confirmed|safe|clean|packed|compromised)\b/i;
 
+function asList(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  return value ? [value] : [];
+}
+
 export function securityResult({
   tool,
   observed = {},
   derived = {},
   assessment = [],
   unverified = [],
+  expected = [],
+  mismatch = [],
+  possibleCause = [],
+  recommendedRemediation = [],
   available = true,
   error = null,
 } = {}) {
-  const assessments = Array.isArray(assessment)
-    ? assessment.filter(Boolean)
-    : assessment
-      ? [assessment]
-      : [];
+  const assessments = asList(assessment);
   for (const line of assessments) {
     if (FORBIDDEN_ABSOLUTES.test(String(line))) {
       throw new Error(
@@ -36,12 +41,12 @@ export function securityResult({
     error,
     observed,
     derived,
+    expected: asList(expected),
+    mismatch: asList(mismatch),
+    possibleCause: asList(possibleCause),
+    recommendedRemediation: asList(recommendedRemediation),
     assessment: assessments,
-    unverified: Array.isArray(unverified)
-      ? unverified.filter(Boolean)
-      : unverified
-        ? [unverified]
-        : [],
+    unverified: asList(unverified),
   };
 }
 
@@ -57,6 +62,12 @@ export function slimSecurityForRemote(result = {}, { maxChars = 4000 } = {}) {
   delete observed.raw;
   delete observed.bytes;
   delete observed.hex;
+  delete observed.certPem;
+  delete observed.chainPem;
+  delete observed.banner;
+  delete observed.body;
+  delete observed.requestBody;
+  delete observed.headers;
   if (Array.isArray(observed.imports))
     observed.imports = observed.imports.slice(0, 40);
   if (Array.isArray(observed.exports))
@@ -77,6 +88,10 @@ export function slimSecurityForRemote(result = {}, { maxChars = 4000 } = {}) {
       note: "Sanitized security summary. Raw binary, captures, and decompilation omitted.",
     },
     derived: result.derived || {},
+    expected: (result.expected || []).slice(0, 8),
+    mismatch: (result.mismatch || []).slice(0, 8),
+    possibleCause: (result.possibleCause || []).slice(0, 8),
+    recommendedRemediation: (result.recommendedRemediation || []).slice(0, 8),
     assessment: (result.assessment || []).slice(0, 8),
     unverified: (result.unverified || []).slice(0, 8),
   };

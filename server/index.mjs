@@ -202,6 +202,7 @@ export async function createApp({
         user,
         store.get("autoApprove", false),
         name,
+        args,
       );
       if (decision.decision === "allow") return;
       if (decision.decision === "deny")

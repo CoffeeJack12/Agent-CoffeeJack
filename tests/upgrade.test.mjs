@@ -36,7 +36,7 @@ test('language, title and mode preferences reach authoritative runtime context',
 });
 test('Hacker defaults include investigation tools; Empathy blocks unsolicited computer tools even with custom packs',()=>{
  const hacker=capabilityPolicy({...DEFAULT_PREFERENCES,mode:'hacker'});
- for(const name of ['terminal','research','read_file','git_diff','desktop','inspect_pc','search_code','security_binary_inspect','security_strings','security_hash','security_yara_scan','security_process_inspect','security_network_snapshot','security_disassemble','security_decompile','security_packet_capture'])assert.ok(hacker.allows(name),name);
+ for(const name of ['terminal','research','read_file','git_diff','desktop','inspect_pc','search_code','security_binary_inspect','security_strings','security_hash','security_yara_scan','security_process_inspect','security_network_snapshot','security_disassemble','security_decompile','security_packet_capture','security_firewall_inspect','security_port_test','security_tls_inspect'])assert.ok(hacker.allows(name),name);
  const empathy={...DEFAULT_PREFERENCES,mode:'empathy',capabilities:MODES.hacker.packs};
  assert.equal(capabilityPolicy(empathy,'today was exhausting').allows('terminal'),false);
  assert.equal(capabilityPolicy(empathy,'inspect the network').allows('inspect_pc'),true);

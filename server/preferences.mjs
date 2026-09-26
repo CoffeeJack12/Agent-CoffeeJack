@@ -20,6 +20,7 @@ export const PACKS = {
   research: "Research",
   developer: "Developer tools",
   reverse_security: "Reverse engineering / security",
+  network_defense: "Firewall / network defense",
 };
 const all = Object.keys(PACKS);
 export const MODES = {
@@ -32,7 +33,7 @@ export const MODES = {
   hacker: {
     label: "Hacker",
     description:
-      "System analysis, networking, cybersecurity, reverse engineering, PE inspection, strings, YARA, process/module inspection, network inspection, focused disassembly/decompilation, and bounded packet capture.",
+      "System analysis, networking, cybersecurity, reverse engineering, firewall assessment, PE inspection, strings, YARA, process/module inspection, network inspection, focused disassembly/decompilation, and bounded packet capture.",
     packs: all,
   },
   developer: {
@@ -233,7 +234,7 @@ export function preferencePrompt(p, { effectiveMode } = {}) {
       : modeId === "empathy"
         ? "EMPATHY MODE: Stay conversational. Do not launch computer/terminal/browser tools unless the user explicitly asks for a machine action."
         : modeId === "hacker"
-          ? "HACKER MODE: Use dedicated reverse_security tools first for PE inspection, hashing/comparison, strings, YARA, process/module inspection, network snapshots, focused disassembly/decompilation, and bounded packet capture. Do not invent terminal commands when a dedicated security tool exists. Prefer evidence labels (observed/derived/assessment/unverified)."
+          ? "HACKER MODE: Use dedicated reverse_security and network_defense tools first for PE inspection, hashing/comparison, strings, YARA, process/module inspection, firewall assessment, port/DNS/TLS tests, segmentation, benign WAF/IDS canaries, network snapshots, focused disassembly/decompilation, and bounded packet capture. Do not invent terminal commands when a dedicated security tool exists. Prefer observed/expected/mismatch labels. Firewall rule changes require exact Owner approval."
           : modeId === "developer"
             ? "DEVELOPER MODE: Inspect the repo, patch, run tests and report verified results."
             : modeId === "secret_agent"

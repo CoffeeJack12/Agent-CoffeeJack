@@ -14,6 +14,7 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
                                                  ├─ PowerShell / Git / package manager
                                                  ├─ isolated Playwright browser
                                                  ├─ reverse engineering / security toolkit
+                                                 ├─ firewall / network-defense toolkit
                                                  └─ explicit Windows desktop adapter
 ```
 
@@ -43,6 +44,7 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/files.mjs`: realpath confinement and document extraction.
 - `server/tools.mjs`: tool schemas and implementations; command cancellation kills the process tree on Windows.
 - `server/security/`: dedicated reverse-engineering toolkit — bounded PE parser, strings, hashing, optional Ghidra/Rizin/YARA adapters (detect-first, never auto-install), read-only process/network snapshots, Owner-approved metadata-only packet capture. Results use observed/derived/assessment/unverified labels. Host-level tools are Owner-direct for read-only inspection; Trusted needs explicit permission; Standard/Guest are denied. Packet capture is Owner-only and never auto-approved.
+- `server/security/defense/`: defensive firewall and network-control assessment — Windows Firewall policy evaluation, bounded port/DNS/route/TLS tests, segmentation matrix, benign WAF checks on Owner-authorized targets only, synthetic IDS canaries, and local service mapping. Rule changes backup first, require Owner approval, and support rollback. No evasion or exploit execution.
 - `scripts/desktop.ps1`: screenshot/mouse/keyboard operations invoked with structured base64 JSON, without command interpolation.
 - `public/`: Arabic RTL frontend; untrusted model/tool strings are escaped before rendering.
 

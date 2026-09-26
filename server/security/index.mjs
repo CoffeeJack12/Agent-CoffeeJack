@@ -22,8 +22,14 @@ import {
   defaultNetworkRunner,
   defaultProcessRunner,
 } from "./windows-runners.mjs";
+import {
+  classifyDefenseIntent,
+  createDefenseToolkit,
+  DEFENSE_AUDIT,
+  DEFENSE_TOOLS,
+} from "./defense/index.mjs";
 
-export const SECURITY_TOOLS = Object.freeze([
+export const REVERSE_SECURITY_TOOLS = Object.freeze([
   "security_binary_inspect",
   "security_strings",
   "security_hash",
@@ -33,6 +39,11 @@ export const SECURITY_TOOLS = Object.freeze([
   "security_disassemble",
   "security_decompile",
   "security_packet_capture",
+]);
+
+export const SECURITY_TOOLS = Object.freeze([
+  ...REVERSE_SECURITY_TOOLS,
+  ...DEFENSE_TOOLS,
 ]);
 
 export const SECURITY_AUDIT = Object.freeze({
@@ -45,6 +56,7 @@ export const SECURITY_AUDIT = Object.freeze({
   security_decompile: "security_decompile_run",
   security_packet_capture_start: "security_capture_started",
   security_packet_capture_stop: "security_capture_stopped",
+  ...DEFENSE_AUDIT,
 });
 
 const MAX_READ = 32 * 1024 * 1024;
@@ -52,6 +64,8 @@ const MAX_READ = 32 * 1024 * 1024;
 export function classifySecurityIntent(text = "") {
   const t = String(text || "").trim();
   if (!t) return null;
+  const defense = classifyDefenseIntent(t);
+  if (defense) return defense;
   if (
     /(?:capture|sniff|pktmon).{0,40}(?:traffic|packets|pcap)|capture traffic/i.test(t)
   ) {
@@ -242,6 +256,12 @@ export function createSecurityToolkit(options = {}) {
       exists,
       runner: adapters.captureRunner,
     });
+  const defense = createDefenseToolkit({
+    dataDirectory,
+    user,
+    adapters,
+    allowlist: adapters.authorizedTargets || [],
+  });
   const allowAbsolute =
     user?.role === "owner" || user?.role === "trusted";
 
@@ -314,6 +334,26 @@ export function createSecurityToolkit(options = {}) {
   return {
     detect: () => detectSecurityTools({ exists }),
     async execute(name, args = {}) {
+      if (DEFENSE_TOOLS.includes(name)) {
+        const result = await defense.execute(name, args);
+        const mutated =
+          name === "security_firewall_rules" &&
+          ["add", "remove", "enable", "disable", "rollback"].includes(
+            String(args.action || "").toLowerCase(),
+          );
+        auditSlim(
+          store,
+          user?.id,
+          mutated
+            ? DEFENSE_AUDIT.security_firewall_rules_changed
+            : DEFENSE_AUDIT[name] || DEFENSE_AUDIT.security_firewall_rules_read,
+          {
+            tool: name,
+            available: result.available,
+          },
+        );
+        return result;
+      }
       let result;
       if (name === "security_binary_inspect") {
         const { bytes, fileName } = await loadFile(args.path);
@@ -485,4 +525,11 @@ export function createSecurityToolkit(options = {}) {
   };
 }
 
-export { slimSecurityForRemote, detectSecurityTools, hashesOf, extractStrings, inspectBinaryBuffer };
+export {
+  slimSecurityForRemote,
+  detectSecurityTools,
+  hashesOf,
+  extractStrings,
+  inspectBinaryBuffer,
+  DEFENSE_TOOLS,
+};
