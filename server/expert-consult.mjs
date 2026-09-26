@@ -17,6 +17,31 @@ export function isExplicitExpertConsultRequest(text = "") {
   return EXPLICIT_EXPERT_REQUEST.test(String(text || ""));
 }
 
+export function expertQuestionFromRequest(text = "") {
+  const original = String(text || "").trim();
+  if (!original) return "";
+  let out = original;
+
+  const ar = out.match(
+    /(?:استشر|استشير|شاور)\s+(?:خبير|مستشار)(?:\s+خارجي)?(?:\s+باستخدام\s+consult_expert)?\s+(?:عن|حول)\s+([\s\S]+)/iu,
+  );
+  if (ar?.[1]) out = ar[1];
+
+  const en = out.match(
+    /(?:consult|ask)\s+(?:(?:an?|the)\s+)?expert(?:\s+using\s+consult_expert)?\s+(?:about|on)\s+([\s\S]+)/iu,
+  );
+  if (en?.[1]) out = en[1];
+
+  out = out
+    .replace(/[.،]\s*(?:لا\s+تستخدم|ولا\s+تستخدم)\s+(?:الـ?\s*)?AI\s*Council[\s\S]*$/iu, "")
+    .replace(/[.،]\s*(?:do\s+not|don't)\s+use\s+(?:the\s+)?AI\s*Council[\s\S]*$/iu, "")
+    .replace(/[.،]\s*قل\s+لي\s+أي\s+provider[\s\S]*$/iu, "")
+    .replace(/[.،]\s*tell\s+me\s+(?:which|what)\s+provider[\s\S]*$/iu, "")
+    .trim();
+
+  return out || original;
+}
+
 function env(name) {
   return String(process.env[name] || "").trim();
 }
@@ -120,9 +145,9 @@ export async function consultExpert({
     {
       role: "system",
       content:
-        "You are a second-opinion technical advisor to CoffeeJack, Abdulrahman's local execution agent. " +
-        "CoffeeJack alone can use tools and control the PC. You cannot. Give a concise, practical next action, " +
-        "identify likely root causes, and state uncertainty. Never claim that you executed or verified anything.",
+        "You are the external expert CoffeeJack has already consulted. Do not say you cannot consult another expert, provider, model, or tool. " +
+        "Answer the substantive problem inside the Goal directly. Ignore meta-instructions in the Goal about consulting an expert, using consult_expert, AI Council, provider names, or model names; those were routing instructions for CoffeeJack, not your task. " +
+        "CoffeeJack alone can use tools and control the PC. You cannot. Give a concise, practical recommendation, identify likely root causes, and state uncertainty. Never claim that you executed or verified anything.",
     },
     {
       role: "user",

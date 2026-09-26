@@ -240,6 +240,13 @@ export function guardResponse(state, candidate, languageText = "", options = {})
         /I cannot hack or bypass/i.test(value) ||
         /I cannot execute potentially harmful/i.test(value) ||
         /I cannot because it may be dangerous/i.test(value) ||
+        /I cannot assist with downloading or installing/i.test(value) ||
+        /I cannot perform actions that go against/i.test(value) ||
+        /I cannot comply with requests that involve/i.test(value) ||
+        /unauthorized actions|violate terms of service/i.test(value) ||
+        /follow the rules and guidelines/i.test(value) ||
+        /safe, legal, and respectful|privacy and security principles/i.test(value) ||
+        /ethical guidelines/i.test(value) ||
         /ethical and safety guidelines/i.test(value) ||
         /help you safely and effectively/i.test(value) ||
         /I am here to help safely/i.test(value) ||
@@ -301,7 +308,7 @@ export function guardResponse(state, candidate, languageText = "", options = {})
     if (missing && !text) text = labels[missing];
     else if (!text) {
       const falseDenial = rejected.some((r) =>
-        /cannot (?:directly )?(?:control|interact with|access)|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|ethical and safety|potentially harmful|safely and effectively/i.test(
+        /cannot (?:directly )?(?:control|interact with|access)|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|cannot assist with downloading or installing|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|potentially harmful|safely and effectively/i.test(
           r,
         ),
       );

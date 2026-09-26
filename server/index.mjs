@@ -19,7 +19,10 @@ import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
 import { isPureGreeting, emitInstantGreeting } from "./greeting.mjs";
 import { createDefaultRegistry } from "./providers/index.mjs";
-import { isExplicitExpertConsultRequest } from "./expert-consult.mjs";
+import {
+  expertQuestionFromRequest,
+  isExplicitExpertConsultRequest,
+} from "./expert-consult.mjs";
 import {
   buildCouncilPlan,
   runCouncil,
@@ -1727,11 +1730,11 @@ export async function createApp({
           let explicitExpertError = null;
           if (explicitExpertRequest) {
             const expertArgs = {
-              task: b.text,
+              task: expertQuestionFromRequest(b.text),
               context: turn.threadContext || "",
               attempts: "",
               question:
-                "Give CoffeeJack the best expert recommendation for this request. Be concise, practical, and do not claim you executed anything.",
+                "Answer the substantive problem directly for CoffeeJack. Do not discuss whether you can consult another model or provider. Be concise, practical, and do not claim you executed anything.",
             };
             emit({
               type: "tool",
