@@ -727,8 +727,9 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
   if (barePcUse) {
     const priorObjective =
       priorUser || snapshot.canonicalTopic || snapshot.lastTopic || "";
+    const priorIsSteam = /\bsteam\b|ستيم/iu.test(priorObjective);
     return {
-      taskHint: "pc_action",
+      taskHint: priorIsSteam ? "steam_action" : "pc_action",
       effectiveIntent: priorObjective
         ? `Continue the previous concrete objective using the connected PC tools. Previous user objective: ${priorObjective}`
         : "Use the connected PC tools for the user's objective.",
@@ -761,8 +762,9 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
       effectiveIntent: trimmed,
       directive: [
         "STEAM ACTION: treat this as an operational PC task, not a capability question.",
-        "Use the enabled browser, terminal, files, or desktop tools to inspect and advance the request before answering.",
-        "A dedicated Steam tool is not required. Do not claim Steam or PC access is unsupported while those tools are enabled.",
+        "Use the dedicated steam tool first. For lookup/search, call steam action=search with the game name and use only a verified app_id returned by that tool.",
+        "Never guess a Steam App ID. Never use steamcmd for store discovery.",
+        "Use browser, terminal, files, or desktop only as a fallback after the steam tool reports an actual blocker. Do not claim Steam or PC access is unsupported while the steam tool is enabled.",
         /luatools/i.test(trimmed)
           ? "LuaTools was explicitly named. Inspect the local machine for LuaTools before claiming it is unavailable. If the requested path would bypass Steam ownership/licensing, use the official Steam client path instead and state that exact operational limitation."
           : "",
@@ -1187,6 +1189,11 @@ export function filterToolsForTurn(definitions = [], turn) {
   return definitions.filter((def) => {
     const name = def?.function?.name || def?.name;
     if (locked) return locked.includes(name);
+    if (
+      turn.taskHint === "steam_action" &&
+      !["steam", "consult_expert", "browser", "desktop"].includes(name)
+    )
+      return false;
     if (!turn.allowResearch && (name === "research" || name === "web_search"))
       return false;
     if (!turn.allowRememberTool && name === "remember") return false;

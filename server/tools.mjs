@@ -55,6 +55,19 @@ export const definitions = [
     ["task", "question"],
   ),
   tool(
+    "steam",
+    "Use the official Steam Store API and the installed Steam client. For game lookup/search, ALWAYS call action=search first and use the returned verified app_id; never guess an App ID and never use steamcmd for store discovery. action=open_store opens the verified store page in the installed Steam client. action=install starts Steam's official install flow and does not claim completion until Steam itself completes it.",
+    {
+      action: {
+        type: "string",
+        enum: ["status", "search", "open_store", "install"],
+      },
+      query: str("Game name/search text. Required for search and as expected name for open_store/install."),
+      app_id: { type: "integer", description: "Verified Steam app ID returned by action=search" },
+    },
+    ["action"],
+  ),
+  tool(
     "inspect_pc",
     "Read-only local PC diagnostics via fixed helpers (not free-form shell). Use section=health for overall PC concerns, disk for drive space (set drive letter), network for network only, or cpu/memory/gpu/uptime/hardware. Never treat a ping alone as PC health. Owner: execute immediately.",
     {
@@ -427,6 +440,209 @@ export const definitions = [
   ),
 ];
 
+
+function steamClientPath() {
+  if (process.platform !== "win32") return null;
+  const candidates = [
+    process.env["ProgramFiles(x86)"]
+      ? path.join(process.env["ProgramFiles(x86)"], "Steam", "steam.exe")
+      : null,
+    process.env.ProgramFiles
+      ? path.join(process.env.ProgramFiles, "Steam", "steam.exe")
+      : null,
+    "C:\\Program Files (x86)\\Steam\\steam.exe",
+    "C:\\Program Files\\Steam\\steam.exe",
+  ].filter(Boolean);
+  return candidates.find((candidate) => existsSync(candidate)) || null;
+}
+
+function steamFetchSignal(signal, ms = 12000) {
+  if (!signal) return AbortSignal.timeout(ms);
+  return AbortSignal.any([signal, AbortSignal.timeout(ms)]);
+}
+
+function normalizeSteamWords(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(
+      (word) =>
+        word.length > 1 &&
+        !["the", "new", "game", "steam", "edition", "ultimate"].includes(word),
+    );
+}
+
+function steamNameMatches(query, name) {
+  const wanted = normalizeSteamWords(query);
+  if (!wanted.length) return true;
+  const actual = new Set(normalizeSteamWords(name));
+  return wanted.some((word) => actual.has(word));
+}
+
+async function steamStoreSearch(query, signal) {
+  const q = String(query || "").trim();
+  if (!q) throw new Error("Steam search requires query");
+  const url =
+    "https://store.steampowered.com/api/storesearch/?term=" +
+    encodeURIComponent(q) +
+    "&l=english&cc=SA";
+  const response = await fetch(url, { signal: steamFetchSignal(signal) });
+  if (!response.ok)
+    throw new Error("Steam Store search failed with HTTP " + response.status);
+  const data = await response.json();
+  const items = Array.isArray(data?.items) ? data.items : [];
+  return items.slice(0, 8).map((item) => ({
+    app_id: Number(item.id),
+    name: String(item.name || ""),
+    currency: item.price?.currency || null,
+    price_initial:
+      Number.isFinite(Number(item.price?.initial))
+        ? Number(item.price.initial) / 100
+        : null,
+    price_final:
+      Number.isFinite(Number(item.price?.final))
+        ? Number(item.price.final) / 100
+        : null,
+    windows: Boolean(item.platforms?.windows),
+    mac: Boolean(item.platforms?.mac),
+    linux: Boolean(item.platforms?.linux),
+    metascore: item.metascore || null,
+    store_url: "https://store.steampowered.com/app/" + Number(item.id) + "/",
+    verified: true,
+  }));
+}
+
+async function steamAppDetails(appId, signal) {
+  const id = Number(appId);
+  if (!Number.isInteger(id) || id <= 0) throw new Error("Invalid Steam app_id");
+  const url =
+    "https://store.steampowered.com/api/appdetails?appids=" +
+    id +
+    "&l=english&cc=SA";
+  const response = await fetch(url, { signal: steamFetchSignal(signal) });
+  if (!response.ok)
+    throw new Error("Steam app verification failed with HTTP " + response.status);
+  const payload = await response.json();
+  const row = payload?.[String(id)];
+  if (!row?.success || !row?.data)
+    throw new Error("Steam app_id could not be verified");
+  return {
+    app_id: id,
+    name: String(row.data.name || ""),
+    type: row.data.type || null,
+    is_free: Boolean(row.data.is_free),
+    store_url: "https://store.steampowered.com/app/" + id + "/",
+    verified: true,
+  };
+}
+
+function launchDetached(command, args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: "ignore",
+      windowsHide: false,
+    });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+async function steamAction(args = {}, signal) {
+  const action = String(args.action || "").toLowerCase();
+  const client = steamClientPath();
+  if (action === "status")
+    return {
+      action,
+      installed: Boolean(client),
+      client_path: client,
+      verified: true,
+    };
+
+  if (action === "search") {
+    const results = await steamStoreSearch(args.query, signal);
+    return {
+      action,
+      query: String(args.query || "").trim(),
+      results,
+      result_count: results.length,
+      client_installed: Boolean(client),
+      source: "official Steam Store API",
+      verified: true,
+      note:
+        "For a lookup/search request, these verified results satisfy the goal. Do not open or install anything unless the user asked for that action.",
+    };
+  }
+
+  if (!["open_store", "install"].includes(action))
+    throw new Error("Unsupported Steam action");
+  if (!client)
+    throw new Error("Steam desktop client is not installed in a detected standard location");
+  const query = String(args.query || "").trim();
+  if (!query)
+    throw new Error(
+      "Steam open/install requires query so the app_id can be verified against the expected game",
+    );
+  let appId = Number(args.app_id);
+  let selection = "provided_app_id";
+  if (!Number.isInteger(appId) || appId <= 0) {
+    const matches = await steamStoreSearch(query, signal);
+    if (!matches.length)
+      throw new Error("No verified Steam result matched the requested game");
+    const normalizedQuery = String(query)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .trim();
+    const exact = matches.find(
+      (item) =>
+        String(item.name)
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}]+/gu, " ")
+          .trim() === normalizedQuery,
+    );
+    appId = Number((exact || matches[0]).app_id);
+    selection = exact ? "exact_verified_search" : "top_verified_search";
+  }
+  const details = await steamAppDetails(appId, signal);
+  if (!steamNameMatches(query, details.name))
+    throw new Error(
+      'Steam app_id ' +
+        details.app_id +
+        ' resolves to "' +
+        details.name +
+        '", which does not match expected game "' +
+        query +
+        '". Search Steam first and use a returned verified app_id.',
+    );
+
+  const uri =
+    action === "install"
+      ? "steam://install/" + details.app_id
+      : "steam://store/" + details.app_id;
+  await launchDetached(client, [uri]);
+  return {
+    action,
+    app_id: details.app_id,
+    name: details.name,
+    steam_uri: uri,
+    store_url: details.store_url,
+    client_path: client,
+    verified_app: true,
+    selection,
+    launched: true,
+    installation_complete: false,
+    note:
+      action === "install"
+        ? "Steam install flow launched. This does not prove the download or installation completed."
+        : "Verified Steam store page launched in the installed client.",
+  };
+}
+
 export function runProcess(
   command,
   args,
@@ -604,6 +820,7 @@ export class Tools {
       "write_file",
       "terminal",
       "desktop",
+      "steam",
       "run_tests",
       "inspect_pc",
       "apply_patch",
@@ -618,6 +835,7 @@ export class Tools {
     if (signal.aborted) throw new Error("Cancelled");
 
     if (name === "research") return research(args,{signal});
+    if (name === "steam") return steamAction(args, signal);
     if (name === "consult_expert") {
       const user =
         this.securityUser ||

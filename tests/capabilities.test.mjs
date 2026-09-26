@@ -264,8 +264,8 @@ test('can u control my PC? affirms live capabilities and does not deny control',
     ],
     "can u control my PC?",
   );
-  assert.match(f.prompts[0][0].content, /AVAILABLE NOW/);
-  assert.match(f.prompts[0][0].content, /Terminal: enabled/);
+  assert.equal(f.n, 0);
+  assert.equal(f.prompts.length, 0);
   assert.equal(f.executed, 0);
   assert.doesNotMatch(
     f.output,
@@ -311,7 +311,8 @@ test("can u search the web? confirms research without executing", async (t) => {
     "can u search the web?",
   );
   assert.equal(f.executed, 0);
-  assert.match(f.prompts[0][0].content, /Web research: enabled|Web search: enabled/);
+  assert.equal(f.n, 0);
+  assert.equal(f.prompts.length, 0);
   assert.match(f.output, /search the web|sources|sourced/i);
 });
 

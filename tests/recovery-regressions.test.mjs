@@ -11,8 +11,13 @@ import {
   capabilityQuestionReply,
   isCapabilityQuestion,
 } from "../server/capabilities.mjs";
-import { resolveTurnContext } from "../server/conversation-intent.mjs";
+import {
+  filterToolsForTurn,
+  resolveTurnContext,
+} from "../server/conversation-intent.mjs";
 import { DEFAULT_PREFERENCES } from "../server/preferences.mjs";
+import { definitions } from "../server/tools.mjs";
+import { toolCapability } from "../server/permissions.mjs";
 
 test("explicit expert request extracts the substantive question", () => {
   const text =
@@ -101,7 +106,7 @@ test("Use my pc binds to the immediately preceding Steam objective", () => {
       },
     ],
   });
-  assert.equal(turn.taskHint, "pc_action");
+  assert.equal(turn.taskHint, "steam_action");
   assert.match(turn.effectiveIntent, /Look for control the new game in steam/i);
 });
 
@@ -118,4 +123,43 @@ test("false PC-access denial is rejected when PC tools are enabled", () => {
   );
   assert.ok(result.rejected.length >= 1);
   assert.doesNotMatch(result.text, /cannot directly access/i);
+});
+
+
+test("Steam action exposes only Steam-safe execution tools", () => {
+  const turn = resolveTurnContext("Look for Control on Steam", {
+    history: [],
+  });
+  assert.equal(turn.taskHint, "steam_action");
+  const offered = filterToolsForTurn(definitions, turn).map(
+    (entry) => entry.function.name,
+  );
+  assert.ok(offered.includes("steam"));
+  assert.ok(offered.includes("browser"));
+  assert.ok(offered.includes("desktop"));
+  assert.ok(offered.includes("consult_expert"));
+  assert.equal(offered.includes("terminal"), false);
+});
+
+test("Steam tool permission distinguishes search, open and install", () => {
+  assert.equal(toolCapability("steam", { action: "search" }), "system_inspect");
+  assert.equal(
+    toolCapability("steam", { action: "open_store" }),
+    "desktop_control",
+  );
+  assert.equal(
+    toolCapability("steam", { action: "install" }),
+    "install_software",
+  );
+});
+
+test("Use my pc after a Steam request remains a Steam action", () => {
+  const turn = resolveTurnContext("Use my pc", {
+    history: [
+      { role: "user", content: "Look for Control on Steam" },
+      { role: "assistant", content: "I need to use the PC." },
+    ],
+  });
+  assert.equal(turn.taskHint, "steam_action");
+  assert.match(turn.effectiveIntent, /Control on Steam/i);
 });

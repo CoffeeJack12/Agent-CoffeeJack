@@ -8,6 +8,7 @@ export const TOOL_PACKS = Object.freeze({
   web_search: ["web"],
   browser: ["browser"],
   desktop: ["computer"],
+  steam: ["computer"],
   inspect_pc: ["computer"],
   terminal: ["terminal"],
   list_files: ["files"],
@@ -108,6 +109,14 @@ export const CAPABILITY_DEFS = Object.freeze([
     name: "Desktop interaction",
     packs: ["computer"],
     tools: ["desktop"],
+    platform: "win32",
+    gamingModeAvailability: false,
+  },
+  {
+    id: "steam",
+    name: "Steam",
+    packs: ["computer"],
+    tools: ["steam"],
     platform: "win32",
     gamingModeAvailability: false,
   },
@@ -299,6 +308,12 @@ export function capabilityQuestionReply({
       : arabic
         ? "\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0648\u064a\u0628 \u063a\u064a\u0631 \u0645\u0641\u0639\u0651\u0644\u0629 \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062c\u0644\u0633\u0629."
         : "Web tools are not enabled in this session.";
+  }
+
+  if (/\b(?:hack|bypass|exploit|pentest|crack|reverse engineer)\b|اختراق|تجاوز|هكر/iu.test(t)) {
+    return arabic
+      ? "يعتمد على الهدف. هل هو على جهازك، لاب/CTF، أو نظام خارجي؟ وش تبغى تفحص أو تعدّل أو تختبر؟"
+      : "What are we targeting—your machine, a lab/CTF, or an external system?";
   }
 
   return practicalLimitsReply({ user, registry, style, text: t });

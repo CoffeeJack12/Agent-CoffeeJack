@@ -242,6 +242,12 @@ export function toolCapability(toolName, args = {}) {
     return /^(?:view|screenshot|capture)$/i.test(String(args?.action ?? ""))
       ? "desktop_view"
       : "desktop_control";
+  if (name === "steam") {
+    const action = String(args?.action || "status").toLowerCase();
+    if (action === "install") return "install_software";
+    if (action === "open_store") return "desktop_control";
+    return "system_inspect";
+  }
   if (name === "inspect_pc") return "system_inspect";
   if (
     [
@@ -308,11 +314,15 @@ export function approvalConsequence(toolName, args = {}) {
     case "outside_workspace":
       return `This reaches outside the workspace${labeled}. Paths outside the workspace are not automatically restored.`;
     case "install_software":
-      return `This installs software on this machine${labeled}. Removal is a separate step.`;
+      return toolName === "steam"
+        ? `This launches Steam's official install flow for the verified app${labeled}. Steam may begin downloading after confirmation. Cancellation/removal is handled in Steam.`
+        : `This installs software on this machine${labeled}. Removal is a separate step.`;
     case "git_push":
       return `This pushes commits to the remote${labeled}. Remote history will change.`;
     case "desktop_control":
-      return `This clicks or types on the live Windows desktop${labeled}. The UI changes immediately.`;
+      return toolName === "steam"
+        ? `This opens the verified Steam store page in the installed Steam client${labeled}. The Steam UI changes immediately.`
+        : `This clicks or types on the live Windows desktop${labeled}. The UI changes immediately.`;
     case "files_write":
       return `This writes a workspace file${labeled}. An existing file is backed up first.`;
     case "security_firewall_modify":

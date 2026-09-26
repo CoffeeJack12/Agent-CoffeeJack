@@ -58,6 +58,85 @@ import { speakerHonorific } from "./speaker-persona.mjs";
 import { isPureGreeting, greetingDeterministicReply } from "./greeting.mjs";
 import { accountBoundSpeaker, privilegedHonorific } from "./account-personas.mjs";
 
+function requiredSteamAction(text = "") {
+  const value = String(text || "");
+  if (/\b(?:install|download)\b|(?:ثبت|حمّل|حمل|نزّل|نزل)/iu.test(value))
+    return "install";
+  if (/\b(?:open|launch|show)\b|(?:افتح|شغل|شغّل|وريني)/iu.test(value))
+    return "open_store";
+  return "search";
+}
+
+
+function verifiedSteamReply(result, requestText = "") {
+  if (!result || typeof result !== "object") return "";
+  const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
+  if (result.action === "search" && Array.isArray(result.results)) {
+    const first = result.results[0];
+    if (!first)
+      return arabic
+        ? "بحثت في Steam الرسمي وما لقيت نتيجة مطابقة."
+        : "I searched the official Steam Store and found no matching result.";
+    const price =
+      first.price_final != null && first.currency
+        ? String(first.price_final) + " " + String(first.currency)
+        : null;
+    const second = result.results[1];
+    const line1 = arabic
+      ? "لقيته من Steam الرسمي: " +
+        first.name +
+        " — App ID " +
+        first.app_id +
+        (price ? " — " + price : "") +
+        "."
+      : "Found it through the official Steam Store: " +
+        first.name +
+        " — App ID " +
+        first.app_id +
+        (price ? " — " + price : "") +
+        ".";
+    const line2 = second
+      ? arabic
+        ? "والنتيجة الثانية: " +
+          second.name +
+          " — App ID " +
+          second.app_id +
+          "."
+        : "Second result: " +
+          second.name +
+          " — App ID " +
+          second.app_id +
+          "."
+      : "";
+    return [line1, line2, first.store_url || ""].filter(Boolean).join("\n");
+  }
+  if (result.action === "open_store" && result.verified_app && result.launched)
+    return arabic
+      ? "فتحت صفحة Steam الموثقة لـ " +
+          result.name +
+          " — App ID " +
+          result.app_id +
+          "."
+      : "Opened the verified Steam page for " +
+          result.name +
+          " — App ID " +
+          result.app_id +
+          ".";
+  if (result.action === "install" && result.verified_app && result.launched)
+    return arabic
+      ? "بدأت مسار التثبيت الرسمي في Steam لـ " +
+          result.name +
+          " — App ID " +
+          result.app_id +
+          ". هذا يؤكد فتح مسار التثبيت، مو اكتمال التحميل."
+      : "Started Steam's official install flow for " +
+          result.name +
+          " — App ID " +
+          result.app_id +
+          ". This verifies the install flow was launched, not that the download finished.";
+  return "";
+}
+
 export async function runAgent({
   store,
   ollama,
@@ -275,15 +354,21 @@ export async function runAgent({
       style: preservedStyle,
       text,
     });
+    const guardedCapability = guardResponse(taskState, canned, text, {
+      registry,
+      user,
+    });
+    const reply = guardedCapability.text || canned;
+    store.saveTaskState(chatId, taskState);
     store.message(chatId, "user", text);
-    store.message(chatId, "assistant", canned);
+    store.message(chatId, "assistant", reply);
     emit({
       type: "mode",
       requestedMode: modeInfo.requestedMode,
       effectiveMode: modeInfo.effectiveMode,
       reason: modeInfo.reason,
     });
-    emit({ type: "token", text: canned });
+    emit({ type: "token", text: reply });
     emit({ type: "done", tokens: 0 });
     return;
   }
@@ -424,6 +509,10 @@ ${finalContract}`;
   let qualityAttempts = 0;
   let refusalRepairAttempts = 0;
   let actionToolRepairAttempts = 0;
+  let steamVerificationRepairAttempts = 0;
+  const successfulSteamActions = new Set();
+  const verifiedSteamResults = new Map();
+  let steamImmediateReply = "";
   let styleRevisionAttempts = 0;
   let jeddawiRenderMeta = null;
   const jeddawiActive = shouldInvokeJeddawiRenderer(
@@ -579,7 +668,7 @@ ${finalContract}`;
         messages.push({
           role: "system",
           content:
-            "This is an execution request and compatible tools are available. Do not answer with a capability denial or instructions for the user to do it manually. Call an appropriate offered tool now to inspect or advance the actual task. For Steam tasks, a dedicated Steam tool is not required: use terminal/browser/files/desktop as appropriate. If the request names a local application, inspect whether it exists before claiming it is unavailable. Never claim success until a tool verifies it.",
+            "This is an execution request and compatible tools are available. Do not answer with a capability denial or instructions for the user to do it manually. Call an appropriate offered tool now to inspect or advance the actual task. For Steam tasks, use the dedicated steam tool first; search there for a verified app_id and never guess one or use steamcmd for store discovery. Use browser/desktop only after a real steam-tool blocker. If the request names a local application, inspect whether it exists before claiming it is unavailable. Never claim success until a tool verifies the requested goal.",
         });
         continue;
       }
@@ -588,6 +677,36 @@ ${finalContract}`;
         // Tool rounds: clear any prematurely streamed prose from the bubble.
         clearStreamed();
         candidate = response.content || "";
+      }
+      if (
+        turnPolicy?.taskHint === "steam_action" &&
+        !response.tool_calls?.length
+      ) {
+        const requiredAction = requiredSteamAction(
+          turnPolicy?.effectiveIntent || text,
+        );
+        if (
+          !successfulSteamActions.has(requiredAction) &&
+          steamVerificationRepairAttempts++ === 0 &&
+          round < 15
+        ) {
+          clearStreamed();
+          messages.push({ role: "assistant", content: candidate });
+          messages.push({
+            role: "system",
+            content:
+              "Steam goal verification failed. The requested Steam action has not been verified by the dedicated steam tool. Call steam now. Search first for a verified app_id; for open/install, use only an app_id returned by Steam and verify the expected game name. Do not use steamcmd and do not claim completion from merely launching a generic browser or process.",
+          });
+          continue;
+        }
+        if (!successfulSteamActions.has(requiredAction)) {
+          candidate =
+            "I could not verify the requested Steam action with the dedicated Steam tool, so I am not claiming it completed.";
+        } else {
+          const verifiedResult = verifiedSteamResults.get(requiredAction);
+          const verifiedReply = verifiedSteamReply(verifiedResult, text);
+          if (verifiedReply) candidate = verifiedReply;
+        }
       }
       if (!fastPath && !response.tool_calls?.length) {
         const evaluation = evaluateFinal(taskState, candidate);
@@ -1023,6 +1142,7 @@ ${finalContract}`;
           const limit = {
             research: 2,
             consult_expert: 1,
+            steam: 6,
             web_search: 2,
             browser: 8,
             inspect_pc: 4,
@@ -1032,7 +1152,28 @@ ${finalContract}`;
           toolBudget.set(name, count);
           if (turnPolicy?.securityIntent?.tool === name)
             securityToolInvoked = true;
-          result = await tools.execute(name, args, signal);
+          const requestedSteamAction =
+            name === "steam" ? String(args?.action || "").toLowerCase() : "";
+          const steamGoalAction =
+            turnPolicy?.taskHint === "steam_action"
+              ? requiredSteamAction(turnPolicy?.effectiveIntent || text)
+              : null;
+          if (
+            name === "steam" &&
+            steamGoalAction === "search" &&
+            successfulSteamActions.has("search") &&
+            !["search", "status"].includes(requestedSteamAction)
+          ) {
+            result = {
+              action: "search",
+              verified: true,
+              skipped_action: requestedSteamAction,
+              note:
+                "Search-only Steam goal is already verified. No store page was opened and no install was started.",
+            };
+          } else {
+            result = await tools.execute(name, args, signal);
+          }
           if (
             result?.stopped ||
             (typeof result?.code === "number" && result.code !== 0)
@@ -1049,6 +1190,23 @@ ${finalContract}`;
             throw new Error(result.error);
           failedCallHistory.delete(callKey);
           successfulTools++;
+          if (name === "steam" && result?.action) {
+            const steamActionName = String(result.action);
+            successfulSteamActions.add(steamActionName);
+            if (
+              (steamActionName === "search" && Array.isArray(result.results)) ||
+              result.verified_app
+            ) {
+              verifiedSteamResults.set(steamActionName, result);
+              const steamGoal = requiredSteamAction(
+                turnPolicy?.effectiveIntent || text,
+              );
+              if (steamActionName === steamGoal) {
+                const reply = verifiedSteamReply(result, text);
+                if (reply) steamImmediateReply = reply;
+              }
+            }
+          }
           store.event(chatId, name, eventDetailForStorage(name, args, result), "done");
           emit({
             type: "tool",
@@ -1108,6 +1266,17 @@ ${finalContract}`;
               ],
             });
         }
+      }
+
+      if (steamImmediateReply) {
+        transcript += steamImmediateReply;
+        store.message(chatId, "assistant", steamImmediateReply);
+        taskState.status = "completed";
+        store.saveTaskState(chatId, taskState);
+        reflect("completed");
+        emit({ type: "token", text: steamImmediateReply });
+        emit({ type: "done", tokens: totalTokens });
+        return;
       }
 
       const expertProviderReady =
