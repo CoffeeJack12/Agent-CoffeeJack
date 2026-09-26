@@ -717,7 +717,7 @@ test("Owner API can use Security Lab; Standard and Guest cannot", async (t) => {
   };
   const app = await createApp({
     dataDirectory: dir,
-    root: "/workspace",
+    root: process.cwd(),
     remoteAccess: null,
     ollama: fake,
   });
