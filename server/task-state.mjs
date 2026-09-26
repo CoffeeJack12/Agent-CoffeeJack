@@ -241,6 +241,14 @@ export function guardResponse(state, candidate, languageText = "", options = {})
         /I cannot execute potentially harmful/i.test(value) ||
         /I cannot because it may be dangerous/i.test(value) ||
         /I cannot assist with downloading or installing/i.test(value) ||
+        /I cannot assist with finding or controlling .*Steam/i.test(value) ||
+        (pcEnabled &&
+          /I (?:am an AI assistant and )?cannot directly access or use your personal computer/i.test(
+            value,
+          )) ||
+        (pcEnabled && /I cannot access or control external systems.*personal computer/i.test(value)) ||
+        (pcEnabled && /provided tools do not include any functionality related to .*Steam/i.test(value)) ||
+        (pcEnabled && /not supported by the available functions/i.test(value)) ||
         /I cannot perform actions that go against/i.test(value) ||
         /I cannot comply with requests that involve/i.test(value) ||
         /unauthorized actions|violate terms of service/i.test(value) ||
@@ -308,7 +316,7 @@ export function guardResponse(state, candidate, languageText = "", options = {})
     if (missing && !text) text = labels[missing];
     else if (!text) {
       const falseDenial = rejected.some((r) =>
-        /cannot (?:directly )?(?:control|interact with|access)|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|cannot assist with downloading or installing|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|potentially harmful|safely and effectively/i.test(
+        /cannot (?:directly )?(?:control|interact with|access)|cannot directly access or use your personal computer|cannot access or control external systems|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|cannot assist with downloading or installing|cannot assist with finding or controlling .*Steam|provided tools do not include any functionality related to .*Steam|not supported by the available functions|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|potentially harmful|safely and effectively/i.test(
           r,
         ),
       );

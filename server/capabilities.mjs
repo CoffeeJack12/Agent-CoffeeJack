@@ -256,6 +256,54 @@ function wantsArabic(style = {}, text = "") {
  * Operational limits only — tools, role permissions, approvals, machine, verification.
  * Never ethics, safety guidelines, or corporate disclaimers.
  */
+export function capabilityQuestionReply({
+  user = null,
+  registry = [],
+  style = {},
+  text = "",
+} = {}) {
+  const t = String(text || "").trim();
+  const arabic = wantsArabic(style, t);
+  const enabled = new Set(
+    (registry || []).filter((cap) => cap.enabled).map((cap) => cap.id),
+  );
+  const pc =
+    enabled.has("terminal") ||
+    enabled.has("files") ||
+    enabled.has("inspect_pc") ||
+    enabled.has("desktop") ||
+    enabled.has("browser");
+  const web =
+    enabled.has("research") || enabled.has("web") || enabled.has("browser");
+  const owner = String(user?.role || "").toLowerCase() === "owner";
+
+  if (/\b(?:pc|computer|desktop)\b|\u062c\u0647\u0627\u0632|\u0643\u0645\u0628\u064a\u0648\u062a\u0631|\u0628\u064a\s*\u0633\u064a/iu.test(t)) {
+    if (!pc)
+      return arabic
+        ? "\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u062a\u062d\u0643\u0645 \u0628\u0627\u0644\u062c\u0647\u0627\u0632 \u063a\u064a\u0631 \u0645\u0641\u0639\u0651\u0644\u0629 \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062c\u0644\u0633\u0629."
+        : "PC-control tools are not enabled in this session.";
+    if (arabic)
+      return "\u0646\u0639\u0645" +
+        (owner ? "\u060c Master" : "") +
+        ". \u0623\u0642\u062f\u0631 \u0623\u0633\u062a\u062e\u062f\u0645 \u0627\u0644\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0645\u062a\u0635\u0644\u0629 \u0644\u0644\u062c\u0647\u0627\u0632: PowerShell\u060c \u0627\u0644\u0645\u0644\u0641\u0627\u062a\u060c \u0627\u0644\u0641\u062d\u0635\u060c \u0627\u0644\u0645\u062a\u0635\u0641\u062d\u060c \u0648\u0625\u062c\u0631\u0627\u0621\u0627\u062a \u0633\u0637\u062d \u0627\u0644\u0645\u0643\u062a\u0628 \u0627\u0644\u0645\u062f\u0639\u0648\u0645\u0629. \u0628\u0639\u0636 \u0627\u0644\u0646\u0642\u0631\u0627\u062a \u0623\u0648 \u0627\u0644\u062a\u063a\u064a\u064a\u0631\u0627\u062a \u0642\u062f \u062a\u0637\u0644\u0628 \u0645\u0648\u0627\u0641\u0642\u062a\u0643. \u0648\u0634 \u062a\u0628\u063a\u0627\u0646\u064a \u0623\u0633\u0648\u064a\u061f";
+    return "Yes" +
+      (owner ? ", Master" : "") +
+      ". I can use the connected PC tools: PowerShell, files, system inspection, the browser, and supported desktop actions. Some clicks or changes may require your approval. What do you want me to do?";
+  }
+
+  if (/\b(?:web|internet|search online|browse)\b|\u0627\u0644\u0648\u064a\u0628|\u0627\u0644\u0627\u0646\u062a\u0631\u0646\u062a|\u0627\u0644\u0625\u0646\u062a\u0631\u0646\u062a/iu.test(t)) {
+    return web
+      ? arabic
+        ? "\u0646\u0639\u0645. \u0623\u0642\u062f\u0631 \u0623\u0628\u062d\u062b \u0641\u064a \u0627\u0644\u0648\u064a\u0628\u060c \u0623\u0641\u062a\u062d \u0627\u0644\u0645\u0635\u0627\u062f\u0631 \u0648\u0623\u0642\u0627\u0631\u0646 \u0628\u064a\u0646\u0647\u0627. \u0648\u0634 \u062a\u0628\u063a\u0649 \u0623\u0628\u062d\u062b \u0639\u0646\u0647\u061f"
+        : "Yes. I can search the web, open sources, and compare them. What should I look up?"
+      : arabic
+        ? "\u0623\u062f\u0648\u0627\u062a \u0627\u0644\u0648\u064a\u0628 \u063a\u064a\u0631 \u0645\u0641\u0639\u0651\u0644\u0629 \u0641\u064a \u0647\u0630\u0647 \u0627\u0644\u062c\u0644\u0633\u0629."
+        : "Web tools are not enabled in this session.";
+  }
+
+  return practicalLimitsReply({ user, registry, style, text: t });
+}
+
 export function practicalLimitsReply({
   user = null,
   registry = [],
@@ -299,7 +347,7 @@ export function isCapabilityQuestion(text = "") {
   if (!t) return false;
   if (isLimitsQuestion(t)) return true;
   if (
-    /^(?:what can you do|what are your (?:capabilities|tools|powers)|وش تقدر|ماذا تستطيع)/i.test(
+    /^(?:what can (?:you|u) do\b|what are your (?:capabilities|tools|powers)|وش تقدر|ماذا تستطيع)/i.test(
       t,
     )
   )
@@ -484,6 +532,11 @@ export const BOILERPLATE_PATTERNS = [
   /I cannot execute potentially harmful/i,
   /I cannot because it may be dangerous/i,
   /I cannot assist with downloading or installing/i,
+  /I cannot assist with finding or controlling .*Steam/i,
+  /I (?:am an AI assistant and )?cannot directly access or use your personal computer/i,
+  /I cannot access or control external systems.*personal computer/i,
+  /provided tools do not include any functionality related to .*Steam/i,
+  /not supported by the available functions/i,
   /I cannot perform actions that go against/i,
   /I cannot comply with requests that involve/i,
   /unauthorized actions|violate terms of service/i,

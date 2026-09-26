@@ -2,6 +2,7 @@ import { getPreferences, preferencePrompt, capabilityPolicy, addressTitle } from
 import {
   buildCapabilityRegistry,
   capabilityPrompt,
+  capabilityQuestionReply,
   isCapabilityQuestion,
   isLimitsQuestion,
   practicalLimitsReply,
@@ -267,6 +268,25 @@ export async function runAgent({
     emit({ type: "done", tokens: 0 });
     return;
   }
+  if (capabilityQuestion && priorityLane !== "self_repair") {
+    const canned = capabilityQuestionReply({
+      user,
+      registry,
+      style: preservedStyle,
+      text,
+    });
+    store.message(chatId, "user", text);
+    store.message(chatId, "assistant", canned);
+    emit({
+      type: "mode",
+      requestedMode: modeInfo.requestedMode,
+      effectiveMode: modeInfo.effectiveMode,
+      reason: modeInfo.reason,
+    });
+    emit({ type: "token", text: canned });
+    emit({ type: "done", tokens: 0 });
+    return;
+  }
   const memories = (
     policy.enabled.has("memory") &&
     !fastPath &&
@@ -403,6 +423,7 @@ ${finalContract}`;
   let evaluationAttempts = 0;
   let qualityAttempts = 0;
   let refusalRepairAttempts = 0;
+  let actionToolRepairAttempts = 0;
   let styleRevisionAttempts = 0;
   let jeddawiRenderMeta = null;
   const jeddawiActive = shouldInvokeJeddawiRenderer(
@@ -542,6 +563,27 @@ ${finalContract}`;
       }
       totalTokens += response.tokens ?? 0;
       let candidate = responseText || response.content || "";
+
+      const requiresActionTool =
+        turnPolicy?.taskHint === "steam_action" ||
+        (turnPolicy?.taskHint === "pc_action" &&
+          Boolean(turnPolicy?.snapshot?.lastUser));
+      if (
+        requiresActionTool &&
+        !response.tool_calls?.length &&
+        actionToolRepairAttempts++ === 0 &&
+        round < 15
+      ) {
+        clearStreamed();
+        messages.push({ role: "assistant", content: candidate });
+        messages.push({
+          role: "system",
+          content:
+            "This is an execution request and compatible tools are available. Do not answer with a capability denial or instructions for the user to do it manually. Call an appropriate offered tool now to inspect or advance the actual task. For Steam tasks, a dedicated Steam tool is not required: use terminal/browser/files/desktop as appropriate. If the request names a local application, inspect whether it exists before claiming it is unavailable. Never claim success until a tool verifies it.",
+        });
+        continue;
+      }
+
       if (response.tool_calls?.length) {
         // Tool rounds: clear any prematurely streamed prose from the bubble.
         clearStreamed();
@@ -575,7 +617,7 @@ ${finalContract}`;
       guarded.text = limitAddress(guarded.text, preferences, transcript, text);
 
       const cannedRefusal = guarded.rejected.some((value) =>
-        /cannot assist with downloading or installing|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|lawful and ethical|potentially harmful|safely and effectively/i.test(
+        /cannot assist with downloading or installing|cannot assist with finding or controlling .*Steam|(?:am an AI assistant and )?cannot directly access or use your personal computer|cannot access or control external systems|provided tools do not include any functionality related to .*Steam|not supported by the available functions|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|lawful and ethical|potentially harmful|safely and effectively/i.test(
           String(value || ""),
         ),
       );

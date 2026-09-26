@@ -601,7 +601,12 @@ export function resolveTurnContext(
     };
   }
 
-  const { effectiveIntent, directive, taskHint } = buildEffectiveIntent(
+  const {
+    effectiveIntent,
+    directive,
+    taskHint,
+    resetTaskState: intentResetTaskState = false,
+  } = buildEffectiveIntent(
     trimmed,
     classified,
     snapshot,
@@ -691,7 +696,7 @@ export function resolveTurnContext(
     needsVerification: classified.needsVerification || explicitVerify,
     explicitVerify,
     explicitRemember,
-    resetTaskState: false,
+    resetTaskState: Boolean(intentResetTaskState),
     priorityLane: "normal",
     priority,
     languageSwitch: classified.languageSwitch || null,
@@ -711,6 +716,65 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
   const thread = formatCompactThreadContext(snapshot, { style });
   const styleBlock = style ? formatConversationStylePrompt(style) : "";
   const arabicHint = classified.arabicFollow?.hint;
+
+  const barePcUse =
+    /^(?:use|control|access)\s+(?:my|the)\s+(?:pc|computer)(?:\s+to\s+do\s+it)?[.!?\s]*$/i.test(
+      trimmed,
+    ) ||
+    /^(?:استخدم|استعمل|تحكم\s+في)\s+(?:جهازي|الكمبيوتر|البي\s*سي)[.!؟\s]*$/iu.test(
+      trimmed,
+    );
+  if (barePcUse) {
+    const priorObjective =
+      priorUser || snapshot.canonicalTopic || snapshot.lastTopic || "";
+    return {
+      taskHint: "pc_action",
+      effectiveIntent: priorObjective
+        ? `Continue the previous concrete objective using the connected PC tools. Previous user objective: ${priorObjective}`
+        : "Use the connected PC tools for the user's objective.",
+      directive: [
+        "OWNER PC ACTION: PC-control tools are connected and available.",
+        priorObjective
+          ? "Continue the immediately preceding objective using the appropriate enabled PC/browser/terminal/desktop tool. Do not claim you cannot access the PC."
+          : "If no concrete objective exists, ask one short question for the objective. Do not claim you cannot access the PC.",
+        styleBlock,
+        thread,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      resetTaskState: false,
+    };
+  }
+
+  const steamAction =
+    /\bsteam\b|ستيم/iu.test(trimmed) &&
+    /\b(?:look\s+for|find|search|open|install|download|launch|run|check|locate)\b|(?:ابحث|دور|افتح|ثبت|حمّل|حمل|شغل|نزّل|نزل)/iu.test(
+      trimmed,
+    );
+  if (steamAction) {
+    const previousUserText = String(snapshot.lastUser || "");
+    const priorSteamContext = /\bsteam\b|ستيم|\bgame\b|لعبة/iu.test(
+      previousUserText,
+    );
+    return {
+      taskHint: "steam_action",
+      effectiveIntent: trimmed,
+      directive: [
+        "STEAM ACTION: treat this as an operational PC task, not a capability question.",
+        "Use the enabled browser, terminal, files, or desktop tools to inspect and advance the request before answering.",
+        "A dedicated Steam tool is not required. Do not claim Steam or PC access is unsupported while those tools are enabled.",
+        /luatools/i.test(trimmed)
+          ? "LuaTools was explicitly named. Inspect the local machine for LuaTools before claiming it is unavailable. If the requested path would bypass Steam ownership/licensing, use the official Steam client path instead and state that exact operational limitation."
+          : "",
+        "For installs/downloads, prefer the official Steam client and owned-library flow; verify what actually happened before claiming success.",
+        styleBlock,
+        thread,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      resetTaskState: Boolean(previousUserText) && !priorSteamContext,
+    };
+  }
 
   if (classified.intent === "style_switch") {
     const cmd = classified.styleCommand;
