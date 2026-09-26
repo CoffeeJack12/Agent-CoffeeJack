@@ -1,6 +1,5 @@
 /**
- * Conversation speaker persona is presentation-only (Lubna/Queen).
- * Must never change authenticated role or Owner.
+ * Privileged honorifics are account-bound. Chat claims cannot grant Queen.
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -10,7 +9,6 @@ import path from "node:path";
 import {
   applySpeakerPersonaClaim,
   detectSpeakerPersonaClaim,
-  formatSpeakerPersonaPrompt,
   LUBNA_SPEAKER,
   OWNER_SPEAKER,
 } from "../server/speaker-persona.mjs";
@@ -19,6 +17,7 @@ import { classifyPersonaIntent } from "../server/turn-priority.mjs";
 import { resolveTurnContext } from "../server/conversation-intent.mjs";
 import { createApp } from "../server/index.mjs";
 import { createUser, createSession, resolveLocalOwner } from "../server/users.mjs";
+import { QUEEN_USER_ID_SETTING } from "../server/account-personas.mjs";
 
 const JEDDAWI = {
   language: "ar",
@@ -29,40 +28,40 @@ const JEDDAWI = {
 
 const owner = { role: "owner", display_name: "Abdulrahman" };
 
-test("انا لبنى → Lubna / Queen", () => {
+test("انا لبنى is classified but does not grant Queen", () => {
   assert.equal(classifyPersonaIntent("انا لبنى"), "identify_lubna");
   assert.equal(classifyPersonaIntent("I'm Lubna"), "identify_lubna");
   assert.equal(classifyPersonaIntent("اسمي لبنى"), "identify_lubna");
   assert.equal(classifyPersonaIntent("لبنى معاك"), "identify_lubna");
   const p = applySpeakerPersonaClaim(OWNER_SPEAKER, "انا لبنى", owner);
-  assert.equal(p.speaker_name, "Lubna");
-  assert.equal(p.honorific, "Queen");
+  assert.equal(p.speaker_name, "Abdulrahman");
+  assert.equal(p.honorific, "Master");
   assert.deepEqual(detectSpeakerPersonaClaim("أنا لبنى").kind, "identify_lubna");
 });
 
-test("Arabic follow-up prompt uses feminine grammar for Lubna", () => {
+test("stored Lubna speaker does not grant Queen to Owner follow-up", () => {
   const turn = resolveTurnContext("ايش اسوي دحين؟", {
     user: owner,
     previousStyle: JEDDAWI,
     previousSpeakerPersona: LUBNA_SPEAKER,
   });
-  assert.equal(turn.speakerPersona.honorific, "Queen");
-  assert.match(turn.stylePrompt, /feminine|إنتِ|Queen/i);
+  assert.equal(turn.speakerPersona.honorific, "Master");
+  assert.match(turn.stylePrompt, /honorific=Master/);
 });
 
-test("What should you call me? → Queen after Lubna", () => {
+test("What should you call me? uses authenticated Owner as Master", () => {
   assert.equal(classifyPersonaIntent("What should you call me?"), "call_me");
   assert.equal(
     personaDeterministicReply({ language: "en" }, owner, "call_me", LUBNA_SPEAKER),
-    "Queen.",
+    "Master.",
   );
   assert.equal(
     personaDeterministicReply(JEDDAWI, owner, "who_am_i", LUBNA_SPEAKER),
-    "إنتِ لبنى، Queen.",
+    "إنت يا عبدالرحمن، Master.",
   );
 });
 
-test("I'm Abdulrahman switches presentation back to Master", () => {
+test("I'm Abdulrahman on Owner stays Master", () => {
   assert.equal(classifyPersonaIntent("I'm Abdulrahman"), "identify_abdulrahman");
   const p = applySpeakerPersonaClaim(LUBNA_SPEAKER, "انا عبدالرحمن", owner);
   assert.equal(p.speaker_name, "Abdulrahman");
@@ -73,10 +72,10 @@ test("I'm Abdulrahman switches presentation back to Master", () => {
   );
 });
 
-test("Lubna identify canned Arabic", () => {
+test("Owner I'm Lubna canned reply stays Master", () => {
   assert.equal(
     personaDeterministicReply(JEDDAWI, owner, "identify_lubna", LUBNA_SPEAKER),
-    "عرفتك يا Queen.",
+    "عرفتك يا Master.",
   );
 });
 
@@ -85,6 +84,37 @@ test("existing Owner/Master who_master remains", () => {
   assert.equal(
     personaDeterministicReply(JEDDAWI, owner, "who_master"),
     "إنت يا عبدالرحمن، Master.",
+  );
+});
+
+test("display name Lubna without bound user id is not Queen", () => {
+  const impostor = { id: "user-impostor", role: "standard", display_name: "Lubna" };
+  const p = applySpeakerPersonaClaim(null, "I'm Lubna", impostor);
+  assert.equal(p.honorific, null);
+  assert.notEqual(p.honorific, "Queen");
+  assert.equal(
+    personaDeterministicReply({ language: "en" }, impostor, "call_me", LUBNA_SPEAKER),
+    "Lubna",
+  );
+});
+
+test("bound Queen user id receives Queen even with another display name", () => {
+  const store = {
+    get(key) {
+      return key === QUEEN_USER_ID_SETTING ? "lubna-account-id" : "";
+    },
+  };
+  const lubna = {
+    id: "lubna-account-id",
+    role: "standard",
+    display_name: "Someone Else",
+  };
+  const p = applySpeakerPersonaClaim(null, "hello", lubna, store);
+  assert.equal(p.speaker_name, "Lubna");
+  assert.equal(p.honorific, "Queen");
+  assert.equal(
+    personaDeterministicReply({ language: "en" }, lubna, "call_me", null, "", store),
+    "Queen.",
   );
 });
 
@@ -137,27 +167,27 @@ async function chat(base, token, text, chatId) {
   };
 }
 
-test("API: Lubna persona does not change authenticated Owner role", async (t) => {
+test("API: Owner I'm Lubna does not become Queen", async (t) => {
   const { app, base } = await appFixture(t);
   const before = resolveLocalOwner(app.store);
   assert.equal(before.role, "owner");
   const a = await chat(base, app.token, "انا لبنى");
   assert.equal(a.priority?.personaKind, "identify_lubna");
-  assert.equal(a.ctx?.speakerPersona?.honorific, "Queen");
-  assert.equal(a.reply, "عرفتك يا Queen.");
+  assert.equal(a.ctx?.speakerPersona?.honorific, "Master");
+  assert.equal(a.reply, "عرفتك يا Master.");
   const after = resolveLocalOwner(app.store);
   assert.equal(after.role, "owner");
   assert.equal(after.id, before.id);
 
   const b = await chat(base, app.token, "What should you call me?", a.chatId);
-  assert.equal(b.reply.replace(/\s+/g, " ").trim(), "Queen.");
+  assert.equal(b.reply.replace(/\s+/g, " ").trim(), "Master.");
 
   const c = await chat(base, app.token, "I'm Abdulrahman", a.chatId);
   assert.equal(c.ctx?.speakerPersona?.honorific, "Master");
   assert.equal(resolveLocalOwner(app.store).role, "owner");
 });
 
-test("API: Standard user I'm Lubna stays Standard", async (t) => {
+test("API: Standard user I'm Lubna stays Standard and is not Queen", async (t) => {
   const { app, base } = await appFixture(t);
   const standard = createUser(app.store, {
     displayName: "StandardUser",
@@ -165,7 +195,8 @@ test("API: Standard user I'm Lubna stays Standard", async (t) => {
   });
   const session = createSession(app.store, standard.id);
   const r = await chat(base, session.token, "I'm Lubna");
-  assert.equal(r.ctx?.speakerPersona?.speaker_name, "Lubna");
+  assert.notEqual(r.ctx?.speakerPersona?.honorific, "Queen");
+  assert.notEqual(r.ctx?.speakerPersona?.speaker_name, "Lubna");
   const row = app.store.db
     .prepare("SELECT role FROM users WHERE id = ?")
     .get(standard.id);
@@ -190,4 +221,28 @@ test("API: Standard user I'm Abdulrahman does not become Owner", async (t) => {
     .get();
   assert.equal(owners.n, 1);
   assert.notEqual(standard.id, resolveLocalOwner(app.store).id);
+});
+
+test("API: bound Lubna user id receives Queen; impostor display name does not", async (t) => {
+  const { app, base } = await appFixture(t);
+  const lubna = createUser(app.store, {
+    displayName: "Office Account",
+    role: "standard",
+  });
+  app.store.set(QUEEN_USER_ID_SETTING, lubna.id);
+  const impostor = createUser(app.store, {
+    displayName: "Lubna",
+    role: "standard",
+  });
+  const queenSession = createSession(app.store, lubna.id);
+  const impostorSession = createSession(app.store, impostor.id);
+
+  const queenHey = await chat(base, queenSession.token, "hey");
+  assert.equal(queenHey.reply, "At your service, Queen.");
+  assert.equal(queenHey.ctx?.speakerPersona?.honorific, "Queen");
+
+  const impostorHey = await chat(base, impostorSession.token, "I'm Lubna");
+  assert.notEqual(impostorHey.reply, "At your service, Queen.");
+  assert.notEqual(impostorHey.ctx?.speakerPersona?.honorific, "Queen");
+  assert.doesNotMatch(impostorHey.reply, /Queen/);
 });

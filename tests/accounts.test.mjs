@@ -354,9 +354,9 @@ test("I'm Abdulrahman / I'm Lubna do not change role", async (t) => {
   assert.equal(row.role, "standard");
   assert.equal(
     applySpeakerPersonaClaim(null, "I'm Lubna", login.data.user).honorific,
-    "Queen",
+    null,
   );
-  assert.equal(
+  assert.notEqual(
     personaDeterministicReply({ language: "en" }, login.data.user, "call_me", LUBNA_SPEAKER),
     "Queen.",
   );
@@ -801,7 +801,7 @@ test("signup creates HttpOnly cookie; /verify uses 6-digit code; same account up
   const verifyPage = await fetch(base + "/verify");
   assert.equal(verifyPage.status, 200);
   const html = await verifyPage.text();
-  assert.match(html, /رمز تأكيد البريد/);
+  assert.match(html, /Email confirmation code/);
   assert.match(html, /maxlength="6"/);
   assert.doesNotMatch(html, /Invalid session token/);
   const me = await get(base, "/api/auth/me", cookie, {

@@ -8,7 +8,8 @@ import {
   isVerbatimStyleExample,
 } from "./styles/jeddawi.mjs";
 import { looksLikeButterCalque } from "./jeddawi-semantics.mjs";
-import { isLubnaSpeaker, normalizeSpeakerPersona } from "./speaker-persona.mjs";
+import { normalizeSpeakerPersona } from "./speaker-persona.mjs";
+import { isMasterAccount, isQueenAccount } from "./account-personas.mjs";
 
 export const DEFAULT_CONVERSATION_STYLE = Object.freeze({
   language: "auto", // auto | en | ar
@@ -559,6 +560,7 @@ export function personaDeterministicReply(
   personaKind = "who_master",
   speakerPersona = null,
   userText = "",
+  store = null,
 ) {
   const s = normalizeConversationStyle(style);
   const role = String(user?.role || "").toLowerCase();
@@ -566,42 +568,48 @@ export function personaDeterministicReply(
     String(
       user?.display_name || user?.displayName || user?.name || "Abdulrahman",
     ).trim() || "Abdulrahman";
-  const isOwner = role === "owner";
+  const isOwner = isMasterAccount(user);
+  const queen = isQueenAccount(user, store);
   const arabicName = name === "Abdulrahman" || /abdulrahman/i.test(name)
     ? "عبدالرحمن"
     : name;
-  const speaker = normalizeSpeakerPersona(speakerPersona, user);
+  const speaker = normalizeSpeakerPersona(speakerPersona, user, store);
   const arabicUi =
     isJeddawiActive(s) ||
     isArabicPresentation(s) ||
     /[\u0600-\u06ff]/.test(String(userText || ""));
 
   if (personaKind === "identify_lubna") {
-    if (arabicUi) return "عرفتك يا Queen.";
-    return "Got it, Queen.";
+    if (queen) return arabicUi ? "عرفتك يا Queen." : "Got it, Queen.";
+    if (isOwner) return arabicUi ? "عرفتك يا Master." : "Got it, Master.";
+    return arabicUi
+      ? "ما أعطيك لقب من النص."
+      : "That name doesn't change how I address you.";
   }
   if (personaKind === "identify_abdulrahman") {
-    if (arabicUi) return "عرفتك يا Master.";
-    return "Got it, Master.";
+    if (isOwner) return arabicUi ? "عرفتك يا Master." : "Got it, Master.";
+    return arabicUi
+      ? "ما أعطيك لقب من النص."
+      : "That name doesn't change how I address you.";
   }
   if (personaKind === "who_am_i") {
-    if (isLubnaSpeaker(speaker)) {
+    if (queen) {
       if (arabicUi) return "إنتِ لبنى، Queen.";
       return "You're Lubna, Queen.";
     }
-    if (isJeddawiActive(s)) return `إنت يا ${arabicName}، Master.`;
-    if (isArabicPresentation(s)) return `${arabicName}، Master.`;
-    return isOwner
-      ? `${name} — Master.`
+    if (isOwner) {
+      if (isJeddawiActive(s)) return `إنت يا ${arabicName}، Master.`;
+      if (isArabicPresentation(s)) return `${arabicName}، Master.`;
+      return `${name} — Master.`;
+    }
+    return arabicUi
+      ? `أنت ${name}.`
       : `You're ${name}. Session role is ${role || "standard"}.`;
   }
   if (personaKind === "call_me") {
-    if (isLubnaSpeaker(speaker)) {
-      if (isJeddawiActive(s) || isArabicPresentation(s)) return "Queen.";
-      return "Queen.";
-    }
-    if (isJeddawiActive(s) || isArabicPresentation(s)) return "Master.";
-    return speaker.honorific || "Master";
+    if (queen) return "Queen.";
+    if (isOwner) return "Master.";
+    return speaker.speaker_name || name;
   }
 
   if (personaKind === "who_master") {

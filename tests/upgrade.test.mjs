@@ -42,7 +42,7 @@ test('Hacker defaults include investigation tools; Empathy blocks unsolicited co
  assert.equal(capabilityPolicy(empathy,'inspect the network').allows('inspect_pc'),true);
  assert.equal(capabilityPolicy({...DEFAULT_PREFERENCES,capabilities:['developer']}).allows('run_tests'),false);
 });
-async function agentFixture(t,prefs,answers,text='hello'){
+async function agentFixture(t,prefs,answers,text='summarize the workspace files'){
  const {store,dir}=await fixture(t);savePreferences(store,prefs);const chatId=store.createChat('upgrade').id;let n=0,executed=0,output='',prompts=[];
  await runAgent({store,chatId,text,model:'test',signal:new AbortController().signal,emit:e=>{if(e.type==='token')output+=e.text;if(e.type==='revise')output=e.text||'';},tools:{workspace:dir,execute:async()=>{executed++;return {code:0};}},ollama:{chat:async request=>{prompts.push(structuredClone(request.messages));const answer=answers[Math.min(n++,answers.length-1)];if(answer.content)request.onToken(answer.content);return structuredClone({role:'assistant',...answer});}}});
  return {store,chatId,n,executed,output,prompts};

@@ -17,6 +17,7 @@ import { Ollama } from "./ollama.mjs";
 import { Tools, runProcess } from "./tools.mjs";
 import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
+import { isPureGreeting, emitInstantGreeting } from "./greeting.mjs";
 import { createDefaultRegistry } from "./providers/index.mjs";
 import {
   buildCouncilPlan,
@@ -1495,8 +1496,19 @@ export async function createApp({
             previousStyle,
             previousTopic,
             previousSpeakerPersona,
+            store,
           });
           timing.mark("context_resolved");
+          if (isPureGreeting(b.text)) {
+            emitInstantGreeting({
+              store,
+              chatId: boundChat.id,
+              user,
+              text: b.text,
+              emit,
+              timing,
+            });
+          } else {
           const conversationIntent = turn;
           const routingText = turn.effectiveIntent || b.text;
           const requestedMode =
@@ -1929,6 +1941,7 @@ export async function createApp({
             }
           } catch {
             /* lesson persistence is best-effort */
+          }
           }
         } catch (e) {
           emit({

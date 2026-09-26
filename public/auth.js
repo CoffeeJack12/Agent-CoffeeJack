@@ -15,39 +15,39 @@ const SESSION_EXPIRED = "Your session expired. Please log in again.";
 
 const copy = {
   "/login": {
-    title: "تسجيل الدخول",
-    lead: "ادخل ببريد CoffeeJack وكلمة المرور.",
-    submit: "دخول",
+    title: "Sign in",
+    lead: "Sign in with your CoffeeJack email and password.",
+    submit: "Sign in",
     password: "current-password",
   },
   "/signup": {
-    title: "إنشاء حساب",
-    lead: "الحسابات الجديدة Standard فقط. لا يوجد تسجيل Owner عام.",
-    submit: "إنشاء الحساب",
+    title: "Create account",
+    lead: "New accounts are Standard only. There is no public Owner signup.",
+    submit: "Create account",
     password: "new-password",
   },
   "/forgot": {
-    title: "نسيت كلمة المرور",
-    lead: "إن وُجد حساب، تُرسل تعليمات إعادة التعيين.",
-    submit: "إرسال",
+    title: "Forgot password",
+    lead: "If an account exists, reset instructions are sent.",
+    submit: "Send",
   },
   "/reset": {
-    title: "كلمة مرور جديدة",
-    lead: "أدخل رمز إعادة التعيين الذي وصلك وكلمة مرور جديدة.",
-    submit: "حفظ",
+    title: "New password",
+    lead: "Enter the reset code you received and a new password.",
+    submit: "Save",
     password: "new-password",
-    tokenLabel: "رمز إعادة تعيين كلمة المرور",
+    tokenLabel: "Password reset code",
   },
   "/verify": {
-    title: "تأكيد البريد",
-    lead: "أدخل رمز تأكيد البريد الذي وصلك. هذا ليس رمز الجلسة.",
-    submit: "تأكيد",
-    tokenLabel: "رمز تأكيد البريد",
+    title: "Confirm email",
+    lead: "Enter the email confirmation code you received. This is not a session token.",
+    submit: "Confirm",
+    tokenLabel: "Email confirmation code",
   },
 }[page] || {
-  title: "تسجيل الدخول",
+  title: "Sign in",
   lead: "",
-  submit: "دخول",
+  submit: "Sign in",
 };
 
 title.textContent = copy.title;
@@ -151,7 +151,7 @@ resendBtn?.addEventListener("click", async () => {
   try {
     const { res, data } = await authFetch("/api/auth/resend");
     if (!res.ok) {
-      showError(sessionMessage(data, "تعذر الإرسال"));
+      showError(sessionMessage(data, "Could not send"));
       if (data.code === "session_expired" || /invalid session token/i.test(data.error || ""))
         setTimeout(() => location.assign("/login"), 1600);
       return;
@@ -179,7 +179,7 @@ form.addEventListener("submit", async (event) => {
   try {
     if (page === "/signup") {
       const { res, data } = await authFetch("/api/auth/register", body);
-      if (!res.ok) throw new Error(data.error || "تعذر إنشاء الحساب");
+      if (!res.ok) throw new Error(data.error || "Could not create the account");
       if (/^\d{6}$/.test(data.devToken || ""))
         sessionStorage.setItem("cj_dev_verify", data.devToken);
       if (data.mail?.configured === false) showNote(MAIL_UNCONFIGURED);
@@ -191,7 +191,7 @@ form.addEventListener("submit", async (event) => {
         email: body.email,
         password: body.password,
       });
-      if (!res.ok) throw new Error(data.error || "تعذر الدخول");
+      if (!res.ok) throw new Error(data.error || "Could not sign in");
       if (
         data.user?.role !== "owner" &&
         data.user?.email &&
@@ -205,7 +205,7 @@ form.addEventListener("submit", async (event) => {
       const { res, data } = await authFetch("/api/auth/forgot", {
         email: body.email,
       });
-      if (!res.ok) throw new Error(data.error || "تعذر الطلب");
+      if (!res.ok) throw new Error(data.error || "Could not submit the request");
       showNote(mailNote(data.mail, data.message));
       return;
     }
@@ -216,7 +216,7 @@ form.addEventListener("submit", async (event) => {
         password: body.password,
         confirmPassword: body.confirmPassword,
       });
-      if (!res.ok) throw new Error(data.error || "تعذر إعادة التعيين");
+      if (!res.ok) throw new Error(data.error || "Could not reset the password");
       location.assign("/login");
       return;
     }
@@ -225,7 +225,7 @@ form.addEventListener("submit", async (event) => {
         code: body.code,
       });
       if (!res.ok) {
-        showError(sessionMessage(data, data.error || "تعذر التأكيد"));
+        showError(sessionMessage(data, data.error || "Could not confirm"));
         return;
       }
       location.assign("/");

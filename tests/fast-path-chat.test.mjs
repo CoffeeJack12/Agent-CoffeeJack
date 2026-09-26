@@ -35,6 +35,7 @@ test("hey uses fast path: 8b, no council/tools/research/memory/verification", ()
   const turn = resolveTurnContext("hey", { history: [] });
   assert.equal(turn.fastPath, true);
   assert.equal(turn.intent, "greeting");
+  assert.equal(turn.instantGreeting, true);
   assert.equal(turn.allowResearch, false);
   assert.equal(turn.allowVerification, false);
   assert.equal(turn.allowMemoryWrite, false);
@@ -58,11 +59,15 @@ test("trivial greetings stay on fast path", () => {
   for (const text of [
     "hi",
     "hello",
+    "hey jack",
     "thanks",
     "ok",
     "yea",
     "good morning",
     "how are you",
+    "هلا",
+    "هاي",
+    "السلام عليكم",
   ]) {
     assert.equal(resolveTurnContext(text, { history: [] }).fastPath, true, text);
   }
@@ -215,30 +220,29 @@ test("fastPath routeModel skips registry.refresh and inspect", async () => {
   assert.match(String(route.profile?.keepAlive || "10m"), /10m/);
 });
 
-test("hey chat stream: 8b, no council card, token before done, activity keeps tools", async (t) => {
+test("hey chat stream: instant greeting, no Ollama/council/tools", async (t) => {
   const dir = await temporary(t);
-  const tokens = [];
-  let generationFinished = false;
+  let chatCalls = 0;
+  let prepareCalls = 0;
+  let modelsCalls = 0;
+  let inspectCalls = 0;
   const fake = {
-    models: async () => [
-      { name: "qwen3:8b" },
-      { name: "qwen3:14b" },
-    ],
-    inspect: async () => ({ capabilities: ["tools"] }),
-    prepare: async () => ({ alreadyLoaded: true, unloaded: [] }),
+    models: async () => {
+      modelsCalls++;
+      return [{ name: "qwen3:8b" }, { name: "qwen3:14b" }];
+    },
+    inspect: async () => {
+      inspectCalls++;
+      return { capabilities: ["tools"] };
+    },
+    prepare: async () => {
+      prepareCalls++;
+      return { alreadyLoaded: true, unloaded: [] };
+    },
     unload: async () => [],
-    chat: async ({ model, tools, onToken, onFirstToken }) => {
-      assert.equal(model, "qwen3:8b");
-      assert.ok(!tools?.length, "fast path must not offer tools");
-      const piece = "At your service, Master.";
-      assert.equal(generationFinished, false);
-      onFirstToken?.(piece);
-      onToken?.(piece);
-      tokens.push(piece);
-      // Remaining generation finishes after the first token was already pushed.
-      await new Promise((r) => setTimeout(r, 15));
-      generationFinished = true;
-      return { role: "assistant", content: piece, tokens: 4 };
+    chat: async () => {
+      chatCalls++;
+      throw new Error("Ollama must not run for a pure greeting");
     },
   };
   const app = await createApp({ dataDirectory: dir, ollama: fake });
@@ -254,58 +258,33 @@ test("hey chat stream: 8b, no council card, token before done, activity keeps to
     body: JSON.stringify({ text: "hey", requestedModel: "auto" }),
   });
   assert.equal(response.status, 200);
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  const events = [];
-  let sawToken = false;
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let nl;
-    while ((nl = buffer.indexOf("\n")) >= 0) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (!line.trim()) continue;
-      const item = JSON.parse(line);
-      events.push(item);
-      if (item.type === "token" && !sawToken) {
-        sawToken = true;
-        assert.equal(generationFinished, false);
-      }
-    }
-  }
-  assert.ok(sawToken, "expected streamed token");
-  assert.ok(
-    events.some((e) => e.type === "done"),
-    "expected done event",
-  );
-  assert.ok(
-    events.some((e) => e.type === "routing" && e.model === "qwen3:8b" && e.fastPath === true),
+  const events = (await response.text())
+    .trim()
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const reply = events
+    .filter((e) => e.type === "token")
+    .map((e) => e.text)
+    .join("");
+  assert.equal(reply, "At your service, Master.");
+  assert.equal(chatCalls, 0);
+  assert.equal(prepareCalls, 0);
+  assert.equal(modelsCalls, 0);
+  assert.equal(inspectCalls, 0);
+  assert.ok(events.some((e) => e.type === "done"));
+  assert.ok(events.some((e) => e.type === "turn_context" && e.instantGreeting === true));
+  assert.equal(
+    events.some((e) => e.type === "routing"),
+    false,
   );
   assert.equal(
     events.some((e) => e.type === "council"),
     false,
-    "no council events on fast path",
+    "no council events on instant greeting",
   );
-  assert.equal(
-    events.some(
-      (e) =>
-        e.type === "council" &&
-        /council_off|not_warranted/i.test(String(e.detail || "")),
-    ),
-    false,
-  );
-  assert.equal(
-    events.some((e) => e.type === "tool"),
-    false,
-  );
-  assert.equal(
-    events.some((e) => e.type === "self_repair"),
-    false,
-  );
-  // Activity log endpoint remains available (empty for greeting — no tools ran).
+  assert.equal(events.some((e) => e.type === "tool"), false);
+  assert.equal(events.some((e) => e.type === "self_repair"), false);
   const activity = await (
     await fetch(base + "/api/events", {
       headers: { "X-CoffeeJack-Token": app.token },

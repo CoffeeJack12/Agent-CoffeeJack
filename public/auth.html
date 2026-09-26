@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>CoffeeJack — حسابك</title>
+    <title>CoffeeJack — Your account</title>
     <link rel="icon" href="/favicon.svg" />
     <link rel="stylesheet" href="/style.css" />
     <link rel="stylesheet" href="/polish.css" />
@@ -14,19 +14,19 @@
         ><span data-jack-slot="logo"></span
         ><span>JACK<small>COFFEEJACK</small></span></a
       >
-      <h1 id="authTitle">تسجيل الدخول</h1>
-      <p id="authLead" class="auth-lead">حساب CoffeeJack — ليس حساب Cloudflare.</p>
+      <h1 id="authTitle">Sign in</h1>
+      <p id="authLead" class="auth-lead">A CoffeeJack account — not a Cloudflare account.</p>
       <form id="authForm" class="auth-form" autocomplete="on">
         <label id="nameRow" class="hidden"
-          >الاسم
+          >Name
           <input name="displayName" maxlength="80" />
         </label>
         <label id="emailRow"
-          >البريد
+          >Email
           <input name="email" type="email" autocomplete="username" />
         </label>
         <label id="passwordRow"
-          >كلمة المرور
+          >Password
           <input
             name="password"
             type="password"
@@ -36,11 +36,11 @@
           />
         </label>
         <label id="confirmRow" class="hidden"
-          >تأكيد كلمة المرور
+          >Confirm password
           <input name="confirmPassword" type="password" minlength="10" />
         </label>
         <label id="tokenRow" class="hidden"
-          ><span id="tokenLabel">رمز تأكيد البريد</span>
+          ><span id="tokenLabel">Email confirmation code</span>
           <input
             name="code"
             inputmode="numeric"
@@ -51,14 +51,14 @@
         </label>
         <p id="authError" class="auth-error" hidden></p>
         <p id="authNote" class="auth-note" hidden></p>
-        <button type="submit" id="authSubmit">دخول</button>
-        <button type="button" id="authResend" class="ghost hidden">إعادة إرسال الرمز</button>
+        <button type="submit" id="authSubmit">Sign in</button>
+        <button type="button" id="authResend" class="ghost hidden">Resend code</button>
       </form>
       <nav class="auth-links">
-        <a href="/login">دخول</a>
-        <a href="/signup">إنشاء حساب</a>
-        <a href="/forgot">نسيت كلمة المرور</a>
-        <a href="/verify">تأكيد البريد</a>
+        <a href="/login">Sign in</a>
+        <a href="/signup">Create account</a>
+        <a href="/forgot">Forgot password</a>
+        <a href="/verify">Confirm email</a>
       </nav>
     </main>
     <script type="module" src="/auth.js"></script>

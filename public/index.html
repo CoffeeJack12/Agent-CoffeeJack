@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -16,28 +16,28 @@
         ></a
       >
       <button id="newChat" class="new-chat">
-        <span>＋</span> <span data-i18n="nav.newChat">محادثة جديدة</span> <kbd data-i18n="nav.newChatShortcut">Ctrl K</kbd>
+        <span>＋</span> <span data-i18n="nav.newChat">New chat</span> <kbd data-i18n="nav.newChatShortcut">Ctrl K</kbd>
       </button>
-      <div class="nav-label" data-i18n="nav.workspace">مساحتك</div>
+      <div class="nav-label" data-i18n="nav.workspace">Your space</div>
       <nav>
         <button class="nav active" data-view="chat">
-          <span>◌</span> <span data-i18n="nav.chat">المحادثة</span></button
-        ><button class="nav" data-view="memory"><span>◇</span> <span data-i18n="nav.memory">الذاكرة</span></button
+          <span>◌</span> <span data-i18n="nav.chat">Chat</span></button
+        ><button class="nav" data-view="memory"><span>◇</span> <span data-i18n="nav.memory">Memory</span></button
         ><button class="nav" data-view="activity">
-          <span>≋</span> <span data-i18n="nav.activity">سجل التنفيذ</span></button
+          <span>≋</span> <span data-i18n="nav.activity">Activity log</span></button
         ><button class="nav" data-view="persona">
-          <span>✦</span> <span data-i18n="nav.persona">شخصية Jack</span></button
+          <span>✦</span> <span data-i18n="nav.persona">Jack persona</span></button
         ><button class="nav" data-view="settings">
-          <span>⚙</span> <span data-i18n="nav.settings">الإعدادات</span>
+          <span>⚙</span> <span data-i18n="nav.settings">Settings</span>
         </button>
       </nav>
-      <div class="nav-label history-label" data-i18n="nav.history">المحادثات الأخيرة</div>
+      <div class="nav-label history-label" data-i18n="nav.history">Recent chats</div>
       <input
         id="historySearch"
         class="history-search"
-        placeholder="ابحث في محادثاتك…"
+        placeholder="Search your chats…"
         data-i18n-placeholder="chat.searchPlaceholder"
-        aria-label="البحث في المحادثات"
+        aria-label="Search chats"
         data-i18n-aria="chat.searchAria"
       />
       <div id="history" class="history"></div>
@@ -45,17 +45,17 @@
         <div class="private">
           <i></i>
           <div>
-            <span data-i18n="sidebar.private.title">على جهازك. لك وحدك.</span><small data-i18n="sidebar.private.detail">الذاكرة والمحادثات تُحفظ محليًا</small>
+            <span data-i18n="sidebar.private.title">On your machine. Yours alone.</span><small data-i18n="sidebar.private.detail">Memory and chats are stored locally</small>
           </div>
         </div>
         <div class="profile">
           <div id="profileAvatar" class="avatar">A</div>
-          <div><span id="profileName">عبدالرحمن</span><small id="profileRole" data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
+          <div><span id="profileName">Abdulrahman</span><small id="profileRole" data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
           <span class="version">v0.2</span>
         </div>
         <div class="auth-account-links">
-          <a href="/login">حساب</a>
-          <button type="button" id="accountLogout" class="ghost">خروج</button>
+          <a href="/login">Account</a>
+          <button type="button" id="accountLogout" class="ghost">Log out</button>
         </div>
       </div>
     </aside>
@@ -63,26 +63,26 @@
       <header>
         <div>
           <span class="eyebrow" data-i18n="header.workspace">JACK WORKSPACE</span>
-          <h1 id="pageTitle">المحادثة</h1>
+          <h1 id="pageTitle">Chat</h1>
         </div>
         <div class="header-actions">
           <button
             id="themeToggle"
             class="ghost theme-toggle"
-            title="تبديل المظهر"
+            title="Toggle theme"
             data-i18n-title="header.themeToggle"
-            aria-label="تبديل المظهر"
+            aria-label="Toggle theme"
             data-i18n-aria="header.themeToggle"
           >
             ☼
           </button>
-          <button id="mobileNew" class="ghost" aria-label="محادثة جديدة" data-i18n-aria="header.newChat">
+          <button id="mobileNew" class="ghost" aria-label="New chat" data-i18n-aria="header.newChat">
             ＋
           </button>
           <span class="connection"
             ><i id="connectionDot"></i
-            ><span id="connectionLabel" data-i18n="connection.connecting">جارٍ الاتصال</span></span
-          ><button id="gaming" class="ghost">♧ <span data-i18n="gaming.mode">وضع الألعاب</span></button>
+            ><span id="connectionLabel" data-i18n="connection.connecting">Connecting…</span></span
+          ><button id="gaming" class="ghost">♧ <span data-i18n="gaming.mode">Gaming mode</span></button>
         </div>
       </header>
       <section id="chatView" class="view chat-view">
@@ -94,42 +94,42 @@
             <span data-jack-slot="icon" data-hero></span>
           </div>
           <div class="presence">
-            <i></i><span id="jackPresence" data-i18n="welcome.presence.here">Jack هنا</span
+            <i></i><span id="jackPresence" data-i18n="welcome.presence.here">Jack is here</span>
             ><span class="presence-separator">·</span
             ><button id="personalityShortcut">هادئ. حاد. جاهز للشغل.</button>
           </div>
-          <h2><span data-i18n="welcome.headline.line1">فكّر أبعد.</span><br /><span data-i18n="welcome.headline.line2">خلّ التنفيذ عليّ.</span></h2>
+          <h2><span data-i18n="welcome.headline.line1">Think bigger.</span><br /><span data-i18n="welcome.headline.line2">Leave execution to me.</span></h2>
           <p>
-            <span data-i18n="welcome.body.line1">أنا Jack. أفحص، أبني، وأتحقق من النتيجة.</span><br /><span data-i18n="welcome.body.line2">عقلك الإضافي. على جهازك. وتحت سيطرتك.</span>
+            <span data-i18n="welcome.body.line1">I'm Jack. I inspect, build, and verify the result.</span><br /><span data-i18n="welcome.body.line2">Your extra mind. On your machine. Under your control.</span>
           </p>
           <div class="suggestions">
             <button
               data-prompt="ابنِ لي صفحة شخصية بسيطة بالعربي داخل مجلد portfolio، ثم اختبرها في المتصفح."
               data-mode="coding"
             >
-              <span class="suggest-icon">⌘</span><strong data-i18n="welcome.suggest.build.title">خلّينا نبني شيء</strong
-              ><small data-i18n="welcome.suggest.build.detail">موقع، برنامج، أو فكرة جديدة</small
+              <span class="suggest-icon">⌘</span><strong data-i18n="welcome.suggest.build.title">Let's build something</strong
+              ><small data-i18n="welcome.suggest.build.detail">A site, app, or new idea</small>
               ><span class="arrow">↖</span>
             </button>
             <button
               data-prompt="ابحث على الويب عن آخر أخبار التقنية اليوم، ولخص أهم ثلاثة أخبار مع روابط المصادر."
             >
-              <span class="suggest-icon">◎</span><strong data-i18n="welcome.suggest.search.title">ابحث معي</strong
-              ><small data-i18n="welcome.suggest.search.detail">معلومات أوضح، من مصادرها</small
+              <span class="suggest-icon">◎</span><strong data-i18n="welcome.suggest.search.title">Search with me</strong
+              ><small data-i18n="welcome.suggest.search.detail">Clearer information, from the source</small>
               ><span class="arrow">↖</span>
             </button>
             <button
               data-prompt="يا Jack، أعطني تعليقًا طريفًا عن التسويف، وبعدها ساعدني أبدأ بمهمة واحدة صغيرة."
             >
-              <span class="suggest-icon">✦</span><strong data-i18n="welcome.suggest.mood.title">غيّر جوّي</strong
-              ><small data-i18n="welcome.suggest.mood.detail">شوية خفة دم، وبداية أخف</small
+              <span class="suggest-icon">✦</span><strong data-i18n="welcome.suggest.mood.title">Change the mood</strong
+              ><small data-i18n="welcome.suggest.mood.detail">A little humor, a lighter start</small>
               ><span class="arrow">↖</span>
             </button>
           </div>
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
         <button id="jumpBottom" class="ghost jump-bottom hidden">
-          <span data-i18n="composer.jumpBottom">↓ آخر رد</span>
+          <span data-i18n="composer.jumpBottom">↓ Latest reply</span>
         </button>
         <div id="approval" class="approval hidden"></div>
         <div class="composer-area">
@@ -214,36 +214,36 @@
         <div class="persona-heading">
           <div>
           <span class="eyebrow" data-i18n="persona.eyebrow">MEET THE MIND BEHIND THE MUG</span>
-            <h2><span data-i18n="persona.title.line1">شخصية ثابتة.</span><br /><span data-i18n="persona.title.line2">بطريقتك أنت.</span></h2>
-            <p data-i18n="persona.intro">ذكي، حاد، وعملي. مزح أسود لما يناسب، ونتائج بدون تمثيل.</p>
+            <h2><span data-i18n="persona.title.line1">A steady persona.</span><br /><span data-i18n="persona.title.line2">Your way.</span></h2>
+            <p data-i18n="persona.intro">Sharp, practical, and grounded. Dark humor when it fits — results without theatrics.</p>
           </div>
           <div class="persona-avatar" aria-hidden="true">
             <span data-jack-slot="avatar"></span><span>✦</span>
           </div>
         </div>
-        <div class="persona-tabs" role="group" aria-label="أنماط الشخصية">
+        <div class="persona-tabs" role="group" aria-label="Persona presets">
           <button type="button" data-persona-preset="playful" class="preset" data-i18n="persona.preset.playful">
-            ☕ رفيق القهوة</button
+            ☕ Coffee companion</button
           ><button type="button" data-persona-preset="focused" class="preset" data-i18n="persona.preset.focused">
-            ⌘ وقت التركيز</button
+            ⌘ Focus time</button
           ><button type="button" data-persona-preset="calm" class="preset" data-i18n="persona.preset.calm">
-            ◌ على رواق
+            ◌ Easygoing
           </button>
         </div>
         <form id="personaForm" class="persona-layout">
           <div class="setting-card persona-controls">
-            <h3>طريقة الكلام</h3>
+            <h3>Way of speaking</h3>
             <label
-              ><span data-i18n="persona.replyLanguage">لغة الرد</span><div id="personaLanguageHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.replyLanguage">Reply language</span><div id="personaLanguageHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="persona.dialect">العربية اللي تريحك</span><div id="personaDialectHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.dialect">Arabic style</span><div id="personaDialectHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="persona.humor">جرعة خفة الدم</span><div id="personaHumorHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.humor">Humor level</span><div id="personaHumorHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="persona.detail">طول الرد</span><div id="personaDetailHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.detail">Reply length</span><div id="personaDetailHost" class="dropdown-host"></div></label
             >
             <div class="settings-footer">
-              <button class="primary">حفظ شخصية Jack</button
+              <button class="primary">Save Jack persona</button>
               ><span id="personaMessage" role="status"></span>
             </div>
           </div>

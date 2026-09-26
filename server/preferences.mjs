@@ -62,7 +62,7 @@ export const MODES = {
 export const MEMORY_BEHAVIORS = ["auto", "ask", "off"];
 export const DEFAULT_PREFERENCES = {
   language: "auto",
-  appLanguage: "auto",
+  appLanguage: "en",
   address: "master",
   customAddress: "",
   name: "Abdulrahman",
@@ -176,6 +176,9 @@ export function getPreferences(store, profileId = "owner") {
   const next = { ...migrated, ...saved, mode: migrateMode(saved.mode ?? migrated.mode) };
   if (saved.mode === "jarvis")
     store.saveProfilePreferences(key, { ...next, mode: "auto" });
+  // English is the default UI language. Treat missing/auto as English at read
+  // time only — do not write existing profile rows (no live DB migration).
+  if (!next.appLanguage || next.appLanguage === "auto") next.appLanguage = "en";
   return next;
 }
 

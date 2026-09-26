@@ -27,7 +27,7 @@ const state = {
   attachments: [],
   status: null,
   view: "chat",
-  locale: "ar",
+  locale: "en",
   currentMode: "auto",
   taskMode: "auto",
   requestedModel: "auto",
@@ -51,7 +51,7 @@ function modeOptions() {
     secret_agent: {},
   }).map((value) => ({ value, label: tr(`mode.${value}.label`) }));
 }
-function applyAppLanguage(appLanguage = "auto") {
+function applyAppLanguage(appLanguage = "en") {
   const locale = resolveAppLocale(appLanguage);
   state.locale = locale.lang;
   applyDocumentLocale(locale);
@@ -378,7 +378,7 @@ async function refreshStatus() {
         return;
       }
     }
-    applyAppLanguage(status.preferences?.appLanguage ?? "auto");
+    applyAppLanguage(status.preferences?.appLanguage ?? "en");
     if (!state.modeInitialized) {
       state.currentMode = status.preferences?.mode ?? "auto";
       state.taskMode = "auto";
@@ -1980,6 +1980,7 @@ $("#accountLogout")?.addEventListener("click", async () => {
   }
 });
 
+applyAppLanguage("en");
 await refreshStatus();
 if (!publicLoginRedirect) {
   await loadPreferences().catch(report);

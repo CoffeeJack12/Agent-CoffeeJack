@@ -46,6 +46,8 @@ import {
   semanticArabicFallback,
 } from "./jeddawi-semantics.mjs";
 import { speakerHonorific } from "./speaker-persona.mjs";
+import { isPureGreeting, greetingDeterministicReply } from "./greeting.mjs";
+import { accountBoundSpeaker, privilegedHonorific } from "./account-personas.mjs";
 
 export async function runAgent({
   store,
@@ -73,6 +75,17 @@ export async function runAgent({
 }) {
   scrubStoredCapabilityClaims(store);
   const profileId = userId || user?.id || "owner";
+  if (isPureGreeting(text)) {
+    const reply = greetingDeterministicReply({ user, text, store });
+    const speakerPersona = accountBoundSpeaker(user, store);
+    const previousState = store.taskState(chatId) || {};
+    store.saveTaskState(chatId, { ...previousState, speakerPersona });
+    store.message(chatId, "user", text);
+    store.message(chatId, "assistant", reply);
+    emit({ type: "token", text: reply });
+    emit({ type: "done", tokens: 0 });
+    return;
+  }
   const basePreferences = getPreferences(store, profileId);
   const fastPath = turnPolicy?.fastPath === true;
   const priorityLane = turnPolicy?.priorityLane || "normal";
@@ -196,6 +209,7 @@ export async function runAgent({
       turnPolicy?.personaKind || "who_master",
       taskState.speakerPersona,
       text,
+      store,
     );
     if (canned) {
       store.message(chatId, "user", text);
@@ -248,9 +262,10 @@ export async function runAgent({
   const persona = getPersona(store, profileId);
   const initialContext = stateContext(taskState);
   const speakerTitle =
-    speakerHonorific(taskState.speakerPersona) ||
-    addressTitle(preferences) ||
-    "Master";
+    privilegedHonorific(user, store) ||
+    speakerHonorific(taskState.speakerPersona, user, store) ||
+    (user?.role === "owner" ? addressTitle(preferences) || "Master" : "") ||
+    "";
   const ownerIdentity =
     user?.role === "owner"
       ? `Authenticated Owner/Master this session: ${user.display_name || user.name || "Abdulrahman"} (role=owner). Owner-directed: execute supported read-only/reversible work; for consequential work, state the exact consequence and wait for explicit Owner approval. Do not substitute your preferences.`

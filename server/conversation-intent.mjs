@@ -29,6 +29,7 @@ import {
   applySpeakerPersonaClaim,
   formatSpeakerPersonaPrompt,
 } from "./speaker-persona.mjs";
+import { isPureGreeting } from "./greeting.mjs";
 
 const CONFIRM =
   /^(?:y(?:eah|ep|ea|up|a)?|yes|sure|ok(?:ay)?|alright|right|correct|affirmative|do it|go ahead|proceed|please do|go for it|sounds good|that(?:'s| is) fine|نعم|ايوه|أيوه|أيوا|ايوا|يب|تمام|اوك|أوك|موافق|نفّذ|نفذ|سويه|سوّيه|يلا|امش|يمشي)[.!؟\s]*$/iu;
@@ -62,7 +63,7 @@ const WHY_HOW =
   /^(?:why\??|how\??|what about that\??|اش رايك\??|إيش رأيك\??|ليش\??|كيف\??)[.!؟\s]*$/iu;
 
 const GREETING =
-  /^(?:hi|hello|hey|yo|thanks|thank you|thx|ty|good\s*morning|good\s*afternoon|good\s*evening|how are you(?: doing)?|what's up|sup|مرحبا|هلا|السلام عليكم|صباح الخير|مساء الخير|كيفك|كيف حالك|شكرا|شكراً)[.!؟\s]*$/iu;
+  /^(?:hi|hello|hey(?:\s+jack)?|yo|thanks|thank you|thx|ty|good\s*morning|good\s*afternoon|good\s*evening|how are you(?: doing)?|what's up|sup|مرحبا|هلا|هاي|السلام عليكم|صباح الخير|مساء الخير|كيفك|كيف حالك|شكرا|شكراً)[.!؟\s]*$/iu;
 
 const EXPLICIT_REMEMBER =
   /\b(?:remember (?:this|that|it)|save (?:this|that)|store (?:this|that)|don't forget|تذك[كر]|احفظ|خزّن|خزن)\b/i;
@@ -373,7 +374,7 @@ export function classifyConversationIntent(text = "", { history = [] } = {}) {
 /**
  * Full pre-routing resolution: effective intent + tool/memory/evidence policy.
  * @param {string} rawText
- * @param {{ history?: any[], user?: object, previousStyle?: object, previousTopic?: string|null }} [options]
+ * @param {{ history?: any[], user?: object, previousStyle?: object, previousTopic?: string|null, store?: object|null }} [options]
  */
 export function resolveTurnContext(
   rawText = "",
@@ -383,6 +384,7 @@ export function resolveTurnContext(
     previousStyle = null,
     previousTopic = null,
     previousSpeakerPersona = null,
+    store = null,
   } = {},
 ) {
   const trimmed = String(rawText || "").trim();
@@ -397,6 +399,7 @@ export function resolveTurnContext(
     previousSpeakerPersona,
     trimmed,
     user,
+    store,
   );
   const speakerPrompt = formatSpeakerPersonaPrompt(speakerPersona, styleAfter);
 
@@ -443,6 +446,7 @@ export function resolveTurnContext(
       semantic,
       canonicalTopic,
       speakerPersona,
+      instantGreeting: isPureGreeting(trimmed),
     };
   }
 
@@ -504,6 +508,7 @@ export function resolveTurnContext(
       semantic,
       canonicalTopic,
       speakerPersona,
+      instantGreeting: isPureGreeting(trimmed),
     };
   }
 
@@ -534,9 +539,10 @@ export function resolveTurnContext(
   const trivial =
     classified.intent === "greeting" ||
     (trimmed.length <= 64 &&
-      /^(?:hi|hello|hey|yo|thanks|thank you|thx|ty|ok|okay|yea|yeah|yes|sure|continue|good\s*morning|good\s*afternoon|good\s*evening|how are you(?: doing)?|what's up|sup|the second(?: one)?|مرحبا|هلا|شكرا|شكراً|نعم|ايوه|تمام|اوك|كمل|الثاني|صباح الخير|مساء الخير|كيفك)[.!؟\s]*$/iu.test(
+      /^(?:hi|hello|hey(?:\s+jack)?|yo|thanks|thank you|thx|ty|ok|okay|yea|yeah|yes|sure|continue|good\s*morning|good\s*afternoon|good\s*evening|how are you(?: doing)?|what's up|sup|the second(?: one)?|مرحبا|هلا|هاي|السلام عليكم|شكرا|شكراً|نعم|ايوه|تمام|اوك|كمل|الثاني|صباح الخير|مساء الخير|كيفك)[.!؟\s]*$/iu.test(
         trimmed,
-      ));
+      ) ||
+      isPureGreeting(trimmed));
 
   const fastPath =
     trivial ||
@@ -604,6 +610,7 @@ export function resolveTurnContext(
     semantic,
     canonicalTopic,
     speakerPersona,
+    instantGreeting: isPureGreeting(trimmed),
   };
 }
 

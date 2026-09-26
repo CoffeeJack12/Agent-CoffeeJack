@@ -847,10 +847,6 @@ export const dictionaries = {
 /** @param {'auto'|'en'|'ar'} appLanguage */
 export function resolveAppLocale(appLanguage) {
   if (appLanguage === "ar") return { lang: "ar", dir: "rtl" };
-  if (appLanguage === "en") return { lang: "en", dir: "ltr" };
-  const nav =
-    (typeof navigator !== "undefined" && navigator.language) || "en";
-  if (/^ar/i.test(nav)) return { lang: "ar", dir: "rtl" };
   return { lang: "en", dir: "ltr" };
 }
 
