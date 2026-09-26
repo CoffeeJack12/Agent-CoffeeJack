@@ -21,6 +21,27 @@ const GOOGLE_MODELS = [
     "free",
     "fast",
   ),
+  model(
+    "gemini-3.7-flash",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
+  model(
+    "gemini-3.6-flash",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
+  model(
+    "gemini-flash-latest",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
 ];
 
 function model(id, capabilities, contextLength, costTier, speedTier) {

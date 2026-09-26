@@ -1,6 +1,11 @@
 import { sanitizeForRemote } from "./privacy.mjs";
 
-const DEFAULT_GOOGLE_MODEL = "gemini-3.8-flash";
+const DEFAULT_GOOGLE_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-flash-latest",
+];
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const MAX_FIELD_CHARS = 6000;
 
@@ -39,7 +44,7 @@ function preferredModel(registry, providerId, explicitModel = "") {
     return models.find((entry) => entry.id === explicitModel) || null;
   }
   const preferred =
-    providerId === "google" ? DEFAULT_GOOGLE_MODEL : DEFAULT_GROQ_MODEL;
+    providerId === "google" ? DEFAULT_GOOGLE_MODELS[0] : DEFAULT_GROQ_MODEL;
   if (providerId === "groq") {
     return (
       models.find((entry) => entry.id === preferred) ||
@@ -60,6 +65,14 @@ function candidateProviders(registry) {
   for (const providerId of order) {
     if (!["google", "groq"].includes(providerId)) continue;
     if (!providerEnabled(registry, providerId)) continue;
+    if (providerId === "google" && !explicitModel) {
+      const models = providerModels(registry, providerId);
+      for (const modelId of DEFAULT_GOOGLE_MODELS) {
+        const model = models.find((entry) => entry.id === modelId);
+        if (model) out.push({ providerId, modelId: model.id });
+      }
+      continue;
+    }
     const model = preferredModel(registry, providerId, explicitModel);
     if (!model) continue;
     out.push({ providerId, modelId: model.id });

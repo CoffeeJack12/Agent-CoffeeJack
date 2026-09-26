@@ -83,3 +83,38 @@ test("consultExpert falls back from Gemini to Groq", async () => {
   assert.equal(registry.calls[0].providerId, "google");
   assert.equal(registry.calls[1].providerId, "groq");
 });
+
+
+test("consultExpert falls back across Gemini Flash models", async () => {
+  const calls = [];
+  const registry = {
+    refresh: async () => {},
+    getProvider(id) {
+      return id === "google" ? { id, enabled: true } : null;
+    },
+    listModels() {
+      return [
+        { provider: "google", id: "gemini-3.8-flash" },
+        { provider: "google", id: "gemini-3.7-flash" },
+        { provider: "google", id: "gemini-3.6-flash" },
+        { provider: "google", id: "gemini-flash-latest" },
+      ];
+    },
+    async chat(args) {
+      calls.push(args.modelId);
+      if (args.modelId === "gemini-3.8-flash")
+        throw new Error("503 high demand");
+      return { content: "fallback-ok" };
+    },
+  };
+
+  const result = await consultExpert({
+    registry,
+    task: "Need a second opinion",
+    question: "What next?",
+  });
+
+  assert.equal(result.provider, "google");
+  assert.equal(result.model, "gemini-3.7-flash");
+  assert.deepEqual(calls, ["gemini-3.8-flash", "gemini-3.7-flash"]);
+});
