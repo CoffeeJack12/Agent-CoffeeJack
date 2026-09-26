@@ -2,6 +2,8 @@
  * Local vs remote trust classification.
  * Never trust X-Forwarded-* / spoofed Host / CF email headers as proof of locality.
  * A Cloudflare Tunnel hop that reaches 127.0.0.1 must not become "local owner".
+ * Direct loopback is still classified local for Origin/cookie rules, but it
+ * never auto-signs in the Owner — every browser session needs CoffeeJack auth.
  */
 
 export function hasCloudflareForwardingMarkers(req) {
@@ -35,12 +37,14 @@ export function classifyRequest(
     accessHostname &&
     hostname === String(accessHostname).trim().toLowerCase();
 
-  // Configured public hostname is always remote — never local bootstrap.
+  // Configured public hostname is always remote — never treat as loopback.
   if (configured) {
     return { mode: "remote", reason: "configured_hostname", loopbackHost };
   }
 
-  // Tunnel/proxy markers on loopback: fail into remote path (JWT required).
+  // Tunnel/proxy markers on loopback: fail into remote path.
+  // Only when remote auth is configured — local-only spoofed CF headers
+  // must not flip classification.
   if (loopbackHost && accessConfigured && hasCloudflareForwardingMarkers(req)) {
     return {
       mode: "remote",
@@ -49,7 +53,8 @@ export function classifyRequest(
     };
   }
 
-  // Direct browser on loopback without CF markers → local owner bootstrap OK.
+  // Direct browser on loopback without CF markers → local origin/cookie rules.
+  // Authentication still requires an explicit CoffeeJack session.
   if (loopbackHost) {
     return { mode: "local", reason: "direct_loopback", loopbackHost };
   }

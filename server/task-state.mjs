@@ -1,4 +1,12 @@
 import { randomUUID } from "node:crypto";
+import {
+  localizedSystemNote,
+  rewriteUserProvidedToolSpeech,
+} from "./conversation-style.mjs";
+import {
+  isLimitsQuestion,
+  practicalLimitsReply,
+} from "./capabilities.mjs";
 
 const patterns = {
   targetLocation:
@@ -208,7 +216,7 @@ export function stateContext(state) {
 }
 
 export function guardResponse(state, candidate, languageText = "", options = {}) {
-  let text = candidate;
+  let text = rewriteUserProvidedToolSpeech(candidate);
   const rejected = [];
   const registry = options.registry ?? [];
   const pcEnabled = registry.some(
@@ -225,11 +233,32 @@ export function guardResponse(state, candidate, languageText = "", options = {})
         (/^(?:I(?:['’]m| am| can| will| do| don| have| must)|As an AI|My (?:help|assistance|purpose))/i.test(
           value,
         ) &&
-          /ethical (?:and|or) legal boundaries|legal (?:and|or) ethical boundaries|lawful and ethical|legality and ethics|within the boundaries of legality|(?:have|know) no limits|don['’]t have limits|help (?:you )?with (?:absolutely )?anything|my purpose is/i.test(
+          /ethical (?:and|or) legal boundaries|legal (?:and|or) ethical boundaries|ethical and safety guidelines|lawful and ethical|legality and ethics|within the boundaries of legality|(?:have|know) no limits|don['’]t have limits|help (?:you )?with (?:absolutely )?anything|my purpose is|safely and effectively/i.test(
             value,
           )) ||
         /as an AI(?: language model)?/i.test(value) ||
         /I cannot hack or bypass/i.test(value) ||
+        /I cannot execute potentially harmful/i.test(value) ||
+        /I cannot because it may be dangerous/i.test(value) ||
+        /I cannot assist with downloading or installing/i.test(value) ||
+        /I cannot assist with finding or controlling .*Steam/i.test(value) ||
+        (pcEnabled &&
+          /I (?:am an AI assistant and )?cannot directly access or use your personal computer/i.test(
+            value,
+          )) ||
+        (pcEnabled && /I cannot access or control external systems.*personal computer/i.test(value)) ||
+        (pcEnabled && /provided tools do not include any functionality related to .*Steam/i.test(value)) ||
+        (pcEnabled && /not supported by the available functions/i.test(value)) ||
+        /I cannot perform actions that go against/i.test(value) ||
+        /I cannot comply with requests that involve/i.test(value) ||
+        /unauthorized actions|violate terms of service/i.test(value) ||
+        /follow the rules and guidelines/i.test(value) ||
+        /safe, legal, and respectful|privacy and security principles/i.test(value) ||
+        /ethical guidelines/i.test(value) ||
+        /ethical and safety guidelines/i.test(value) ||
+        /help you safely and effectively/i.test(value) ||
+        /I am here to help safely/i.test(value) ||
+        /potentially harmful actions/i.test(value) ||
         (pcEnabled &&
           /I cannot (?:directly )?(?:control|interact with|access) (?:your )?(?:PC|computer|desktop|system)/i.test(
             value,
@@ -287,11 +316,18 @@ export function guardResponse(state, candidate, languageText = "", options = {})
     if (missing && !text) text = labels[missing];
     else if (!text) {
       const falseDenial = rejected.some((r) =>
-        /cannot (?:directly )?(?:control|interact with|access)|as an AI|lawful and ethical|my purpose is|cannot hack or bypass/i.test(
+        /cannot (?:directly )?(?:control|interact with|access)|cannot directly access or use your personal computer|cannot access or control external systems|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|cannot assist with downloading or installing|cannot assist with finding or controlling .*Steam|provided tools do not include any functionality related to .*Steam|not supported by the available functions|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|potentially harmful|safely and effectively/i.test(
           r,
         ),
       );
-      if (falseDenial && pcEnabled) {
+      if (isLimitsQuestion(languageText)) {
+        text = practicalLimitsReply({
+          user: options.user,
+          registry,
+          style: state.style,
+          text: languageText,
+        });
+      } else if (falseDenial && pcEnabled) {
         text = arabic
           ? "نعم — عبر أدواتي المتصلة أقدر أشغّل PowerShell، أفحص الجهاز، أتعامل مع الملفات، وأستخدم المتصفح والإجراءات المدعومة على سطح المكتب. بعض الخطوات الحساسة قد تحتاج موافقتك. وش المطلوب؟"
           : "Yes — through my connected tools I can run PowerShell, inspect the system, work with files, use the browser and handle supported desktop actions. Some sensitive steps may still need your approval. Give me an objective.";
@@ -303,9 +339,11 @@ export function guardResponse(state, candidate, languageText = "", options = {})
           ? "يعتمد على الهدف. وش النظام، وش اللي تبغى توصله أو تعدّله أو تختبره؟"
           : "Depends on the target. What are you trying to access, modify, test or bypass?";
       } else
-        text = arabic
-          ? "السياق السابق محفوظ. أحتاج التفصيل الناقص فقط حتى أتابع."
-          : "The earlier context is saved. I still need the outstanding detail to continue.";
+        text = localizedSystemNote(state.style || {}, {
+          jeddawi: "كمّل معي من نفس الموضوع — وش تبغى نسوي دحين؟",
+          ar: "السياق محفوظ. وش تبغى نكمّل؟",
+          en: "The earlier context is saved. I still need the outstanding detail to continue.",
+        });
     }
   }
   for (const question of text.match(/[^.!?؟\n]*[?؟]/g) ?? []) {

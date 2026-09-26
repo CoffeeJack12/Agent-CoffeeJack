@@ -36,15 +36,15 @@ test('language, title and mode preferences reach authoritative runtime context',
 });
 test('Hacker defaults include investigation tools; Empathy blocks unsolicited computer tools even with custom packs',()=>{
  const hacker=capabilityPolicy({...DEFAULT_PREFERENCES,mode:'hacker'});
- for(const name of ['terminal','research','read_file','git_diff','desktop','inspect_pc','search_code'])assert.ok(hacker.allows(name),name);
+ for(const name of ['terminal','research','read_file','git_diff','desktop','inspect_pc','search_code','security_binary_inspect','security_strings','security_hash','security_yara_scan','security_process_inspect','security_network_snapshot','security_disassemble','security_decompile','security_packet_capture','security_firewall_inspect','security_port_test','security_tls_inspect','security_lab'])assert.ok(hacker.allows(name),name);
  const empathy={...DEFAULT_PREFERENCES,mode:'empathy',capabilities:MODES.hacker.packs};
  assert.equal(capabilityPolicy(empathy,'today was exhausting').allows('terminal'),false);
  assert.equal(capabilityPolicy(empathy,'inspect the network').allows('inspect_pc'),true);
  assert.equal(capabilityPolicy({...DEFAULT_PREFERENCES,capabilities:['developer']}).allows('run_tests'),false);
 });
-async function agentFixture(t,prefs,answers,text='hello'){
+async function agentFixture(t,prefs,answers,text='summarize the workspace files'){
  const {store,dir}=await fixture(t);savePreferences(store,prefs);const chatId=store.createChat('upgrade').id;let n=0,executed=0,output='',prompts=[];
- await runAgent({store,chatId,text,model:'test',signal:new AbortController().signal,emit:e=>{if(e.type==='token')output+=e.text;},tools:{workspace:dir,execute:async()=>{executed++;return {code:0};}},ollama:{chat:async request=>{prompts.push(structuredClone(request.messages));const answer=answers[Math.min(n++,answers.length-1)];if(answer.content)request.onToken(answer.content);return structuredClone({role:'assistant',...answer});}}});
+ await runAgent({store,chatId,text,model:'test',signal:new AbortController().signal,emit:e=>{if(e.type==='token')output+=e.text;if(e.type==='revise')output=e.text||'';},tools:{workspace:dir,execute:async()=>{executed++;return {code:0};}},ollama:{chat:async request=>{prompts.push(structuredClone(request.messages));const answer=answers[Math.min(n++,answers.length-1)];if(answer.content)request.onToken(answer.content);return structuredClone({role:'assistant',...answer});}}});
  return {store,chatId,n,executed,output,prompts};
 }
 test('disabled tools cannot execute even when a model invents their calls',async t=>{

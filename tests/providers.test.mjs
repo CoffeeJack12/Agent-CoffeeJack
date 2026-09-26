@@ -65,8 +65,8 @@ test("createDefaultRegistry includes remote adapters without requiring keys", ()
   const registry = createDefaultRegistry(fakeOllama());
   const ids = registry.listProviders().map((p) => p.id);
   assert.deepEqual(
-    ids.filter((id) => ["ollama", "openai", "anthropic", "google"].includes(id)).sort(),
-    ["anthropic", "google", "ollama", "openai"],
+    ids.filter((id) => ["ollama", "openai", "anthropic", "google", "groq"].includes(id)).sort(),
+    ["anthropic", "google", "groq", "ollama", "openai"],
   );
   assert.equal(registry.getProvider("openai").enabled, false);
 });

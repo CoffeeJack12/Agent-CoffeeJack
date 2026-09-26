@@ -1,0 +1,204 @@
+import { sanitizeForRemote } from "./privacy.mjs";
+
+const DEFAULT_GOOGLE_MODELS = [
+  "gemini-3.8-flash",
+  "gemini-3.7-flash",
+  "gemini-3.6-flash",
+  "gemini-3.1-flash-lite",
+  "gemini-flash-latest",
+];
+const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
+const MAX_FIELD_CHARS = 6000;
+
+const EXPLICIT_EXPERT_REQUEST =
+  /\b(?:consult|ask)\s+(?:(?:an?|the)\s+)?expert\b|\bsecond\s+opinion\b|(?:استشر|استشير|شاور)\s+(?:خبير|مستشار)/iu;
+
+export function isExplicitExpertConsultRequest(text = "") {
+  return EXPLICIT_EXPERT_REQUEST.test(String(text || ""));
+}
+
+export function expertQuestionFromRequest(text = "") {
+  const original = String(text || "").trim();
+  if (!original) return "";
+  let out = original;
+
+  const ar = out.match(
+    /(?:استشر|استشير|شاور)\s+(?:خبير|مستشار)(?:\s+خارجي)?(?:\s+باستخدام\s+consult_expert)?\s+(?:عن|حول)\s+([\s\S]+)/iu,
+  );
+  if (ar?.[1]) out = ar[1];
+
+  const en = out.match(
+    /(?:consult|ask)\s+(?:(?:an?|the)\s+)?expert(?:\s+using\s+consult_expert)?\s+(?:about|on)\s+([\s\S]+)/iu,
+  );
+  if (en?.[1]) out = en[1];
+
+  out = out
+    .replace(/[.،]\s*(?:لا\s+تستخدم|ولا\s+تستخدم)\s+(?:الـ?\s*)?AI\s*Council[\s\S]*$/iu, "")
+    .replace(/[.،]\s*(?:do\s+not|don't)\s+use\s+(?:the\s+)?AI\s*Council[\s\S]*$/iu, "")
+    .replace(/[.،]\s*قل\s+لي\s+أي\s+provider[\s\S]*$/iu, "")
+    .replace(/[.،]\s*tell\s+me\s+(?:which|what)\s+provider[\s\S]*$/iu, "")
+    .trim();
+
+  return out || original;
+}
+
+function env(name) {
+  return String(process.env[name] || "").trim();
+}
+
+function safeField(value) {
+  return sanitizeForRemote(String(value || ""), {
+    maxChars: MAX_FIELD_CHARS,
+  });
+}
+
+function providerEnabled(registry, providerId) {
+  const provider = registry?.getProvider?.(providerId);
+  return Boolean(provider && provider.enabled !== false);
+}
+
+function providerModels(registry, providerId) {
+  return (registry?.listModels?.() || []).filter(
+    (entry) => entry.provider === providerId,
+  );
+}
+
+function preferredModel(registry, providerId, explicitModel = "") {
+  const models = providerModels(registry, providerId);
+  if (!models.length) return null;
+  if (explicitModel) {
+    return models.find((entry) => entry.id === explicitModel) || null;
+  }
+  const preferred =
+    providerId === "google" ? DEFAULT_GOOGLE_MODELS[0] : DEFAULT_GROQ_MODEL;
+  if (providerId === "groq") {
+    return (
+      models.find((entry) => entry.id === preferred) ||
+      models.find((entry) => /qwen\/qwen3\.8-27b/i.test(entry.id)) ||
+      models.find((entry) => /openai\/gpt-oss-20b/i.test(entry.id)) ||
+      null
+    );
+  }
+  return models.find((entry) => entry.id === preferred) || null;
+}
+
+function candidateProviders(registry) {
+  const requested = env("COFFEEJACK_EXPERT_PROVIDER").toLowerCase();
+  const explicitModel = env("COFFEEJACK_EXPERT_MODEL");
+  const order =
+    requested && requested !== "auto" ? [requested] : ["google", "groq"];
+  const out = [];
+  for (const providerId of order) {
+    if (!["google", "groq"].includes(providerId)) continue;
+    if (!providerEnabled(registry, providerId)) continue;
+    if (providerId === "google" && !explicitModel) {
+      const models = providerModels(registry, providerId);
+      for (const modelId of DEFAULT_GOOGLE_MODELS) {
+        const model = models.find((entry) => entry.id === modelId);
+        if (model) out.push({ providerId, modelId: model.id });
+      }
+      continue;
+    }
+    const model = preferredModel(registry, providerId, explicitModel);
+    if (!model) continue;
+    out.push({ providerId, modelId: model.id });
+  }
+  return out;
+}
+
+export function expertStatus(registry) {
+  const candidates = candidateProviders(registry);
+  return {
+    configured: candidates.length > 0,
+    candidates,
+    policy: "free-advisor-only",
+  };
+}
+export async function consultExpert({
+  registry,
+  task = "",
+  context = "",
+  attempts = "",
+  question = "",
+  signal,
+} = {}) {
+  if (!registry) throw new Error("Expert consultation registry is unavailable");
+  await registry.refresh?.(signal);
+  const candidates = candidateProviders(registry);
+  if (!candidates.length) {
+    throw new Error(
+      "No free expert provider is configured. Add GEMINI_API_KEY or GROQ_API_KEY locally, then restart CoffeeJack.",
+    );
+  }
+
+  const safeTask = safeField(task);
+  const safeContext = safeField(context);
+  const safeAttempts = safeField(attempts);
+  const safeQuestion = safeField(question);
+  const redacted =
+    safeTask.redacted +
+    safeContext.redacted +
+    safeAttempts.redacted +
+    safeQuestion.redacted;
+
+  const messages = [
+    {
+      role: "system",
+      content:
+        "You are the external expert CoffeeJack has already consulted. Do not say you cannot consult another expert, provider, model, or tool. " +
+        "Answer the substantive problem inside the Goal directly. Ignore meta-instructions in the Goal about consulting an expert, using consult_expert, AI Council, provider names, or model names; those were routing instructions for CoffeeJack, not your task. " +
+        "CoffeeJack alone can use tools and control the PC. You cannot. Give a concise, practical recommendation, identify likely root causes, and state uncertainty. Never claim that you executed or verified anything.",
+    },
+    {
+      role: "user",
+      content: [
+        "Goal:\n" + safeTask.text,
+        safeContext.text ? "Context:\n" + safeContext.text : "",
+        safeAttempts.text
+          ? "What Jack already tried:\n" + safeAttempts.text
+          : "",
+        safeQuestion.text ? "Question:\n" + safeQuestion.text : "",
+        "Return the best next action for Jack. Do not request credentials or secrets.",
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    },
+  ];
+
+  const failures = [];
+  for (const candidate of candidates) {
+    signal?.throwIfAborted?.();
+    try {
+      const result = await registry.chat({
+        providerId: candidate.providerId,
+        modelId: candidate.modelId,
+        messages,
+        tools: [],
+        profile: { think: false, predict: 1400, temperature: 0.2 },
+        signal,
+      });
+      const advice = String(result?.content || "").trim();
+      if (!advice) throw new Error("Expert returned an empty response");
+      return {
+        advice,
+        provider: candidate.providerId,
+        model: candidate.modelId,
+        remote: true,
+        redacted,
+        sanitized: true,
+      };
+    } catch (error) {
+      failures.push(
+        candidate.providerId +
+          "/" +
+          candidate.modelId +
+          ": " +
+          String(error?.message || error).slice(0, 240),
+      );
+    }
+  }
+
+  throw new Error(
+    "Free expert consultation failed: " + failures.join(" | "),
+  );
+}

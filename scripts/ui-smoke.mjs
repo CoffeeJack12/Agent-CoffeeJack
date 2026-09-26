@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { chromium } from "playwright";
 import { createApp } from "../server/index.mjs";
+import { createSession, resolveLocalOwner } from "../server/users.mjs";
 
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), "jack-ui-"));
 const model = {
@@ -36,19 +37,30 @@ const model = {
 const app = await createApp({ dataDirectory: directory, ollama: model });
 app.store.set("autoGaming", false);
 app.store.set("model", "test");
+const owner = resolveLocalOwner(app.store);
+const session = createSession(app.store, owner.id, { source: "local" });
 await new Promise((resolve) => app.server.listen(0, "127.0.0.1", resolve));
 let browser;
 try {
   browser = await chromium.launch({ headless: true });
+  const origin = `http://127.0.0.1:${app.server.address().port}`;
   const context = await browser.newContext({
     viewport: { width: 1440, height: 1000 },
     permissions: ["clipboard-read", "clipboard-write"],
-    locale: "ar-SA",
+    locale: "en-US",
   });
+  await context.addCookies([
+    {
+      name: "coffeejack_session",
+      value: session.token,
+      url: origin,
+      httpOnly: true,
+    },
+  ]);
   const page = await context.newPage();
   const errors = [];
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.goto(`http://127.0.0.1:${app.server.address().port}`);
+  await page.goto(origin);
   await page
     .waitForFunction(
       () =>
@@ -65,7 +77,8 @@ try {
           (await page.locator("#notice").textContent()),
       );
     });
-  assert.equal(await page.locator("html").getAttribute("dir"), "rtl");
+  assert.equal(await page.locator("html").getAttribute("lang"), "en");
+  assert.equal(await page.locator("html").getAttribute("dir"), "ltr");
   assert.equal(await page.locator(".jack-placeholder").innerText(), "J");
   const capture = async (name) => {
     if (!process.argv[2]) return;
@@ -91,16 +104,17 @@ try {
   }
   await page.setViewportSize({ width: 1440, height: 1000 });
   const prompt = page.locator("#prompt");
-  await prompt.fill("hello");
+  const markdownSample = "Show a verified markdown sample";
+  await prompt.fill(markdownSample);
   await prompt.press("Shift+Enter");
-  assert.equal(await prompt.inputValue(), "hello\n");
+  assert.equal(await prompt.inputValue(), markdownSample + "\n");
   assert.equal(await page.locator(".message.user").count(), 0);
   await prompt.press("Enter");
   await page.locator(".message-content strong").waitFor();
   await page.locator("#stop").waitFor({ state: "hidden" });
   assert.equal(await page.locator(".message.user .message-head").count(),0);
   assert.equal(await page.locator(".message.assistant .jack-brand").count(),1);
-  assert.equal(await page.locator(".message.user").innerText(),"hello");
+  assert.equal(await page.locator(".message.user").innerText(), markdownSample);
   assert.ok(await page.locator(".message.user").evaluate(el=>el.getBoundingClientRect().width<el.parentElement.getBoundingClientRect().width*.85));
   await capture("conversation");
   assert.equal(await page.locator(".copy-code").count(), 1);
@@ -143,6 +157,12 @@ try {
   );
   await page.locator('[data-view="settings"]').click();
   await page.locator("#modelSelectHost .cj-dropdown").waitFor({ state: "visible" });
+  const englishSettings = await page.locator("#settingsView").innerText();
+  assert.equal(
+    /[\u0600-\u06FF]/.test(englishSettings),
+    false,
+    "English Settings must not contain Arabic labels",
+  );
   assert.equal(
     await page.locator(
       "#modelSelectHost .cj-dropdown, #codingModelHost .cj-dropdown, #visionModelHost .cj-dropdown",
@@ -192,6 +212,10 @@ try {
     () =>
       document.documentElement.lang === "ar" &&
       document.documentElement.dir === "rtl",
+  );
+  assert.match(
+    await page.locator('[data-view="settings"]').innerText(),
+    /[\u0600-\u06FF]/,
   );
 
   for (const host of ["#jackModeHost", preferenceDropdown("mode")]) {

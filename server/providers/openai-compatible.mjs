@@ -15,10 +15,38 @@ const ANTHROPIC_MODELS = [
 ];
 const GOOGLE_MODELS = [
   model(
-    "gemini-2.0-flash",
+    "gemini-3.8-flash",
     ["tools", "vision", "reasoning"],
     1048576,
-    "low",
+    "free",
+    "fast",
+  ),
+  model(
+    "gemini-3.7-flash",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
+  model(
+    "gemini-3.6-flash",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
+  model(
+    "gemini-3.1-flash-lite",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
+    "fast",
+  ),
+  model(
+    "gemini-flash-latest",
+    ["tools", "vision", "reasoning"],
+    1048576,
+    "unknown",
     "fast",
   ),
 ];

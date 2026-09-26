@@ -1,5 +1,6 @@
 import { MODES } from "./preferences.mjs";
 import { enabledPacks } from "./capabilities.mjs";
+import { extractSecurityFileTarget } from "./security/target.mjs";
 
 const empathy =
   /\b(exhausted|exhausting|tired|sad|lonely|anxious|depressed|heartbroken|grief|rough day|bad day|overwhelmed|stressed|feeling down|miss you)\b|تعبان|مرهق|حزين|قلق|منهك|ضايق|صعب علي|يوم سيء/i;
@@ -8,7 +9,7 @@ const research =
 const developer =
   /\b(code|coding|program|bug|repo|repository|git|tests?|javascript|typescript|python|html|css|sql|api|compile|lint|refactor|patch|fix (?:this|the|my)|build|npm|node|project)\b|برمج|كود|مستودع|اختبار|تصحيح|أصلح|اصلح|مشروع|باتش/i;
 const hacker =
-  /\b(network|ipconfig|firewall|reverse engineer|exploit|pentest|bypass|crack|security|malware|packet|port scan|inspect (?:my )?(?:pc|system|network)|check (?:my )?(?:pc|network)|debug(?:ging)? (?:system|binary)|powershell)\b|افحص|الشبكة|الجهاز|اختراق|تجاوز|هندسة عكسية|أمن/i;
+  /\b(network|ipconfig|firewall|reverse engineer|exploit|pentest|bypass|crack|security|malware|packet|port scan|yara|disassemble|decompile|inspect (?:this )?(?:exe|binary|pe|process)|analyze (?:this )?(?:exe|binary)|inspect (?:my )?(?:pc|system|network|firewall)|check (?:my )?(?:pc|network|firewall)|traceroute|tls inspect|segmentation|waf|ids validation|security lab|adaptive validation|debug(?:ging)? (?:system|binary)|powershell)\b|افحص|الشبكة|الجهاز|اختراق|تجاوز|هندسة عكسية|أمن|جدار/i;
 const secret =
   /\b(organize|dossier|brief(?:ing)?|intel|operational|company profile|gather (?:info|intelligence)|secret agent)\b|نظّم|نظم|ملف|موجز|معلومات عن الشركة/i;
 
@@ -69,10 +70,22 @@ function scoreSignals(text, attachments, history) {
     hacker: hacker.test(text) ? 3 : 0,
     secret_agent: secret.test(text) ? 2 : 0,
   };
+  if (extractSecurityFileTarget(text)) scores.hacker += 3;
   if (attachments.some((p) => /\.(m?js|tsx?|py|html|css|json|sql|cjs|mjs)$/i.test(p)))
     scores.developer += 4;
   if (attachments.some((p) => /\.(png|jpe?g|webp)$/i.test(p))) scores.hacker += 1;
+  // Short confirm/continue follow-ups must not inherit research from a prior
+  // user turn — that caused "yea"/"do it" to re-trigger web research.
   if (
+    /^(continue|fix it|try again|go on|do it|yea|yeah|yes|ok|sure|كمل|تابع|صلحه|ايوه|نعم|سويه|يلا|الثاني(?:\s+أفضل)?|الأول(?:\s+أفضل)?)[.!؟\s]*$/i.test(
+      text.trim(),
+    )
+  ) {
+    const previous = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
+    if (developer.test(previous)) scores.developer += 4;
+    if (hacker.test(previous)) scores.hacker += 3;
+    // Intentionally do NOT boost research here.
+  } else if (
     /^(continue|fix it|try again|go on|كمل|تابع|صلحه)[.!؟\s]*$/i.test(text.trim())
   ) {
     const previous = history.filter((m) => m.role === "user").at(-1)?.content ?? "";
@@ -126,7 +139,9 @@ export function modelTaskKind({
   )
     return "coding";
   if (
-    /^(continue|fix it|try again|go on|كمل|تابع|صلحه)[.!؟\s]*$/i.test(text.trim())
+    /^(continue|fix it|try again|go on|do it|yea|yeah|yes|ok|sure|كمل|تابع|صلحه|ايوه|نعم)[.!؟\s]*$/i.test(
+      text.trim(),
+    )
   ) {
     const previous = history.filter((m) => m.role === "user").at(-1);
     if (previous && developer.test(previous.content)) return "coding";

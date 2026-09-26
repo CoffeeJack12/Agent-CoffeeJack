@@ -6,8 +6,14 @@ import {
   t,
   applyDocumentLocale,
   applyStaticI18n,
+  persistAppLanguageHint,
+  readAppLanguageHint,
 } from "/i18n.js";
 import { createDropdown, mountDropdown } from "/dropdown.js";
+import {
+  shouldShowCouncilInChat,
+  shouldShowToolInChat,
+} from "/chat-visibility.js";
 const $ = (selector) => document.querySelector(selector);
 mountBranding();
 try {
@@ -23,8 +29,9 @@ const state = {
   attachments: [],
   status: null,
   view: "chat",
-  locale: "ar",
+  locale: "en",
   currentMode: "auto",
+  taskMode: "auto",
   requestedModel: "auto",
   modeInitialized: false,
 };
@@ -36,6 +43,8 @@ const dropdowns = {
   persona: {},
 };
 const tr = (key, vars) => t(key, state.locale, vars);
+const UI_DATE_LOCALES = { ar: "ar-SA", en: "en-US" };
+const uiDateLocale = () => UI_DATE_LOCALES[state.locale] || "en-US";
 function modeOptions() {
   return Object.keys(preferenceCatalog?.modes ?? {
     auto: {},
@@ -46,24 +55,125 @@ function modeOptions() {
     secret_agent: {},
   }).map((value) => ({ value, label: tr(`mode.${value}.label`) }));
 }
-function applyAppLanguage(appLanguage = "auto") {
+function updateConnectionChrome(status) {
+  if (!status) {
+    if ($("#connectionLabel"))
+      $("#connectionLabel").textContent = tr("connection.disconnected");
+    $("#connectionDot")?.classList.remove("ready");
+    return;
+  }
+  const models = status.models ?? [];
+  const ready =
+    !status.modelError &&
+    models.some((m) => m.name === status.settings?.model);
+  $("#connectionDot")?.classList.toggle("ready", ready && !status.gaming);
+  if ($("#connectionLabel"))
+    $("#connectionLabel").textContent = status.gaming
+      ? tr("connection.gamingPriority")
+      : ready
+        ? tr("connection.local")
+        : tr("connection.modelNotReady");
+  const gaming = $("#gaming");
+  if (gaming) {
+    gaming.classList.toggle("on", status.gaming);
+    gaming.setAttribute("aria-pressed", String(status.gaming));
+  }
+  const gamingLabel = $("#gaming span");
+  if (gamingLabel)
+    gamingLabel.textContent = status.gaming
+      ? tr("gaming.modeOn")
+      : tr("gaming.mode");
+}
+
+function remountSettingsModelDropdowns() {
+  const status = state.status;
+  const form = $("#settingsForm");
+  if (!status || !form || !$("#modelSelectHost")) return;
+  for (const [name, host] of [
+    ["model", "#modelSelectHost"],
+    ["codingModel", "#codingModelHost"],
+    ["visionModel", "#visionModelHost"],
+  ]) {
+    const names = [
+      ...new Set(
+        [...status.models.map((m) => m.name), status.settings[name]].filter(
+          Boolean,
+        ),
+      ),
+    ];
+    dropdowns.settingsModels[name] = mountDropdown(host, {
+      name,
+      options: [
+        ...(name === "model"
+          ? [{ value: "auto", label: tr("settings.autoOption") }]
+          : [{ value: "", label: tr("settings.sameAsPrimary") }]),
+        ...names
+          .filter((value) => value && value !== "auto")
+          .map((value) => ({ value, label: value })),
+      ],
+      value: status.settings[name] || (name === "model" ? "auto" : ""),
+      ariaLabel: tr(
+        name === "model"
+          ? "settings.primaryModel"
+          : name === "codingModel"
+            ? "settings.codingModel"
+            : "settings.visionModel",
+      ),
+    });
+  }
+}
+
+async function refreshLocalizedLists() {
+  if (!state.status) return;
+  const jobs = [];
+  if (state.view === "memory") jobs.push(loadMemories());
+  if (state.view === "activity") jobs.push(loadEvents());
+  if (state.view === "lab") jobs.push(loadSecurityLab());
+  if (state.view === "settings") {
+    jobs.push(loadPreferences(), loadUsers(), loadSelfRepairPanel());
+  }
+  if (state.view === "chat") jobs.push(history());
+  await Promise.all(jobs.map((job) => job.catch(report)));
+}
+
+async function applyAppLanguage(appLanguage = "en") {
   const locale = resolveAppLocale(appLanguage);
+  const changed = state.locale !== locale.lang;
   state.locale = locale.lang;
   applyDocumentLocale(locale);
+  persistAppLanguageHint(locale.lang);
   applyStaticI18n(document, state.locale);
-  $("#pageTitle").textContent = tr(`page.${state.view}`);
-  setComposerPlaceholder();
-  mountComposerDropdowns();
-  if (Object.keys(dropdowns.persona).length) mountPersonaDropdowns(personaValues());
+  document.title = tr("page.documentTitle");
+  if ($("#pageTitle")) $("#pageTitle").textContent = tr(`page.${state.view}`);
+  try {
+    setComposerPlaceholder();
+    mountRoutingDropdowns();
+    if (Object.keys(dropdowns.settingsModels).length)
+      remountSettingsModelDropdowns();
+    if (Object.keys(dropdowns.persona).length) {
+      mountPersonaDropdowns(personaValues());
+      previewPersona();
+    }
+    if (state.status) {
+      renderAccountIdentity(state.status);
+      renderProviders(state.status.providers, state.status);
+      updateConnectionChrome(state.status);
+      if (state.status.jack) updateSelfModel(state.status.jack);
+    }
+  } catch (error) {
+    console.error("applyAppLanguage", error);
+  }
+  if (changed) await refreshLocalizedLists();
 }
-function mountComposerDropdowns() {
+function mountRoutingDropdowns() {
+  if (!$("#jackModeHost") || !$("#taskModeHost") || !$("#modelHost")) return;
   const modes = modeOptions();
   dropdowns.currentMode = mountDropdown("#jackModeHost", {
     options: modes,
-    value: state.currentMode,
+    value: state.currentMode || "auto",
     ariaLabel: tr("composer.currentMode"),
     onChange: (value) => {
-      state.currentMode = value;
+      state.currentMode = value || "auto";
     },
   });
   dropdowns.taskMode = mountDropdown("#taskModeHost", {
@@ -71,8 +181,11 @@ function mountComposerDropdowns() {
       value,
       label: tr(`composer.mode.${value}`),
     })),
-    value: dropdowns.taskMode?.getValue?.() ?? "auto",
+    value: state.taskMode || "auto",
     ariaLabel: tr("composer.taskType"),
+    onChange: (value) => {
+      state.taskMode = value || "auto";
+    },
   });
   const installed = state.status?.models ?? [];
   dropdowns.requestedModel = mountDropdown("#modelHost", {
@@ -90,7 +203,7 @@ function mountComposerDropdowns() {
       : "auto",
     ariaLabel: tr("settings.autoModel"),
     onChange: (value) => {
-      state.requestedModel = value;
+      state.requestedModel = value || "auto";
     },
   });
 }
@@ -102,8 +215,14 @@ const escape = (text) =>
         c
       ],
   );
-function renderText(element, text) {
+function renderText(element, text, { streaming = false } = {}) {
   element.dataset.text = text;
+  // During streaming, paint plain text immediately — do not wait for markdown.
+  if (streaming) {
+    element.textContent = text;
+    element.dir = "auto";
+    return;
+  }
   element.innerHTML = DOMPurify.sanitize(
     marked.parse(text, { breaks: true, gfm: true }),
     {
@@ -168,22 +287,31 @@ async function copyText(text, button) {
     button.textContent = original;
   }, 1600);
 }
-function renderProviders(providers) {
+function renderProviders(providers, status) {
   const host = $("#providersList");
   if (!host) return;
   host.innerHTML = "";
+  const auto = status?.autoRouting;
+  if (auto?.general) {
+    const legend = document.createElement("div");
+    legend.className = "card";
+    legend.innerHTML = `<strong>${escape(tr("providers.autoTitle"))}</strong>
+      <div class="muted">${escape(tr("providers.providerLine"))}</div>
+      <div class="muted">${escape(tr("providers.modelLine"))}</div>
+      <div>${escape(tr("providers.autoGeneral"))}: <code>${escape(auto.general)}</code></div>
+      <div>${escape(tr("providers.autoReasoning"))}: <code>${escape(auto.reasoning || auto.general)}</code></div>`;
+    host.append(legend);
+  }
   const list = providers?.length
     ? providers
     : [
         { id: "ollama", name: "Ollama", status: "unavailable", type: "local" },
-        { id: "openai", name: "OpenAI", status: "not_configured", type: "remote" },
-        { id: "anthropic", name: "Anthropic", status: "not_configured", type: "remote" },
-        { id: "google", name: "Google", status: "not_configured", type: "remote" },
       ];
   for (const provider of list) {
+    // Local-first UI: keep remote rows only when already present from status.
     const row = document.createElement("div");
     row.className = "provider-row";
-    const status =
+    const statusKey =
       provider.status ||
       (!provider.enabled
         ? "not_configured"
@@ -191,9 +319,9 @@ function renderProviders(providers) {
           ? "connected"
           : "unavailable");
     const label =
-      status === "connected"
+      statusKey === "connected"
         ? tr("providers.connected")
-        : status === "unavailable"
+        : statusKey === "unavailable"
           ? tr("providers.unavailable")
           : tr("providers.notConfigured");
     const typeLabel =
@@ -217,19 +345,50 @@ function renderProviders(providers) {
     refresh.type = "button";
     refresh.className = "secondary";
     refresh.dataset.providersRefresh = "1";
-    refresh.textContent = tr("providers.refresh");
     refresh.onclick = () => refreshStatus().catch(report);
     host.parentElement.append(refresh);
   }
+  if (refresh) refresh.textContent = tr("providers.refresh");
+}
+function isPublicRemoteBrowser() {
+  const host = String(location.hostname || "").toLowerCase();
+  return host !== "127.0.0.1" && host !== "localhost";
+}
+function isSessionAuthFailure(error) {
+  const code = error?.code;
+  const message = String(error?.message || "");
+  return (
+    code === "authentication_required" ||
+    code === "session_expired" ||
+    message === "Invalid session token" ||
+    message === "Your session expired. Please log in again." ||
+    message === "Authentication required. Please log in again."
+  );
+}
+let publicLoginRedirect = false;
+function leavePublicAppForLogin(error) {
+  if (!isSessionAuthFailure(error)) return false;
+  publicLoginRedirect = true;
+  location.replace("/login");
+  return true;
+}
+function isCloudflareBoundSession() {
+  return state.status?.identitySource === "cloudflare";
+}
+function sessionHeaders(extra = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...extra,
+  };
+  const token = typeof state.token === "string" ? state.token.trim() : "";
+  if (token && token !== "undefined")
+    headers["X-CoffeeJack-Token"] = token;
+  return headers;
 }
 async function api(route, options = {}) {
   const response = await fetch("/api/" + route, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-CoffeeJack-Token": state.token,
-      ...options.headers,
-    },
+    headers: sessionHeaders(options.headers),
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
@@ -265,7 +424,9 @@ function renderAccountIdentity(status) {
   const source =
     status.identitySource === "cloudflare"
       ? tr("account.sourceCloudflare")
-      : tr("account.sourceLocal");
+      : status.identitySource === "account"
+        ? tr("account.sourceCoffeeJack")
+        : tr("account.sourceLocal");
   const linked = (status.identities || []).some(
     (i) => i.provider === "cloudflare_access",
   );
@@ -314,35 +475,30 @@ async function refreshStatus() {
         status.user.display_name.trim().charAt(0).toUpperCase() || "?";
       renderAccountIdentity(status);
       renderWorkspaces(status);
+      if (
+        status.user.email_verification_required ||
+        (status.user.email &&
+          !status.user.email_verified &&
+          status.user.role !== "owner")
+      ) {
+        location.assign("/verify");
+        return;
+      }
     }
-    applyAppLanguage(status.preferences?.appLanguage ?? "auto");
+    await applyAppLanguage(status.preferences?.appLanguage ?? "en");
     if (!state.modeInitialized) {
       state.currentMode = status.preferences?.mode ?? "auto";
+      state.taskMode = "auto";
       state.requestedModel = status.preferences?.model ?? "auto";
       state.modeInitialized = true;
-      mountComposerDropdowns();
+      mountRoutingDropdowns();
     }
     if (status.jack) updateSelfModel(status.jack);
+    updateConnectionChrome(status);
+    renderProviders(status.providers, status);
     const ready =
       !status.modelError &&
-      status.models.some((m) => m.name === status.settings.model);
-    $("#connectionDot").classList.toggle("ready", ready && !status.gaming);
-    $("#connectionLabel").textContent = status.gaming
-      ? tr("connection.gamingPriority")
-      : ready
-        ? tr("connection.local")
-        : tr("connection.modelNotReady");
-    const prefModel = status.preferences?.model ?? "auto";
-    $("#modelLabel").textContent =
-      prefModel === "auto"
-        ? `Auto → ${status.settings.model}`
-        : `${status.settings.model} · ${tr("composer.modelLocal")}`;
-    renderProviders(status.providers);
-    $("#gaming").classList.toggle("on", status.gaming);
-    $("#gaming").setAttribute("aria-pressed", String(status.gaming));
-    $("#gaming span").textContent = status.gaming
-      ? tr("gaming.modeOn")
-      : tr("gaming.mode");
+      (status.models ?? []).some((m) => m.name === status.settings?.model);
     if (status.gaming)
       notice(
         tr("gaming.notice"),
@@ -357,10 +513,12 @@ async function refreshStatus() {
       );
     else if (!state.busy) notice();
     if (status.approvals.length) showApproval(status.approvals[0]);
+    syncSecurityLabNav(status);
     return status;
   } catch (e) {
     $("#connectionLabel").textContent = tr("connection.disconnected");
     $("#connectionDot").classList.remove("ready");
+    if (leavePublicAppForLogin(e)) return;
     if (e?.code === "pending_identity") {
       const email = e.email ? ` (${e.email})` : "";
       showAccessPending(tr("access.pendingBody") + email);
@@ -411,8 +569,10 @@ function newChat() {
   state.chatId = null;
   state.attachments = [];
   state.currentMode = state.status?.preferences?.mode ?? "auto";
+  state.taskMode = "auto";
   state.requestedModel = state.status?.preferences?.model ?? "auto";
   dropdowns.currentMode?.setValue(state.currentMode);
+  dropdowns.taskMode?.setValue(state.taskMode);
   dropdowns.requestedModel?.setValue(state.requestedModel);
   drawAttachments();
   $("#messages").innerHTML = "";
@@ -455,6 +615,7 @@ function showView(name) {
   if (name === "activity") loadEvents().catch(report);
   if (name === "settings") loadSettings().catch(report);
   if (name === "persona") loadPersona().catch(report);
+  if (name === "lab") loadSecurityLab().catch(report);
 }
 function syncPromptDirection() {
   const el = $("#prompt");
@@ -486,7 +647,10 @@ function setComposerPlaceholder() {
 function showApproval(event) {
   const el = $("#approval");
   el.classList.remove("hidden");
-  el.innerHTML = `<h3>${escape(tr("approval.title", { name: event.name }))}</h3><pre>${escape(JSON.stringify(event.args, null, 2))}</pre><button class="primary" id="allowTool">${escape(tr("approval.allow"))}</button><button class="ghost" id="denyTool">${escape(tr("approval.deny"))}</button>`;
+  const consequence = event.consequence
+    ? `<p>${escape(event.consequence)}</p>`
+    : "";
+  el.innerHTML = `<h3>${escape(tr("approval.title", { name: event.name }))}</h3>${consequence}<pre>${escape(JSON.stringify(event.args, null, 2))}</pre><button class="primary" id="allowTool">${escape(tr("approval.allow"))}</button><button class="ghost" id="denyTool">${escape(tr("approval.deny"))}</button>`;
   for (const [id, allow] of [
     ["allowTool", true],
     ["denyTool", false],
@@ -578,6 +742,459 @@ function renderMemoryAskCard(proposal) {
   card.append(body, editor, actions);
   return card;
 }
+function renderSelfRepairCard(item) {
+  if (item?.kind === "diagnosis" || item?.diagnosisOnly) {
+    return renderSelfRepairDiagnosisCard(item);
+  }
+  return renderSelfRepairProposalCard(item);
+}
+
+function renderSelfRepairDiagnosisCard(diagnosis) {
+  const card = document.createElement("div");
+  card.className = "self-repair-card memory-ask-card self-repair-diagnosis";
+  card.dataset.proposalId = diagnosis.id;
+  card.dataset.kind = "diagnosis";
+  const body = document.createElement("div");
+  body.className = "memory-ask-body";
+  const checks = (diagnosis.checksPerformed || [])
+    .map(
+      (c) =>
+        `<li><code>${escape(c.id || "")}</code> · ${escape(c.status || "")}${c.detail ? ` — ${escape(c.detail)}` : ""}</li>`,
+    )
+    .join("");
+  const findings = (diagnosis.findings || [])
+    .map((f) => `<li>${escape(f.problem || f.rootCause || "")}</li>`)
+    .join("");
+  body.innerHTML = `
+    <p class="memory-ask-label">${escape(tr("selfRepair.diagnosisTitle"))}</p>
+    <p><strong>${escape(tr("selfRepair.status"))}:</strong> ${escape(tr("selfRepair.statusComplete"))}</p>
+    <p><strong>${escape(tr("selfRepair.request"))}:</strong> ${escape(diagnosis.request || "")}</p>
+    <p><strong>${escape(tr("selfRepair.checks"))}:</strong></p>
+    <ul>${checks || `<li>${escape(tr("selfRepair.none"))}</li>`}</ul>
+    <p><strong>${escape(tr("selfRepair.findings"))}:</strong> ${escape(diagnosis.summary || diagnosis.message || tr("selfRepair.noFault"))}</p>
+    ${findings ? `<ul>${findings}</ul>` : ""}
+    <p><strong>${escape(tr("selfRepair.confidence"))}:</strong> ${escape(diagnosis.confidence || "none")}</p>
+  `;
+  const details = document.createElement("pre");
+  details.className = "self-repair-details hidden";
+  details.textContent = JSON.stringify(
+    { evidence: diagnosis.evidence || [], checks: diagnosis.checksPerformed || [] },
+    null,
+    2,
+  );
+  const actions = document.createElement("div");
+  actions.className = "memory-ask-actions";
+  const show = document.createElement("button");
+  show.type = "button";
+  show.className = "ghost";
+  show.textContent = tr("selfRepair.details");
+  show.onclick = () => details.classList.toggle("hidden");
+  const dismiss = document.createElement("button");
+  dismiss.type = "button";
+  dismiss.className = "ghost";
+  dismiss.textContent = tr("selfRepair.cancel");
+  dismiss.onclick = async () => {
+    try {
+      await api("self-repair/" + diagnosis.id, {
+        method: "POST",
+        body: { action: "cancel" },
+      });
+      card.classList.add("resolved");
+      actions.remove();
+      body.querySelector(".memory-ask-label").textContent = tr(
+        "selfRepair.cancelled",
+      );
+      loadSelfRepairPanel().catch(report);
+    } catch (error) {
+      report(error);
+    }
+  };
+  actions.append(show, dismiss);
+  card.append(body, details, actions);
+  return card;
+}
+
+function renderSelfRepairProposalCard(proposal) {
+  const card = document.createElement("div");
+  card.className = "self-repair-card memory-ask-card";
+  card.dataset.proposalId = proposal.id;
+  card.dataset.kind = "proposal";
+  const canApplyRole = state.status?.selfRepair?.canApply === true;
+  const hasPatches = Boolean(proposal.patches?.length);
+  const showApply = canApplyRole && hasPatches;
+  const body = document.createElement("div");
+  body.className = "memory-ask-body";
+  const files = (proposal.files || [])
+    .map((f) => `<li><code>${escape(f)}</code></li>`)
+    .join("");
+  const plan = (proposal.plan || [])
+    .map((step, i) => `<li>${escape(`${i + 1}. ${step}`)}</li>`)
+    .join("");
+  body.innerHTML = `
+    <p class="memory-ask-label">${escape(tr("selfRepair.proposalTitle"))}</p>
+    <p><strong>${escape(tr("selfRepair.problem"))}:</strong> ${escape(proposal.problem || "")}</p>
+    <p><strong>${escape(tr("selfRepair.rootCause"))}:</strong> ${escape(proposal.rootCause || "")}</p>
+    <p><strong>${escape(tr("selfRepair.files"))}:</strong></p>
+    <ul>${files || `<li>${escape(tr("selfRepair.none"))}</li>`}</ul>
+    <p><strong>${escape(tr("selfRepair.plan"))}:</strong></p>
+    <ol class="self-repair-plan">${plan || `<li>${escape(tr("selfRepair.none"))}</li>`}</ol>
+    <p><strong>${escape(tr("selfRepair.risk"))}:</strong> ${escape(proposal.risk || "low")}</p>
+    ${
+      proposal.securitySensitive
+        ? `<p class="self-repair-security">${escape(tr("selfRepair.security"))}</p>`
+        : ""
+    }
+    ${
+      !hasPatches
+        ? `<p class="hint">${escape(tr("selfRepair.awaitingPatch"))}</p>`
+        : ""
+    }
+  `;
+  const details = document.createElement("pre");
+  details.className = "self-repair-details hidden";
+  details.textContent = JSON.stringify(
+    {
+      evidence: proposal.evidence || [],
+      patches: (proposal.patches || []).map((p) => p.path),
+      findings: proposal.findings || [],
+    },
+    null,
+    2,
+  );
+  const actions = document.createElement("div");
+  actions.className = "memory-ask-actions";
+  const apply = document.createElement("button");
+  apply.type = "button";
+  apply.className = "primary";
+  apply.textContent = tr("selfRepair.apply");
+  apply.disabled = !showApply;
+  if (!canApplyRole) apply.title = tr("selfRepair.denied");
+  else if (!hasPatches) apply.title = tr("selfRepair.noPatches");
+  const show = document.createElement("button");
+  show.type = "button";
+  show.className = "ghost";
+  show.textContent = tr("selfRepair.details");
+  const cancel = document.createElement("button");
+  cancel.type = "button";
+  cancel.className = "ghost";
+  cancel.textContent = tr("selfRepair.cancel");
+  let ack = null;
+  if (proposal.securitySensitive && showApply) {
+    ack = document.createElement("label");
+    ack.className = "toggle-row";
+    ack.innerHTML = `<input type="checkbox" class="self-repair-ack" /><span>${escape(tr("selfRepair.ackSecurity"))}</span>`;
+    card.append(ack);
+  }
+  const finish = (message) => {
+    card.classList.add("resolved");
+    actions.remove();
+    ack?.remove();
+    details.remove();
+    body.querySelector(".memory-ask-label").textContent = message;
+  };
+  apply.onclick = async () => {
+    if (!showApply) return notice(tr("selfRepair.noPatches"));
+    if (proposal.securitySensitive) {
+      const checked = card.querySelector(".self-repair-ack")?.checked;
+      if (!checked) return notice(tr("selfRepair.ackSecurity"));
+    }
+    apply.disabled = true;
+    cancel.disabled = true;
+    try {
+      const result = await api("self-repair/" + proposal.id, {
+        method: "POST",
+        body: {
+          action: "apply",
+          acknowledgeSecurity: Boolean(
+            card.querySelector(".self-repair-ack")?.checked,
+          ),
+        },
+      });
+      finish(
+        result.ok ? tr("selfRepair.applied") : tr("selfRepair.reverted"),
+      );
+      loadSelfRepairPanel().catch(report);
+    } catch (error) {
+      report(error);
+      apply.disabled = false;
+      cancel.disabled = false;
+    }
+  };
+  show.onclick = () => details.classList.toggle("hidden");
+  cancel.onclick = async () => {
+    cancel.disabled = true;
+    try {
+      await api("self-repair/" + proposal.id, {
+        method: "POST",
+        body: { action: "cancel" },
+      });
+      finish(tr("selfRepair.cancelled"));
+      loadSelfRepairPanel().catch(report);
+    } catch (error) {
+      report(error);
+      cancel.disabled = false;
+    }
+  };
+  if (showApply) actions.append(apply);
+  actions.append(show, cancel);
+  card.append(body, details, actions);
+  return card;
+}
+async function loadSelfRepairPanel() {
+  const section = $("#selfRepairSection");
+  if (!section) return;
+  const owner = state.status?.user?.role === "owner";
+  section.classList.toggle("hidden", !owner);
+  if (!owner) return;
+  try {
+    const data = await api("self-repair");
+    $("#selfRepairEnabled").checked = data.settings?.enabled !== false;
+    $("#selfRepairAutoDiagnose").checked = data.settings?.autoDiagnose !== false;
+    const host = $("#selfRepairHistory");
+    host.innerHTML = "";
+    const rows = data.history || [];
+    if (!rows.length) {
+      host.textContent = tr("selfRepair.historyEmpty");
+      return;
+    }
+    for (const row of rows.slice(0, 20)) {
+      const el = document.createElement("div");
+      el.className = "card";
+      el.innerHTML = `<p><strong>${escape(row.timestamp || "")}</strong> · ${escape(row.result || "")}</p>
+        <p>${escape(row.issue || "")}</p>
+        <p class="hint">${escape(row.diagnosis || "").slice(0, 280)}</p>
+        <p class="hint">${escape((row.filesChanged || []).join(", ") || "—")}</p>`;
+      host.append(el);
+    }
+  } catch (error) {
+    report(error);
+  }
+}
+function syncSecurityLabNav(status) {
+  const nav = $("#navSecurityLab");
+  if (!nav) return;
+  const owner = status?.user?.role === "owner";
+  nav.classList.toggle("hidden", !owner);
+  if (!owner && state.view === "lab") showView("chat");
+}
+
+function labCard(text) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.textContent = text;
+  return el;
+}
+
+function fillLabList(id, rows, render) {
+  const host = $(id);
+  if (!host) return;
+  host.innerHTML = "";
+  if (!rows?.length) {
+    host.textContent = tr("lab.empty");
+    return;
+  }
+  for (const row of rows) host.append(render(row));
+}
+
+async function loadSecurityLab() {
+  const nav = $("#navSecurityLab");
+  const owner = state.status?.user?.role === "owner";
+  if (nav) nav.classList.toggle("hidden", !owner);
+  if (!owner) {
+    $("#labMessage").textContent = tr("lab.denied");
+    return;
+  }
+  const data = await api("security-lab");
+  state.lab = data;
+  fillLabList("#labTargets", data.targets, (target) => {
+    const el = labCard(
+      `${target.name} · ${target.host} · ${target.environment} · ${target.enabled ? tr("lab.target.on") : tr("lab.target.off")}\n${target.authorization_note}\n${target.target_id}`,
+    );
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.textContent = tr("button.delete");
+    remove.onclick = async () => {
+      await api("security-lab/targets/" + encodeURIComponent(target.target_id), {
+        method: "DELETE",
+      });
+      await loadSecurityLab();
+    };
+    el.append(remove);
+    return el;
+  });
+  fillLabList(
+    "#labLessons",
+    data.lessons,
+    (lesson) =>
+      labCard(
+        `${lesson.control} · ${lesson.target_id}\n${lesson.observation}\n${tr("lab.confidence")} ${lesson.confidence}`,
+      ),
+  );
+  fillLabList(
+    "#labFindings",
+    data.findings,
+    (finding) =>
+      labCard(
+        `${tr("lab.finding.expected")}: ${finding.expected}\n${tr("lab.finding.observed")}: ${finding.observed}\n${tr("lab.finding.gap")}: ${finding.gap}\n${tr("lab.finding.impact")}: ${finding.impact}`,
+      ),
+  );
+  const active = $("#labActive");
+  active.innerHTML = "";
+  if (data.active) {
+    active.append(
+      labCard(
+        `${tr("lab.active.run")} ${data.active.runId || data.active.run_id} · ${tr("lab.active.target")} ${data.active.targetId || data.active.target_id}`,
+      ),
+    );
+  } else if (data.latest_run) {
+    active.append(
+      labCard(
+        `${data.latest_run.status} · ${data.latest_run.case_count} ${tr("lab.cases")} · ${data.latest_run.run_id}`,
+      ),
+    );
+  } else {
+    active.textContent = tr("lab.empty");
+  }
+  const evidence = $("#labEvidence");
+  evidence.innerHTML = "";
+  evidence.append(
+    labCard(
+      data.latest_run
+        ? tr("lab.evidence.latest", {
+            id: data.latest_run.run_id,
+            count: data.latest_run.case_count,
+          })
+        : tr("lab.empty"),
+    ),
+  );
+  const tools = data.availability || {};
+  const runtimes = tools.runtimes || data.environment?.runtimes || {};
+  fillLabList(
+    "#labAvailability",
+    Object.entries(runtimes).map(([id, row]) => ({
+      id,
+      installed: row.installed,
+    })),
+    (row) =>
+      labCard(
+        `${row.id}: ${row.installed ? tr("lab.tools.detected") : tr("lab.tools.notDetected")} (${tr("lab.tools.noAutoInstall")})`,
+      ),
+  );
+  const plans = $("#labPlans");
+  plans.innerHTML = "";
+  plans.append(
+    labCard(
+      tr("lab.plan.pipeline"),
+    ),
+  );
+  const matrix = $("#labMatrix");
+  matrix.innerHTML = "";
+  matrix.append(labCard(tr("lab.matrix.headers")));
+}
+
+$("#labTargetForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  try {
+    await api("security-lab/targets", {
+      method: "POST",
+      body: {
+        name: form.elements.name.value,
+        host: form.elements.host.value,
+        ports: String(form.elements.ports.value || "")
+          .split(",")
+          .map((n) => Number(n.trim()))
+          .filter(Boolean),
+        protocols: String(form.elements.protocols.value || "http")
+          .split(",")
+          .map((n) => n.trim())
+          .filter(Boolean),
+        environment: form.elements.environment.value,
+        authorization_note: form.elements.authorization_note.value,
+      },
+    });
+    form.reset();
+    $("#labMessage").textContent = "";
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labNewValidation")?.addEventListener("click", async () => {
+  try {
+    const targets = state.lab?.targets || [];
+    const target = targets.find((row) => row.enabled) || targets[0];
+    if (!target) {
+      $("#labMessage").textContent = tr("lab.needTarget");
+      return;
+    }
+    await api("security-lab/run", {
+      method: "POST",
+      body: {
+        target_id: target.target_id,
+        policy: {
+          expectations: [
+            { method: "GET", path: "/", decision: "allow" },
+          ],
+        },
+        baseline: { method: "GET", path: "/" },
+        maxRounds: 2,
+        maxCasesPerRound: 8,
+        maxCasesPerRun: 20,
+      },
+    });
+    $("#labMessage").textContent = tr("lab.started");
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labStop")?.addEventListener("click", async () => {
+  try {
+    await api("security-lab/stop", { method: "POST" });
+    $("#labMessage").textContent = tr("lab.stopped");
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labExport")?.addEventListener("click", async () => {
+  try {
+    const runId = state.lab?.latest_run?.run_id;
+    if (!runId) {
+      $("#labMessage").textContent = tr("lab.empty");
+      return;
+    }
+    const data = await api("security-lab/report/" + encodeURIComponent(runId));
+    const blob = new Blob(
+      [JSON.stringify(data.observed?.report || data, null, 2)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `coffeejack-lab-${runId.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labClearLessons")?.addEventListener("click", async () => {
+  try {
+    await api("security-lab/lessons/clear", { method: "POST" });
+    $("#labMessage").textContent = tr("lab.cleared");
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
 $("#chatForm").onsubmit = async (event) => {
   event.preventDefault();
   const draft = $("#prompt").value;
@@ -600,19 +1217,17 @@ $("#chatForm").onsubmit = async (event) => {
   let accepted = false;
   const steps = [];
   $("#runStatus").textContent = tr("composer.status.thinking");
+  window.__cjTiming = { sendAt: performance.now() };
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CoffeeJack-Token": state.token,
-      },
+      headers: sessionHeaders(),
       body: JSON.stringify({
         text,
         chatId: state.chatId,
-        mode: dropdowns.taskMode?.getValue() ?? "auto",
-        requestedMode: state.currentMode,
-        requestedModel: state.requestedModel,
+        mode: state.taskMode || dropdowns.taskMode?.getValue() || "auto",
+        requestedMode: state.currentMode || "auto",
+        requestedModel: state.requestedModel || "auto",
         attachments: state.attachments.map((a) => a.path),
       }),
     });
@@ -642,44 +1257,51 @@ $("#chatForm").onsubmit = async (event) => {
         if (item.type === "token") {
           thinking.remove();
           full += item.text;
-          renderText(content, full);
+          if (!content.dataset.firstPaint) {
+            content.dataset.firstPaint = String(performance.now());
+            if (window.__cjTiming) {
+              window.__cjTiming.browser_first_chunk_ms =
+                performance.now() - (window.__cjTiming.sendAt || 0);
+              window.__cjTiming.browser_first_paint_ms =
+                window.__cjTiming.browser_first_chunk_ms;
+            }
+          }
+          renderText(content, full, { streaming: true });
+          $("#runStatus").textContent = tr("composer.status.streaming");
+        }
+        if (item.type === "revise") {
+          thinking.remove();
+          full = item.text || "";
+          renderText(content, full, { streaming: true });
         }
         if (item.type === "routing") {
-          const provider = item.provider ? ` · ${item.provider}` : "";
-          const auto =
-            (item.requestedModel === "auto" || !item.requestedModel) &&
-            item.effectiveModel
-              ? `Auto → ${item.effectiveModel}`
-              : item.model;
-          const fallbackNote = item.fallback
-            ? item.requestedModel &&
-              item.requestedModel !== "auto" &&
-              item.requestedModel !== item.effectiveModel
-              ? ` · Fallback from ${item.requestedModel}`
-              : ` · ${tr("composer.modelFallback")}`
-            : "";
-          $("#modelLabel").textContent = `${auto}${provider}${fallbackNote}`;
-          const log = document.createElement("div");
-          log.className = "exec-meta";
-          log.textContent = `Mode: ${item.effectiveMode || "-"} · Model: ${item.effectiveModel || item.model} · Provider: ${item.provider || "ollama"}${item.reasonCode ? ` · ${item.reasonCode}` : ""}`;
-          answer.append(log);
+          // Routing stays internal — no composer chips or exec-meta in the chat UI.
         }
         if (item.type === "council") {
+          if (!shouldShowCouncilInChat(item)) continue;
           const el = document.createElement("details");
           el.className = "tool-step council-step";
           const ok = item.status === "done";
-          const title = item.title || "AI Council";
+          const title = item.title || tr("council.title");
           el.innerHTML = `<summary>${ok ? "✓" : "◌"} ${escape(title)} · ${escape(item.detail || item.status || "")}</summary>`;
           if (item.evidenceTypes?.length || item.verification) {
             const meta = document.createElement("div");
             meta.className = "council-summary";
             meta.textContent = [
               item.evidenceTypes?.length
-                ? `Evidence: ${item.evidenceTypes.join(", ")}`
+                ? tr("council.evidence", {
+                    types: item.evidenceTypes.join(", "),
+                  })
                 : "",
-              item.verification ? `Verification: ${item.verification}` : "",
+              item.verification
+                ? tr("council.verification", { value: item.verification })
+                : "",
               item.testsVerified != null
-                ? `Tests verified: ${item.testsVerified ? "yes" : "no"}`
+                ? tr("council.testsVerified", {
+                    value: item.testsVerified
+                      ? tr("council.yes")
+                      : tr("council.no"),
+                  })
                 : "",
             ]
               .filter(Boolean)
@@ -710,6 +1332,7 @@ $("#chatForm").onsubmit = async (event) => {
             round: item.round,
           });
         if (item.type === "tool") {
+          if (!shouldShowToolInChat(item)) continue;
           thinking.remove();
           let el;
           if (item.status === "running") {
@@ -737,7 +1360,7 @@ $("#chatForm").onsubmit = async (event) => {
                   : [];
               if (item.name === "research" && item.status !== "error") {
                 el.querySelector("summary").textContent =
-                  `Research ✓ · ${sources.length} sources`;
+                  tr("research.sources", { count: sources.length });
                 pre.remove();
                 const list = document.createElement("ul");
                 list.className = "research-sources";
@@ -752,7 +1375,7 @@ $("#chatForm").onsubmit = async (event) => {
                   list.append(row);
                 }
                 el.append(list);
-              } else {
+              } else if (pre) {
                 pre.textContent = JSON.stringify(item.result, null, 2);
               }
               if (
@@ -764,6 +1387,15 @@ $("#chatForm").onsubmit = async (event) => {
                 img.alt = tr("tool.screenshotAlt");
                 el.append(img);
               }
+            } else if (item.status === "done" || item.status === "error") {
+              // Done arrived without a visible running card — show final card.
+              el = document.createElement("details");
+              el.className = "tool-step";
+              el.dataset.name = item.name;
+              el.dataset.done = "1";
+              el.classList.toggle("error", item.status === "error");
+              el.innerHTML = `<summary>${item.status === "error" ? "!" : "✓"} ${escape(item.name)} · ${escape(item.status === "error" ? tr("tool.error") : tr("tool.done"))}</summary><pre>${escape(JSON.stringify(item.result, null, 2))}</pre>`;
+              answer.append(el);
             }
           }
         }
@@ -774,6 +1406,11 @@ $("#chatForm").onsubmit = async (event) => {
             answer.append(renderMemoryAskCard(proposal));
           }
         }
+        if (item.type === "self_repair") {
+          thinking.remove();
+          const payload = item.diagnosis || item.proposal;
+          if (payload) answer.append(renderSelfRepairCard(payload));
+        }
         if (item.type === "approval") showApproval(item);
         if (item.type === "error") {
           failed = true;
@@ -781,8 +1418,13 @@ $("#chatForm").onsubmit = async (event) => {
           if (!full) content.textContent = item.error;
           content.classList.add("error-text");
         }
-        if (item.type === "done")
+        if (item.type === "done") {
+          if (full) renderText(content, full, { streaming: false });
           $("#runStatus").textContent = tr("composer.status.done");
+        }
+        if (item.type === "timing" && window.__cjTiming) {
+          Object.assign(window.__cjTiming, item);
+        }
       }
       if (
         window.innerHeight + window.scrollY >=
@@ -825,8 +1467,9 @@ $("#prompt").onkeydown = (e) => {
   }
 };
 $("#prompt").oninput = syncComposer;
+
 $("#chatForm").addEventListener("pointerdown", (e) => {
-  if (!e.target.closest("button, .cj-dropdown, a")) $("#prompt").focus();
+  if (!e.target.closest("button, a")) $("#prompt").focus();
 });
 $("#newChat").onclick = newChat;
 document.addEventListener("keydown", (e) => {
@@ -842,7 +1485,8 @@ document.querySelectorAll("[data-prompt]").forEach(
   (button) =>
     (button.onclick = () => {
       $("#prompt").value = button.dataset.prompt;
-      dropdowns.taskMode?.setValue(button.dataset.mode || "auto");
+      state.taskMode = button.dataset.mode || "auto";
+      dropdowns.taskMode?.setValue(state.taskMode);
       syncComposer();
       $("#prompt").focus();
     }),
@@ -932,16 +1576,13 @@ async function loadMemories() {
     for (const m of items) {
       const el = document.createElement("div");
       el.className = "card";
-      el.innerHTML = `<small>${escape(tr(`memory.kind.${m.kind}`))} · ${new Date(m.created).toLocaleDateString(state.locale === "ar" ? "ar-SA" : "en-US")}</small><p>${escape(m.content)}</p>`;
+      el.innerHTML = `<small>${escape(tr(`memory.kind.${m.kind}`))} · ${new Date(m.created).toLocaleDateString(uiDateLocale())}</small><p>${escape(m.content)}</p>`;
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "ghost";
-      edit.textContent = state.locale === "ar" ? "تعديل" : "Edit";
+      edit.textContent = tr("memory.edit");
       edit.onclick = async () => {
-        const content = prompt(
-          state.locale === "ar" ? "عدّل الذاكرة" : "Edit memory",
-          m.content,
-        )?.trim();
+        const content = prompt(tr("memory.editPrompt"), m.content)?.trim();
         if (!content || content === m.content) return;
         await api("memories/" + m.id, { method: "DELETE" });
         await api("memories", {
@@ -987,7 +1628,7 @@ async function loadEvents() {
   for (const item of events) {
     const el = document.createElement("details");
     el.className = "card";
-    el.innerHTML = `<summary>${item.status === "done" ? "✓" : "!"} ${escape(item.tool)} <small> · ${new Date(item.created).toLocaleString(state.locale === "ar" ? "ar-SA" : "en-US")}</small></summary><pre>${escape(JSON.stringify(JSON.parse(item.detail), null, 2))}</pre>`;
+    el.innerHTML = `<summary>${item.status === "done" ? "✓" : "!"} ${escape(item.tool)} <small> · ${new Date(item.created).toLocaleString(uiDateLocale())}</small></summary><pre>${escape(JSON.stringify(JSON.parse(item.detail), null, 2))}</pre>`;
     $("#events").append(el);
   }
 }
@@ -998,44 +1639,17 @@ async function loadSettings() {
   await loadPreferences();
   await loadUsers();
   const form = $("#settingsForm");
-  for (const [name, host] of [
-    ["model", "#modelSelectHost"],
-    ["codingModel", "#codingModelHost"],
-    ["visionModel", "#visionModelHost"],
-  ]) {
-    const names = [
-      ...new Set(
-        [
-          ...status.models.map((m) => m.name),
-          status.settings[name],
-        ].filter(Boolean),
-      ),
-    ];
-    dropdowns.settingsModels[name] = mountDropdown(host, {
-      name,
-      options: [
-        ...(name === "model"
-          ? []
-          : [{ value: "", label: tr("settings.sameAsPrimary") }]),
-        ...names.map((value) => ({ value, label: value })),
-      ],
-      value: status.settings[name],
-      ariaLabel: tr(
-        name === "model"
-          ? "settings.primaryModel"
-          : name === "codingModel"
-            ? "settings.codingModel"
-            : "settings.visionModel",
-      ),
-    });
-  }
+  remountSettingsModelDropdowns();
   for (const key of ["workspace", "instructions"])
     form.elements[key].value = status.settings[key];
   for (const key of ["autoApprove", "autoGaming"])
     form.elements[key].checked = status.settings[key];
   form.elements.gameProcesses.value = status.settings.gameProcesses.join(", ");
+  mountRoutingDropdowns();
 }
 async function switchUser(userId) {
+  if (isCloudflareBoundSession())
+    throw new Error(tr("users.remoteSwitchHelp"));
   if (state.busy) throw new Error(tr("chat.stopFirst"));
   const result = await api("session/switch", {
     method: "POST",
@@ -1061,7 +1675,24 @@ async function loadUsers() {
   $("#currentUser").textContent = `${current.display_name} · ${current.role}`;
   const owner = current.role === "owner";
   $("#createUserForm").classList.toggle("hidden", !owner);
+  const ownerForm = $("#ownerCredentialsForm");
+  if (ownerForm) {
+    ownerForm.classList.toggle("hidden", !owner);
+    if (owner && current.email && !ownerForm.elements.email.value)
+      ownerForm.elements.email.value = current.email;
+  }
+  $("#selfRepairSection")?.classList.toggle("hidden", !owner);
+  if (owner) loadSelfRepairPanel().catch(report);
+  syncSecurityLabNav(state.status);
   $("#usersList").innerHTML = "";
+  const localSession = !isCloudflareBoundSession();
+  if (owner && !localSession) {
+    const help = document.createElement("p");
+    help.id = "remoteSwitchHelp";
+    help.className = "hint";
+    help.textContent = tr("users.remoteSwitchHelp");
+    $("#usersList").append(help);
+  }
   for (const user of users) {
     const row = document.createElement("div");
     row.className = "card";
@@ -1078,6 +1709,13 @@ async function loadUsers() {
       use.type = "button";
       use.className = "ghost";
       use.textContent = tr("users.switch");
+      // Keep clickable remotely so the notice explains the block (disabled
+      // buttons look broken / do nothing). Switching remains local-only.
+      if (!localSession) {
+        use.title = tr("users.remoteSwitchHelp");
+        use.setAttribute("aria-disabled", "true");
+        use.setAttribute("aria-describedby", "remoteSwitchHelp");
+      }
       use.onclick = () => switchUser(user.id).catch(report);
       row.append(use);
     }
@@ -1118,16 +1756,45 @@ async function loadUsers() {
 $("#createUserForm").onsubmit = async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
+  const role = form.elements.namedItem("role").value;
+  const confirmOwner =
+    role === "owner" && confirm(tr("users.createOwnerConfirm"));
+  if (role === "owner" && !confirmOwner) return;
   await api("users", {
     method: "POST",
     body: {
       displayName: form.elements.displayName.value,
-      role: form.elements.role.value,
+      role,
+      confirmOwner,
     },
   });
   form.reset();
   await loadUsers();
 };
+$("#ownerCredentialsForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  const message = $("#ownerCredentialsMessage");
+  if (message) message.textContent = "";
+  try {
+    const data = await api("auth/owner/credentials", {
+      method: "POST",
+      body: {
+        email: form.elements.email.value,
+        password: form.elements.password.value,
+        confirmPassword: form.elements.confirmPassword.value,
+      },
+    });
+    form.elements.password.value = "";
+    form.elements.confirmPassword.value = "";
+    if (message)
+      message.textContent = data.user?.email || tr("owner.credentials.saved");
+    await refreshStatus();
+    await loadUsers();
+  } catch (error) {
+    if (message) message.textContent = error.message;
+  }
+});
 $("#settingsForm").onsubmit = async (e) => {
   e.preventDefault();
   const f = e.target;
@@ -1154,6 +1821,22 @@ $("#settingsForm").onsubmit = async (e) => {
     $("#settingsMessage").textContent = err.message;
   }
 };
+$("#selfRepairSave")?.addEventListener("click", async () => {
+  try {
+    await api("self-repair", {
+      method: "POST",
+      body: {
+        enabled: $("#selfRepairEnabled").checked,
+        autoDiagnose: $("#selfRepairAutoDiagnose").checked,
+        askBeforeModify: "always",
+      },
+    });
+    $("#selfRepairMessage").textContent = tr("selfRepair.saved");
+    await loadSelfRepairPanel();
+  } catch (err) {
+    $("#selfRepairMessage").textContent = err.message;
+  }
+});
 function filterHistory() {
   const query = $("#historySearch").value.trim().toLocaleLowerCase();
   for (const row of document.querySelectorAll(".history-row"))
@@ -1263,33 +1946,24 @@ function mountPersonaDropdowns(values = {}) {
 }
 function previewPersona() {
   const values = personaValues();
-  const english = values.language === "en";
-  $("#previewQuestion").textContent = english
-    ? "Jack, my code broke."
-    : values.dialect === "standard"
-      ? "يا Jack، توقف الكود عن العمل."
-      : "يا Jack، الكود خرب.";
-  const examples = english
-    ? {
-        playful:
-          "Send the first error. The code picked drama; we pick the cause, then we break it properly.",
-        subtle: "First error. One bug at a time—no speeches.",
-        off: "Send the first error and the relevant code. I’ll isolate the cause, patch it, and test.",
-      }
-    : values.dialect === "standard"
-      ? {
-          playful:
-            "أرسل أول رسالة خطأ. الكود قرر المسرح؛ إحنا نقرر السبب وبعدها نكسر المشكلة.",
-          subtle: "أول رسالة خطأ. خطوة واحدة. بلا خطب.",
-          off: "أرسل أول رسالة خطأ والجزء المرتبط بها من الكود. أحدد السبب، أصلحه، ثم أختبر.",
-        }
-      : {
-          playful:
-            "هات أول رسالة خطأ. الكود اختار الدراما؛ إحنا نمسك السبب ونخلّصه. قهوتك اختيارية.",
-          subtle: "خلّينا نشوف أول رسالة خطأ. خطوة خطوة، من غير تمثيل.",
-          off: "أرسل أول رسالة خطأ والكود المرتبط بها. أحدد السبب، أعدّله، وأختبر.",
-        };
-  $("#personaPreview").textContent = examples[values.humor];
+  const replyLang = values.language === "en" ? "en" : "ar";
+  if (replyLang === "en") {
+    $("#previewQuestion").textContent = t("persona.previewQuestion.en", "en");
+    $("#personaPreview").textContent = t(
+      `persona.previewAnswer.en.${values.humor}`,
+      "en",
+    );
+  } else {
+    const dialect = values.dialect === "standard" ? "standard" : "jeddah";
+    $("#previewQuestion").textContent = t(
+      `persona.previewQuestion.ar.${dialect}`,
+      "ar",
+    );
+    $("#personaPreview").textContent = t(
+      `persona.previewAnswer.ar.${dialect}.${values.humor}`,
+      "ar",
+    );
+  }
   for (const button of document.querySelectorAll("[data-persona-preset]")) {
     const preset = presets[button.dataset.personaPreset];
     const selected =
@@ -1299,22 +1973,29 @@ function previewPersona() {
   }
 }
 function updateSelfModel(jack) {
-  const formatter = new Intl.NumberFormat(state.locale === "ar" ? "ar-SA" : "en-US");
-  $("#memoryCount").textContent = formatter.format(jack.memories);
-  $("#conversationCount").textContent = formatter.format(jack.conversations);
-  $("#toolCount").textContent = formatter.format(jack.completedTools);
-  $("#selfState").textContent = tr(
-    `persona.self.state.${jack.state === "gaming" ? "gaming" : jack.state === "working" ? "working" : "ready"}`,
-  );
-  $("#jackPresence").textContent =
-    jack.state === "gaming"
-      ? tr("welcome.presence.gaming")
-      : jack.state === "working"
-        ? tr("welcome.presence.working")
-        : tr("welcome.presence.here");
-  $("#personalityShortcut").textContent = tr(
-    `persona.shortcut.${jack.persona.humor}`,
-  );
+  if (!jack) return;
+  const formatter = new Intl.NumberFormat(uiDateLocale());
+  if ($("#memoryCount"))
+    $("#memoryCount").textContent = formatter.format(jack.memories ?? 0);
+  if ($("#conversationCount"))
+    $("#conversationCount").textContent = formatter.format(jack.conversations ?? 0);
+  if ($("#toolCount"))
+    $("#toolCount").textContent = formatter.format(jack.completedTools ?? 0);
+  if ($("#selfState"))
+    $("#selfState").textContent = tr(
+      `persona.self.state.${jack.state === "gaming" ? "gaming" : jack.state === "working" ? "working" : "ready"}`,
+    );
+  if ($("#jackPresence"))
+    $("#jackPresence").textContent =
+      jack.state === "gaming"
+        ? tr("welcome.presence.gaming")
+        : jack.state === "working"
+          ? tr("welcome.presence.working")
+          : tr("welcome.presence.here");
+  if ($("#personalityShortcut"))
+    $("#personalityShortcut").textContent = tr(
+      `persona.shortcut.${jack.persona?.humor || "playful"}`,
+    );
   const r = jack.lastReflection;
   if (r) {
     const outcome = r.outcome === "step-limit" ? "stepLimit" : r.outcome;
@@ -1495,7 +2176,7 @@ async function loadPreferences() {
           onChange: async (value) => {
             if (key === "mode") drawPacks();
             if (key === "appLanguage") {
-              applyAppLanguage(value);
+              await applyAppLanguage(value);
               try {
                 await api("preferences", {
                   method: "POST",
@@ -1584,8 +2265,22 @@ async function loadPreferences() {
   };
 }
 
+$("#accountLogout")?.addEventListener("click", async () => {
+  try {
+    await fetch("/api/auth/logout", {
+      method: "POST",
+      headers: sessionHeaders(),
+    });
+  } finally {
+    location.assign("/login");
+  }
+});
+
+await applyAppLanguage(readAppLanguageHint());
 await refreshStatus();
-await loadPreferences().catch(report);
-await history().catch(report);
-syncComposer();
-setInterval(refreshStatus, 15000);
+if (!publicLoginRedirect) {
+  await loadPreferences().catch(report);
+  await history().catch(report);
+  syncComposer();
+  setInterval(refreshStatus, 15000);
+}

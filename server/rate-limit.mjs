@@ -28,10 +28,12 @@ export function createRateLimiter({
     /**
      * @returns {{ ok: true } | { ok: false, retryAfterMs: number }}
      */
-    check(req, category, limit = max) {
+    check(req, category, limit = max, extra = "") {
       const ts = now();
       prune(ts);
-      const key = keyFor(req, category);
+      const key = extra
+        ? `${keyFor(req, category)}:${extra}`
+        : keyFor(req, category);
       let bucket = buckets.get(key);
       if (!bucket || ts - bucket.start >= windowMs) {
         bucket = { start: ts, count: 0 };
@@ -56,4 +58,12 @@ export const REMOTE_RATE = {
   identityLink: { category: "identity_link", max: 20 },
   approval: { category: "approval", max: 60 },
   loginDenied: { category: "login_denied", max: 60 },
+};
+
+export const AUTH_RATE = {
+  signup: { category: "auth_signup", max: 5 },
+  login: { category: "auth_login", max: 8 },
+  verify: { category: "auth_verify", max: 20 },
+  reset: { category: "auth_reset", max: 12 },
+  chatStandard: { category: "chat_standard", max: 20 },
 };

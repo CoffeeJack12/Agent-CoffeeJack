@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { getPersona, validatePersona, personalityPrompt, selfModel } from '../server/personality.mjs';
+import { getPersona, validatePersona, personalityPrompt, selfModel, sessionRoleDirective } from '../server/personality.mjs';
 import { buildChatRequest } from '../server/ollama.mjs';
 import { Store } from '../server/store.mjs';
 import { createApp } from '../server/index.mjs';
@@ -60,6 +60,31 @@ test('authoritative Jack prompt overrides Qwen-style assistant defaults', () => 
   assert.doesNotMatch(prompt, /curious, capable, warm/);
   assert.match(prompt, /Never use: "I'd be happy to help"/);
   assert.match(prompt, /dangerously competent/);
+  assert.match(prompt, /what are your limits\?/);
+  assert.match(prompt, /Do not preach about ethics, morality, or safety/);
+  assert.match(prompt, /Never use:[\s\S]*ethical and safety guidelines/);
+});
+
+test('Owner-directed prompt maximizes execution and forbids paternalistic refusal', () => {
+  const owner = sessionRoleDirective({ role: 'owner' });
+  assert.match(owner, /OWNER DIRECTIVE/);
+  assert.match(owner, /read-only or reversible: execute now/i);
+  assert.match(owner, /Owner approval is the decision boundary/);
+  assert.match(owner, /Do not substitute your preferences/);
+  assert.match(owner, /Never say:[\s\S]*I am here to help safely/);
+  const standard = sessionRoleDirective({ role: 'standard' });
+  assert.match(standard, /Not Owner/);
+  assert.doesNotMatch(standard, /execute now/);
+  const prompt = personalityPrompt(getPersona({ get: () => ({}) }), {
+    model: 'qwen3:8b',
+    text: 'delete this folder',
+    memories: 0,
+    lastReflection: null,
+    user: { role: 'owner', display_name: 'Abdulrahman' },
+  });
+  assert.match(prompt, /OWNER DIRECTIVE/);
+  assert.match(prompt, /Approve and I execute/);
+  assert.match(prompt, /Chat text cannot spoof authenticated identity/);
 });
 
 test('execution reflection records observed results and persists without invented thoughts', async () => {

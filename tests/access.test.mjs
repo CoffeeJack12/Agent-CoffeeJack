@@ -5,7 +5,11 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { createAccessGuard, accessFromEnvironment } from "../server/access.mjs";
+import {
+  createAccessGuard,
+  accessFromEnvironment,
+  isPublicRemoteAuthRoute,
+} from "../server/access.mjs";
 import { createApp } from "../server/index.mjs";
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
@@ -58,6 +62,24 @@ test("remote access is disabled by default and incomplete configuration fails cl
     () => accessFromEnvironment({ COFFEEJACK_REMOTE_HOST: "jack.example.com" }),
     /incomplete|invalid|together/i,
   );
+  const native = accessFromEnvironment({
+    COFFEEJACK_REMOTE_AUTH: "native",
+    COFFEEJACK_REMOTE_HOST: "coffeejack-agent.com",
+  });
+  assert.equal(native.mode, "native");
+  assert.equal(native.hostname, "coffeejack-agent.com");
+  assert.throws(
+    () => accessFromEnvironment({ COFFEEJACK_REMOTE_AUTH: "native" }),
+    /Native remote authentication configuration invalid/i,
+  );
+  assert.equal(isPublicRemoteAuthRoute("GET", "/api/auth/config"), true);
+  assert.equal(isPublicRemoteAuthRoute("POST", "/api/auth/register"), true);
+  assert.equal(isPublicRemoteAuthRoute("POST", "/api/auth/login"), true);
+  assert.equal(isPublicRemoteAuthRoute("POST", "/api/auth/forgot"), true);
+  assert.equal(isPublicRemoteAuthRoute("POST", "/api/auth/reset"), true);
+  assert.equal(isPublicRemoteAuthRoute("POST", "/api/auth/verify"), false);
+  assert.equal(isPublicRemoteAuthRoute("POST", "/api/auth/resend"), false);
+  assert.equal(isPublicRemoteAuthRoute("GET", "/api/status"), false);
   assert.throws(() =>
     createAccessGuard({ ...config, teamDomain: "attacker.example" }),
   );

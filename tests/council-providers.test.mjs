@@ -357,7 +357,7 @@ test("OpenAI/Anthropic/Google adapters normalize chat shape", async () => {
       messages: [{ role: "user", content: "hi" }],
     });
     const g = await google.chat({
-      model: "gemini-2.0-flash",
+      model: "gemini-3.8-flash",
       messages: [{ role: "user", content: "hi" }],
     });
     assert.equal(o.content, "openai-ok");
