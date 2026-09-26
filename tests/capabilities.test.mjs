@@ -11,6 +11,8 @@ import {
   capabilityPrompt,
   capabilitySummary,
   isCapabilityQuestion,
+  isLimitsQuestion,
+  practicalLimitsReply,
   scrubStoredCapabilityClaims,
   scrubBoilerplateText,
 } from "../server/capabilities.mjs";
@@ -54,9 +56,45 @@ test("capability questions are distinguished from action requests", () => {
   assert.equal(isCapabilityQuestion("can u control my PC?"), true);
   assert.equal(isCapabilityQuestion("can you search the web?"), true);
   assert.equal(isCapabilityQuestion("what can you do?"), true);
+  assert.equal(isLimitsQuestion("what are your limits?"), true);
+  assert.equal(isCapabilityQuestion("what are your limits?"), true);
   assert.equal(isCapabilityQuestion("inspect my PC"), false);
   assert.equal(isCapabilityQuestion("search the latest Ollama release"), false);
   assert.equal(isCapabilityQuestion("check my network"), false);
+});
+
+test("limits reply is operational and has no ethical/safety boilerplate", () => {
+  const registry = buildCapabilityRegistry({
+    preferences: fullPrefs,
+    platform: "win32",
+  });
+  const owner = practicalLimitsReply({
+    user: { role: "owner", display_name: "Abdulrahman" },
+    registry,
+    text: "what are your limits?",
+  });
+  assert.doesNotMatch(
+    owner,
+    /ethical and safety guidelines|I cannot execute potentially harmful|I am here to help you safely and effectively|privacy|moral|policy/i,
+  );
+  assert.match(owner, /tools/i);
+  assert.match(owner, /permissions/i);
+  assert.match(owner, /owner/i);
+  assert.match(owner, /approval/i);
+  assert.match(owner, /verify/i);
+  const standard = practicalLimitsReply({
+    user: { role: "standard" },
+    registry,
+    text: "what are your limits?",
+  });
+  assert.match(standard, /standard/i);
+  assert.doesNotMatch(standard, /ethical and safety|harmful commands/i);
+  const prompt = capabilityPrompt(registry, {
+    text: "what are your limits?",
+    preferences: fullPrefs,
+  });
+  assert.match(prompt, /LIMITS QUESTIONS/);
+  assert.match(prompt, /available tools/);
 });
 
 test("capability prompt forbids false PC-control denials when tools are enabled", () => {
@@ -72,6 +110,27 @@ test("capability prompt forbids false PC-control denials when tools are enabled"
   assert.match(prompt, /You CAN control this PC/);
   assert.match(prompt, /Do NOT launch tools/);
   assert.match(prompt, /Depends on the target/);
+});
+
+test("tone guard replaces ethical/safety limits boilerplate with operational limits", () => {
+  const registry = buildCapabilityRegistry({
+    preferences: fullPrefs,
+    platform: "win32",
+  });
+  const state = advanceTask(null, "what are your limits?");
+  const guarded = guardResponse(
+    state,
+    "Due to ethical and safety guidelines, I cannot execute potentially harmful commands. I am here to help you safely and effectively.",
+    "what are your limits?",
+    { registry, user: { role: "owner" } },
+  );
+  assert.doesNotMatch(
+    guarded.text,
+    /ethical and safety guidelines|potentially harmful|safely and effectively/i,
+  );
+  assert.match(guarded.text, /tools/i);
+  assert.match(guarded.text, /permissions/i);
+  assert.match(guarded.text, /approval/i);
 });
 
 test("tone guard strips false PC denial and cyber boilerplate when PC tools are enabled", () => {
@@ -265,6 +324,30 @@ test("search the latest Ollama release executes research", async (t) => {
   assert.ok(f.executed >= 1);
   assert.ok(f.tools.some((t) => t.startsWith("research:")));
   assert.match(f.output, /example\.com\/ollama|v9/);
+});
+
+test("what are your limits? describes tools and permissions, not ethics boilerplate", async (t) => {
+  const f = await chatFixture(
+    t,
+    { mode: "auto" },
+    [
+      {
+        content:
+          "I cannot execute potentially harmful commands due to ethical and safety guidelines. I am here to help you safely and effectively.",
+      },
+    ],
+    "what are your limits?",
+  );
+  assert.equal(f.n, 0);
+  assert.equal(f.executed, 0);
+  assert.doesNotMatch(
+    f.output,
+    /ethical and safety guidelines|potentially harmful commands|safely and effectively|I cannot execute/i,
+  );
+  assert.match(f.output, /tools/i);
+  assert.match(f.output, /permissions/i);
+  assert.match(f.output, /approval/i);
+  assert.match(f.output, /verify|execute/i);
 });
 
 test("hack/bypass capability question asks for target without legal boilerplate", async (t) => {

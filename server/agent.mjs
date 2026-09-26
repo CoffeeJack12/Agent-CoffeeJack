@@ -3,6 +3,8 @@ import {
   buildCapabilityRegistry,
   capabilityPrompt,
   isCapabilityQuestion,
+  isLimitsQuestion,
+  practicalLimitsReply,
   scrubStoredCapabilityClaims,
 } from "./capabilities.mjs";
 import { emptyAnswer, limitAddress } from "./response-quality.mjs";
@@ -208,6 +210,25 @@ export async function runAgent({
       emit({ type: "done", tokens: 0 });
       return;
     }
+  }
+  if (isLimitsQuestion(text) && priorityLane !== "self_repair") {
+    const canned = practicalLimitsReply({
+      user,
+      registry,
+      style: preservedStyle,
+      text,
+    });
+    store.message(chatId, "user", text);
+    store.message(chatId, "assistant", canned);
+    emit({
+      type: "mode",
+      requestedMode: modeInfo.requestedMode,
+      effectiveMode: modeInfo.effectiveMode,
+      reason: modeInfo.reason,
+    });
+    emit({ type: "token", text: canned });
+    emit({ type: "done", tokens: 0 });
+    return;
   }
   const memories = (
     policy.enabled.has("memory") &&
@@ -477,7 +498,10 @@ ${finalContract}`;
       }
       timing?.mark?.("core_generation_done");
       timing?.mark?.("guard_start");
-      let guarded = guardResponse(taskState, candidate, text, { registry });
+      let guarded = guardResponse(taskState, candidate, text, {
+        registry,
+        user,
+      });
       guarded.text = limitAddress(guarded.text, preferences, transcript, text);
 
       // Jeddawi: direct answer is primary; renderer runs ONCE only if cheap guard fails.
@@ -668,7 +692,10 @@ ${finalContract}`;
             });
             totalTokens += revision.tokens ?? 0;
             candidate = (revised || revision.content || "").trim() || candidate;
-            guarded = guardResponse(taskState, candidate, text, { registry });
+            guarded = guardResponse(taskState, candidate, text, {
+              registry,
+              user,
+            });
             guarded.text = limitAddress(
               guarded.text,
               preferences,

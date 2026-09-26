@@ -60,6 +60,9 @@ test('authoritative Jack prompt overrides Qwen-style assistant defaults', () => 
   assert.doesNotMatch(prompt, /curious, capable, warm/);
   assert.match(prompt, /Never use: "I'd be happy to help"/);
   assert.match(prompt, /dangerously competent/);
+  assert.match(prompt, /what are your limits\?/);
+  assert.match(prompt, /Do not preach about ethics, morality, or safety/);
+  assert.match(prompt, /Never use:[\s\S]*ethical and safety guidelines/);
 });
 
 test('execution reflection records observed results and persists without invented thoughts', async () => {
