@@ -1946,6 +1946,17 @@ export async function createApp({
         return json(res, 200, result);
       }
       if (req.method !== "GET") return json(res, 404, { error: "Not found" });
+      if (nativeRemote && !isLocal && route === "/") {
+        const shell = sessionIdentity(req);
+        if (!shell?.user) {
+          res.writeHead(302, {
+            Location: "/login",
+            "Cache-Control": "no-store",
+          });
+          res.end();
+          return;
+        }
+      }
       let filename;
       if (
         route.startsWith("/artifacts/") &&

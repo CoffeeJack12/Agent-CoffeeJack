@@ -4,6 +4,7 @@ import http from "node:http";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { createApp } from "../server/index.mjs";
 import { createNativeRemoteAccess } from "../server/access.mjs";
 import { attachOwnerCredentials } from "../server/accounts.mjs";
@@ -25,6 +26,10 @@ import {
 const HOST = "coffeejack-agent.com";
 const ORIGIN = "https://coffeejack-agent.com";
 const strong = "CorrectHorse9";
+const REPO_ROOT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
 const fakeOllama = {
   models: async () => [{ name: "qwen3:8b" }],
@@ -110,7 +115,7 @@ async function nativeApp(t, { ollama = fakeOllama } = {}) {
   });
   const app = await createApp({
     dataDirectory: dir,
-    root: dir,
+    root: REPO_ROOT,
     remoteAccess: createNativeRemoteAccess(HOST),
     ollama,
   });
@@ -466,6 +471,70 @@ test("auth config reports native mode and public host", async (t) => {
   assert.equal(res.data.remoteAuth, "native");
   assert.equal(res.data.publicHost, HOST);
   assert.equal(res.data.publicRegistration, true);
+});
+
+test("native remote GET / without session redirects to /login and does not bootstrap Owner", async (t) => {
+  const { port, app } = await nativeApp(t);
+  const before = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
+  const res = await httpReq(port, "/", { origin: null });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.location, "/login");
+  assert.doesNotMatch(res.data.raw || "", /id="messages"|Invalid session token/i);
+  const after = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
+  assert.equal(after, before);
+  const remoteSessions = app.store.db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL AND source='remote'",
+    )
+    .get().n;
+  assert.equal(remoteSessions, 0);
+});
+
+test("native remote GET / with a valid session serves the app", async (t) => {
+  const { port } = await nativeApp(t);
+  const created = await register(port, { email: "shell@example.com" });
+  const res = await httpReq(port, "/", { cookie: created.cookie.token });
+  assert.equal(res.status, 200);
+  assert.match(String(res.headers["content-type"] || ""), /text\/html/);
+  assert.match(res.data.raw || "", /id="messages"|CoffeeJack/i);
+});
+
+test("public auth pages and static assets remain reachable without a session", async (t) => {
+  const { port } = await nativeApp(t);
+  for (const route of ["/login", "/signup", "/forgot", "/reset", "/verify"]) {
+    const page = await httpReq(port, route, { origin: null });
+    assert.equal(page.status, 200, route);
+    assert.match(String(page.headers["content-type"] || ""), /text\/html/);
+    assert.match(page.data.raw || "", /id="authForm"/);
+  }
+  for (const route of ["/auth.js", "/branding.js", "/style.css", "/favicon.svg"]) {
+    const asset = await httpReq(port, route, { origin: null });
+    assert.equal(asset.status, 200, route);
+  }
+});
+
+test("direct localhost GET / still serves the app shell", async (t) => {
+  const { port } = await nativeApp(t);
+  const res = await httpReq(port, "/", {
+    host: "127.0.0.1",
+    origin: "http://127.0.0.1",
+  });
+  assert.equal(res.status, 200);
+  assert.match(String(res.headers["content-type"] || ""), /text\/html/);
+  assert.notEqual(res.headers.location, "/login");
+  assert.match(res.data.raw || "", /id="messages"|CoffeeJack/i);
+});
+
+test("app.js never emits an undefined CoffeeJack token header", async () => {
+  const src = await fs.readFile(path.join(REPO_ROOT, "public/app.js"), "utf8");
+  assert.match(src, /function sessionHeaders/);
+  assert.doesNotMatch(src, /["']X-CoffeeJack-Token["']\s*:\s*state\.token/);
+  assert.doesNotMatch(src, /X-CoffeeJack-Token["']\s*:\s*undefined/);
+  assert.match(src, /location\.replace\(\s*["']\/login["']\s*\)/);
 });
 
 test("forgot and reset are reachable remotely without a session", async (t) => {

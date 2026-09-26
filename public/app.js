@@ -246,14 +246,42 @@ function renderProviders(providers, status) {
     host.parentElement.append(refresh);
   }
 }
+function isPublicRemoteBrowser() {
+  const host = String(location.hostname || "").toLowerCase();
+  return host !== "127.0.0.1" && host !== "localhost";
+}
+function isSessionAuthFailure(error) {
+  const code = error?.code;
+  const message = String(error?.message || "");
+  return (
+    code === "authentication_required" ||
+    code === "session_expired" ||
+    message === "Invalid session token" ||
+    message === "Your session expired. Please log in again." ||
+    message === "Authentication required. Please log in again."
+  );
+}
+let publicLoginRedirect = false;
+function leavePublicAppForLogin(error) {
+  if (!isPublicRemoteBrowser() || !isSessionAuthFailure(error)) return false;
+  publicLoginRedirect = true;
+  location.replace("/login");
+  return true;
+}
+function sessionHeaders(extra = {}) {
+  const headers = {
+    "Content-Type": "application/json",
+    ...extra,
+  };
+  const token = typeof state.token === "string" ? state.token.trim() : "";
+  if (token && token !== "undefined")
+    headers["X-CoffeeJack-Token"] = token;
+  return headers;
+}
 async function api(route, options = {}) {
   const response = await fetch("/api/" + route, {
     ...options,
-    headers: {
-      "Content-Type": "application/json",
-      "X-CoffeeJack-Token": state.token,
-      ...options.headers,
-    },
+    headers: sessionHeaders(options.headers),
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
@@ -392,6 +420,7 @@ async function refreshStatus() {
   } catch (e) {
     $("#connectionLabel").textContent = tr("connection.disconnected");
     $("#connectionDot").classList.remove("ready");
+    if (leavePublicAppForLogin(e)) return;
     if (e?.code === "pending_identity") {
       const email = e.email ? ` (${e.email})` : "";
       showAccessPending(tr("access.pendingBody") + email);
@@ -865,10 +894,7 @@ $("#chatForm").onsubmit = async (event) => {
   try {
     const response = await fetch("/api/chat", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CoffeeJack-Token": state.token,
-      },
+      headers: sessionHeaders(),
       body: JSON.stringify({
         text,
         chatId: state.chatId,
@@ -1944,10 +1970,7 @@ $("#accountLogout")?.addEventListener("click", async () => {
   try {
     await fetch("/api/auth/logout", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-CoffeeJack-Token": state.token,
-      },
+      headers: sessionHeaders(),
     });
   } finally {
     location.assign("/login");
@@ -1955,7 +1978,9 @@ $("#accountLogout")?.addEventListener("click", async () => {
 });
 
 await refreshStatus();
-await loadPreferences().catch(report);
-await history().catch(report);
-syncComposer();
-setInterval(refreshStatus, 15000);
+if (!publicLoginRedirect) {
+  await loadPreferences().catch(report);
+  await history().catch(report);
+  syncComposer();
+  setInterval(refreshStatus, 15000);
+}
