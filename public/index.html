@@ -29,6 +29,9 @@
           <span>✦</span> <span data-i18n="nav.persona">Jack persona</span></button
         ><button class="nav" data-view="settings">
           <span>⚙</span> <span data-i18n="nav.settings">Settings</span>
+        </button
+        ><button class="nav hidden" id="navSecurityLab" data-view="lab">
+          <span>▣</span> <span data-i18n="nav.lab">Security Lab</span>
         </button>
       </nav>
       <div class="nav-label history-label" data-i18n="nav.history">Recent chats</div>
@@ -484,6 +487,73 @@
           <h4 data-i18n="selfRepair.historyTitle">Repair history</h4>
           <div id="selfRepairHistory" class="card-list"></div>
         </section>
+      </section>
+      <section id="labView" class="view panel-view hidden">
+        <div class="section-intro">
+          <span class="eyebrow" data-i18n="lab.eyebrow">OWNER-AUTHORIZED DEFENSIVE VALIDATION</span>
+          <h2 data-i18n="lab.title">Security Lab</h2>
+          <p data-i18n="lab.intro">
+            Learn how defensive controls behave on Owner-authorized lab targets. Tests require a registered target_id. Lessons stay local and never authorize another host.
+          </p>
+        </div>
+        <div class="lab-toolbar">
+          <button type="button" id="labNewValidation" class="primary" data-i18n="lab.new">New validation</button>
+          <button type="button" id="labStop" class="ghost" data-i18n="lab.stop">Stop</button>
+          <button type="button" id="labExport" class="ghost" data-i18n="lab.export">Export report</button>
+          <button type="button" id="labClearLessons" class="ghost" data-i18n="lab.clearLessons">Clear lab lessons</button>
+        </div>
+        <p id="labMessage" class="hint" role="status"></p>
+        <div class="lab-grid">
+          <section class="setting-card">
+            <h3 data-i18n="lab.targets">Authorized Targets</h3>
+            <form id="labTargetForm" class="lab-form">
+              <label>Name<input name="name" required /></label>
+              <label>Host / IP / domain<input name="host" required dir="ltr" /></label>
+              <label>Ports<input name="ports" placeholder="80,443" dir="ltr" /></label>
+              <label>Protocols<input name="protocols" placeholder="http,https" dir="ltr" /></label>
+              <label>Environment
+                <select name="environment">
+                  <option value="localhost">localhost</option>
+                  <option value="rfc1918">RFC1918</option>
+                  <option value="docker">Docker</option>
+                  <option value="vm">VM</option>
+                  <option value="authorized_explicit">Explicit domain/IP</option>
+                </select>
+              </label>
+              <label>Authorization note<input name="authorization_note" required /></label>
+              <button type="submit" class="primary" data-i18n="lab.addTarget">Add target</button>
+            </form>
+            <div id="labTargets" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.plans">Test Plans</h3>
+            <div id="labPlans" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.active">Active Validation</h3>
+            <div id="labActive" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.findings">Findings</h3>
+            <div id="labFindings" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.lessons">Learned Behavior</h3>
+            <div id="labLessons" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.matrix">Control Matrix</h3>
+            <div id="labMatrix" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.evidence">Evidence</h3>
+            <div id="labEvidence" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.tools">Tool Availability</h3>
+            <div id="labAvailability" class="card-list"></div>
+          </section>
+        </div>
       </section>
     </main>
     <script type="module" src="/app.js"></script>

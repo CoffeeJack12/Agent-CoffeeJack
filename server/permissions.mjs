@@ -23,6 +23,7 @@ const CAPABILITIES = new Set([
   "security_inspect",
   "security_capture",
   "security_firewall_modify",
+  "security_lab",
 ]);
 
 const APPROVAL = new Set([
@@ -126,6 +127,23 @@ export function authorize({
         "Firewall rule changes require explicit Owner approval",
       );
     return result("deny", "Firewall rule changes are Owner-only");
+  }
+  if (capability === "security_lab") {
+    const labAction = String(context.labAction || "").toLowerCase();
+    if (roleEarly === "owner")
+      return result("allow", "Owner adaptive security validation lab");
+    if (roleEarly === "trusted") {
+      if (["targets_add", "targets_remove", "clear_lessons"].includes(labAction))
+        return result(
+          "deny",
+          "Only Owner can manage authorized targets and lab lessons",
+        );
+      return result(
+        "require_approval",
+        "Trusted security lab requires explicit Owner permission",
+      );
+    }
+    return result("deny", "Security Lab is unavailable to this role");
   }
   if (
     capability === "chat" &&
@@ -259,6 +277,7 @@ export function toolCapability(toolName, args = {}) {
     return "security_inspect";
   }
   if (name === "security_packet_capture") return "security_capture";
+  if (name === "security_lab") return "security_lab";
   if (name === "remember") return "chat";
   if (["delete_file", "delete_files"].includes(name)) return "delete_files";
   if (name === "gaming_toggle") return "gaming_toggle";
@@ -298,6 +317,8 @@ export function approvalConsequence(toolName, args = {}) {
       return `This writes a workspace file${labeled}. An existing file is backed up first.`;
     case "security_firewall_modify":
       return `This changes Windows Firewall rules${labeled}. The current policy is backed up first. Connectivity may change immediately. Rollback is a separate approved action.`;
+    case "security_lab":
+      return `This uses the Adaptive Security Validation Lab${labeled}. Tests stay on the Owner-registered target_id. Lessons stay local and never authorize another host.`;
     case "security_capture":
       return args?.includePayload
         ? `This captures live network packets including payloads${labeled}. Captures may contain private data and are stored only under .local/security/captures. They are not automatically deleted.`
@@ -327,6 +348,7 @@ export function permissionSummary(user) {
     "security_inspect",
     "security_capture",
     "security_firewall_modify",
+    "security_lab",
   ];
   return keys
     .map((capability) => {

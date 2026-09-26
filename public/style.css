@@ -1026,3 +1026,30 @@ input[type="checkbox"] {
     display: none;
   }
 }
+
+.lab-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.lab-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.lab-form {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.lab-form label {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+}
+@media (max-width: 860px) {
+  .lab-grid {
+    grid-template-columns: 1fr;
+  }
+}

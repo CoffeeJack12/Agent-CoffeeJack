@@ -42,6 +42,7 @@ export const TOOL_PACKS = Object.freeze({
   security_waf_test: ["network_defense"],
   security_ids_validation: ["network_defense"],
   security_service_map: ["network_defense"],
+  security_lab: ["security_lab"],
 });
 
 const APPROVAL_TOOLS = new Set([
@@ -179,6 +180,13 @@ export const CAPABILITY_DEFS = Object.freeze([
       "security_ids_validation",
       "security_service_map",
     ],
+    gamingModeAvailability: false,
+  },
+  {
+    id: "security_lab",
+    name: "Adaptive security validation lab",
+    packs: ["security_lab"],
+    tools: ["security_lab"],
     gamingModeAvailability: false,
   },
 ]);
@@ -413,7 +421,8 @@ export function capabilityPrompt(
     enabled.includes("desktop") ||
     enabled.includes("browser") ||
     enabled.includes("reverse_security") ||
-    enabled.includes("network_defense");
+    enabled.includes("network_defense") ||
+    enabled.includes("security_lab");
   const web =
     enabled.includes("research") ||
     enabled.includes("web") ||

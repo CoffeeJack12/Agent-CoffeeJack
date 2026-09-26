@@ -21,6 +21,7 @@ export const PACKS = {
   developer: "Developer tools",
   reverse_security: "Reverse engineering / security",
   network_defense: "Firewall / network defense",
+  security_lab: "Adaptive security validation lab",
 };
 const all = Object.keys(PACKS);
 export const MODES = {
@@ -33,7 +34,7 @@ export const MODES = {
   hacker: {
     label: "Hacker",
     description:
-      "System analysis, networking, cybersecurity, reverse engineering, firewall assessment, PE inspection, strings, YARA, process/module inspection, network inspection, focused disassembly/decompilation, and bounded packet capture.",
+      "System analysis, networking, cybersecurity, reverse engineering, firewall assessment, PE inspection, strings, YARA, process/module inspection, network inspection, focused disassembly/decompilation, bounded packet capture, and Owner-authorized adaptive security validation.",
     packs: all,
   },
   developer: {
@@ -234,7 +235,7 @@ export function preferencePrompt(p, { effectiveMode } = {}) {
       : modeId === "empathy"
         ? "EMPATHY MODE: Stay conversational. Do not launch computer/terminal/browser tools unless the user explicitly asks for a machine action."
         : modeId === "hacker"
-          ? "HACKER MODE: Use dedicated reverse_security and network_defense tools first for PE inspection, hashing/comparison, strings, YARA, process/module inspection, firewall assessment, port/DNS/TLS tests, segmentation, benign WAF/IDS canaries, network snapshots, focused disassembly/decompilation, and bounded packet capture. Do not invent terminal commands when a dedicated security tool exists. Prefer observed/expected/mismatch labels. Firewall rule changes require exact Owner approval."
+          ? "HACKER MODE: Use dedicated reverse_security, network_defense, and security_lab tools first for PE inspection, hashing/comparison, strings, YARA, process/module inspection, firewall assessment, port/DNS/TLS tests, segmentation, benign WAF/IDS canaries, network snapshots, focused disassembly/decompilation, bounded packet capture, and Owner-authorized adaptive validation. Do not invent terminal commands when a dedicated security tool exists. Prefer observed/expected/mismatch labels. Firewall rule changes require exact Owner approval. Lab tests require target_id."
           : modeId === "developer"
             ? "DEVELOPER MODE: Inspect the repo, patch, run tests and report verified results."
             : modeId === "secret_agent"

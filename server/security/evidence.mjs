@@ -68,6 +68,24 @@ export function slimSecurityForRemote(result = {}, { maxChars = 4000 } = {}) {
   delete observed.body;
   delete observed.requestBody;
   delete observed.headers;
+  delete observed.packets;
+  if (observed.cases && Array.isArray(observed.cases)) {
+    observed.cases = observed.cases.slice(0, 12).map((row) => ({
+      test_id: row.test_id || row.case_id,
+      category: row.category,
+      expected_decision: row.expected_decision,
+      observed_decision: row.observed_decision,
+      status: row.status ?? null,
+    }));
+  }
+  if (observed.report?.reproduction_steps) {
+    observed.report = {
+      executive_summary: observed.report.executive_summary,
+      target: observed.report.target,
+      policy_gaps: (observed.report.policy_gaps || []).slice(0, 8),
+      secrets_omitted: true,
+    };
+  }
   if (Array.isArray(observed.imports))
     observed.imports = observed.imports.slice(0, 40);
   if (Array.isArray(observed.exports))

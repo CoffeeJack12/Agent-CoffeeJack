@@ -372,6 +372,47 @@ export const definitions = [
     {},
     [],
   ),
+  tool(
+    "security_lab",
+    "Adaptive Security Validation Lab. Requires target_id from the Owner authorized-target registry. Learns defensive-control behavior in an authorized lab only. No stealth, exploits, or unauthorized hosts.",
+    {
+      action: {
+        type: "string",
+        enum: [
+          "targets_list",
+          "targets_add",
+          "targets_remove",
+          "run",
+          "stop",
+          "report",
+          "lessons",
+          "clear_lessons",
+          "findings",
+          "matrix",
+          "rate_limit",
+          "fuzz",
+          "environment",
+          "plans",
+          "evidence",
+          "availability",
+          "compare",
+        ],
+      },
+      target_id: str("Authorized target_id — required for adaptive tests"),
+      target: { type: "object", description: "Target record for targets_add" },
+      policy: { type: "object", description: "Owner-provided expected policy. Never invented." },
+      baseline: { type: "object", description: "Baseline request for the lab target" },
+      budgets: { type: "object", description: "Optional lower limits. Hard max 10 rounds / 25 per round / 200 cases." },
+      expectedThreshold: { type: "number" },
+      maxRequestRate: { type: "number" },
+      durationMs: { type: "number" },
+      intended: { type: "array", items: { type: "object" } },
+      observed: { type: "array", items: { type: "object" } },
+      run_id: str("Stored lab run id"),
+      fuzz: { type: "boolean" },
+    },
+    ["action"],
+  ),
 ];
 
 export function runProcess(
@@ -915,7 +956,7 @@ export class Tools {
         exists: this.securityAdapters?.exists,
         adapters: this.securityAdapters,
       });
-      return kit.execute(name, args);
+      return kit.execute(name, args, signal);
     }
     if (name === "run_tests") {
       const filter = args.testFilter ?? "";

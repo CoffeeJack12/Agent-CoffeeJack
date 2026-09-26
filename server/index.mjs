@@ -35,6 +35,7 @@ import {
   persistVerifiedLesson,
 } from "./lessons.mjs";
 import { workspacePath } from "./files.mjs";
+import { createLabToolkit } from "./security/adaptive/index.mjs";
 import { getPersona, validatePersona, selfModel } from "./personality.mjs";
 import {
   applyLegacyOwnerAutoApprove,
@@ -195,6 +196,7 @@ export async function createApp({
         context: {
           memoryPack: true,
           workspaceId: active?.workspaceId || null,
+          labAction: name === "security_lab" ? args?.action : undefined,
         },
       });
       decision = applyLegacyOwnerAutoApprove(
@@ -1162,6 +1164,54 @@ export async function createApp({
           return json(res, 200, result);
         }
         throw new Error("Invalid self-repair action");
+      }
+      if (route === "/api/security-lab" || route.startsWith("/api/security-lab/")) {
+        if (user.role !== "owner")
+          return json(res, 403, { error: "Security Lab is visible only to Owner" });
+        const lab = createLabToolkit({ dataDirectory: data, user });
+        if (route === "/api/security-lab" && req.method === "GET") {
+          return json(res, 200, await lab.snapshot());
+        }
+        if (route === "/api/security-lab/targets" && req.method === "GET") {
+          return json(res, 200, { targets: lab.registry.list() });
+        }
+        if (route === "/api/security-lab/targets" && req.method === "POST") {
+          const b = await body(req);
+          const target = await lab.registry.add(b.target || b, user);
+          return json(res, 200, { target });
+        }
+        if (route.startsWith("/api/security-lab/targets/") && req.method === "DELETE") {
+          const targetId = decodeURIComponent(route.slice("/api/security-lab/targets/".length));
+          return json(res, 200, await lab.registry.remove(targetId, user));
+        }
+        if (route === "/api/security-lab/run" && req.method === "POST") {
+          const b = await body(req);
+          return json(res, 200, await lab.execute("security_lab", { ...b, action: "run" }));
+        }
+        if (route === "/api/security-lab/stop" && req.method === "POST") {
+          return json(res, 200, await lab.execute("security_lab", { action: "stop" }));
+        }
+        if (route === "/api/security-lab/lessons" && req.method === "GET") {
+          return json(res, 200, { lessons: lab.lessons.list() });
+        }
+        if (route === "/api/security-lab/lessons/clear" && req.method === "POST") {
+          return json(res, 200, await lab.lessons.clear(user));
+        }
+        if (route === "/api/security-lab/findings" && req.method === "GET") {
+          return json(res, 200, await lab.execute("security_lab", { action: "findings" }));
+        }
+        if (route === "/api/security-lab/matrix" && req.method === "POST") {
+          const b = await body(req);
+          return json(res, 200, await lab.execute("security_lab", { action: "matrix", ...b }));
+        }
+        if (route === "/api/security-lab/availability" && req.method === "GET") {
+          return json(res, 200, await lab.execute("security_lab", { action: "availability" }));
+        }
+        if (route.startsWith("/api/security-lab/report/") && req.method === "GET") {
+          const runId = decodeURIComponent(route.slice("/api/security-lab/report/".length));
+          return json(res, 200, await lab.execute("security_lab", { action: "report", run_id: runId }));
+        }
+        return json(res, 404, { error: "Unknown Security Lab route" });
       }
       if (route === "/api/events" && req.method === "GET")
         return json(res, 200, store.events(user.id));

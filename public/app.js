@@ -416,6 +416,7 @@ async function refreshStatus() {
       );
     else if (!state.busy) notice();
     if (status.approvals.length) showApproval(status.approvals[0]);
+    syncSecurityLabNav(status);
     return status;
   } catch (e) {
     $("#connectionLabel").textContent = tr("connection.disconnected");
@@ -517,6 +518,7 @@ function showView(name) {
   if (name === "activity") loadEvents().catch(report);
   if (name === "settings") loadSettings().catch(report);
   if (name === "persona") loadPersona().catch(report);
+  if (name === "lab") loadSecurityLab().catch(report);
 }
 function syncPromptDirection() {
   const el = $("#prompt");
@@ -871,6 +873,223 @@ async function loadSelfRepairPanel() {
     report(error);
   }
 }
+function syncSecurityLabNav(status) {
+  const nav = $("#navSecurityLab");
+  if (!nav) return;
+  const owner = status?.user?.role === "owner";
+  nav.classList.toggle("hidden", !owner);
+  if (!owner && state.view === "lab") showView("chat");
+}
+
+function labCard(text) {
+  const el = document.createElement("div");
+  el.className = "card";
+  el.textContent = text;
+  return el;
+}
+
+function fillLabList(id, rows, render) {
+  const host = $(id);
+  if (!host) return;
+  host.innerHTML = "";
+  if (!rows?.length) {
+    host.textContent = tr("lab.empty");
+    return;
+  }
+  for (const row of rows) host.append(render(row));
+}
+
+async function loadSecurityLab() {
+  const nav = $("#navSecurityLab");
+  const owner = state.status?.user?.role === "owner";
+  if (nav) nav.classList.toggle("hidden", !owner);
+  if (!owner) {
+    $("#labMessage").textContent = tr("lab.denied");
+    return;
+  }
+  const data = await api("security-lab");
+  state.lab = data;
+  fillLabList("#labTargets", data.targets, (target) => {
+    const el = labCard(
+      `${target.name} · ${target.host} · ${target.environment} · ${target.enabled ? "on" : "off"}\n${target.authorization_note}\n${target.target_id}`,
+    );
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "ghost";
+    remove.textContent = tr("button.delete");
+    remove.onclick = async () => {
+      await api("security-lab/targets/" + encodeURIComponent(target.target_id), {
+        method: "DELETE",
+      });
+      await loadSecurityLab();
+    };
+    el.append(remove);
+    return el;
+  });
+  fillLabList(
+    "#labLessons",
+    data.lessons,
+    (lesson) =>
+      labCard(
+        `${lesson.control} · ${lesson.target_id}\n${lesson.observation}\nconfidence ${lesson.confidence}`,
+      ),
+  );
+  fillLabList(
+    "#labFindings",
+    data.findings,
+    (finding) =>
+      labCard(
+        `EXPECTED: ${finding.expected}\nOBSERVED: ${finding.observed}\nGAP: ${finding.gap}\nIMPACT: ${finding.impact}`,
+      ),
+  );
+  const active = $("#labActive");
+  active.innerHTML = "";
+  if (data.active) {
+    active.append(
+      labCard(`run ${data.active.runId || data.active.run_id} · target ${data.active.targetId || data.active.target_id}`),
+    );
+  } else if (data.latest_run) {
+    active.append(
+      labCard(
+        `${data.latest_run.status} · ${data.latest_run.case_count} cases · ${data.latest_run.run_id}`,
+      ),
+    );
+  } else {
+    active.textContent = tr("lab.empty");
+  }
+  const evidence = $("#labEvidence");
+  evidence.innerHTML = "";
+  evidence.append(
+    labCard(
+      data.latest_run
+        ? `Latest run ${data.latest_run.run_id} · ${data.latest_run.case_count} recorded cases`
+        : tr("lab.empty"),
+    ),
+  );
+  const tools = data.availability || {};
+  const runtimes = tools.runtimes || data.environment?.runtimes || {};
+  fillLabList(
+    "#labAvailability",
+    Object.entries(runtimes).map(([id, row]) => ({
+      id,
+      installed: row.installed,
+    })),
+    (row) => labCard(`${row.id}: ${row.installed ? "detected" : "not detected"} (no auto-install)`),
+  );
+  const plans = $("#labPlans");
+  plans.innerHTML = "";
+  plans.append(
+    labCard(
+      "baseline → mutate → observe → classify → compare → store lesson → next (max 10 rounds / 25 cases / 200 global)",
+    ),
+  );
+  const matrix = $("#labMatrix");
+  matrix.innerHTML = "";
+  matrix.append(labCard("source · destination · protocol · port · expected · observed · result"));
+}
+
+$("#labTargetForm")?.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  try {
+    await api("security-lab/targets", {
+      method: "POST",
+      body: {
+        name: form.elements.name.value,
+        host: form.elements.host.value,
+        ports: String(form.elements.ports.value || "")
+          .split(",")
+          .map((n) => Number(n.trim()))
+          .filter(Boolean),
+        protocols: String(form.elements.protocols.value || "http")
+          .split(",")
+          .map((n) => n.trim())
+          .filter(Boolean),
+        environment: form.elements.environment.value,
+        authorization_note: form.elements.authorization_note.value,
+      },
+    });
+    form.reset();
+    $("#labMessage").textContent = "";
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labNewValidation")?.addEventListener("click", async () => {
+  try {
+    const targets = state.lab?.targets || [];
+    const target = targets.find((row) => row.enabled) || targets[0];
+    if (!target) {
+      $("#labMessage").textContent = tr("lab.needTarget");
+      return;
+    }
+    await api("security-lab/run", {
+      method: "POST",
+      body: {
+        target_id: target.target_id,
+        policy: {
+          expectations: [
+            { method: "GET", path: "/", decision: "allow" },
+          ],
+        },
+        baseline: { method: "GET", path: "/" },
+        maxRounds: 2,
+        maxCasesPerRound: 8,
+        maxCasesPerRun: 20,
+      },
+    });
+    $("#labMessage").textContent = tr("lab.started");
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labStop")?.addEventListener("click", async () => {
+  try {
+    await api("security-lab/stop", { method: "POST" });
+    $("#labMessage").textContent = tr("lab.stopped");
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labExport")?.addEventListener("click", async () => {
+  try {
+    const runId = state.lab?.latest_run?.run_id;
+    if (!runId) {
+      $("#labMessage").textContent = tr("lab.empty");
+      return;
+    }
+    const data = await api("security-lab/report/" + encodeURIComponent(runId));
+    const blob = new Blob(
+      [JSON.stringify(data.observed?.report || data, null, 2)],
+      { type: "application/json" },
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `coffeejack-lab-${runId.slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  } catch (error) {
+    report(error);
+  }
+});
+
+$("#labClearLessons")?.addEventListener("click", async () => {
+  try {
+    await api("security-lab/lessons/clear", { method: "POST" });
+    $("#labMessage").textContent = tr("lab.cleared");
+    await loadSecurityLab();
+  } catch (error) {
+    report(error);
+  }
+});
+
 $("#chatForm").onsubmit = async (event) => {
   event.preventDefault();
   const draft = $("#prompt").value;
@@ -1386,6 +1605,7 @@ async function loadUsers() {
   }
   $("#selfRepairSection")?.classList.toggle("hidden", !owner);
   if (owner) loadSelfRepairPanel().catch(report);
+  syncSecurityLabNav(state.status);
   $("#usersList").innerHTML = "";
   const localSession = state.status?.identitySource === "local";
   if (owner && !localSession) {

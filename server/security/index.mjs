@@ -28,6 +28,12 @@ import {
   DEFENSE_AUDIT,
   DEFENSE_TOOLS,
 } from "./defense/index.mjs";
+import {
+  classifyLabIntent,
+  createLabToolkit,
+  LAB_AUDIT,
+  LAB_TOOLS,
+} from "./adaptive/index.mjs";
 
 export const REVERSE_SECURITY_TOOLS = Object.freeze([
   "security_binary_inspect",
@@ -44,6 +50,7 @@ export const REVERSE_SECURITY_TOOLS = Object.freeze([
 export const SECURITY_TOOLS = Object.freeze([
   ...REVERSE_SECURITY_TOOLS,
   ...DEFENSE_TOOLS,
+  ...LAB_TOOLS,
 ]);
 
 export const SECURITY_AUDIT = Object.freeze({
@@ -57,6 +64,7 @@ export const SECURITY_AUDIT = Object.freeze({
   security_packet_capture_start: "security_capture_started",
   security_packet_capture_stop: "security_capture_stopped",
   ...DEFENSE_AUDIT,
+  ...LAB_AUDIT,
 });
 
 const MAX_READ = 32 * 1024 * 1024;
@@ -64,6 +72,8 @@ const MAX_READ = 32 * 1024 * 1024;
 export function classifySecurityIntent(text = "") {
   const t = String(text || "").trim();
   if (!t) return null;
+  const lab = classifyLabIntent(t);
+  if (lab) return lab;
   const defense = classifyDefenseIntent(t);
   if (defense) return defense;
   if (
@@ -262,6 +272,11 @@ export function createSecurityToolkit(options = {}) {
     adapters,
     allowlist: adapters.authorizedTargets || [],
   });
+  const lab = createLabToolkit({
+    dataDirectory,
+    user,
+    adapters,
+  });
   const allowAbsolute =
     user?.role === "owner" || user?.role === "trusted";
 
@@ -333,7 +348,15 @@ export function createSecurityToolkit(options = {}) {
 
   return {
     detect: () => detectSecurityTools({ exists }),
-    async execute(name, args = {}) {
+    async execute(name, args = {}, signal) {
+      if (LAB_TOOLS.includes(name)) {
+        const result = await lab.execute(name, args, signal);
+        auditSlim(store, user?.id, LAB_AUDIT.security_lab, {
+          tool: name,
+          available: result.available,
+        });
+        return result;
+      }
       if (DEFENSE_TOOLS.includes(name)) {
         const result = await defense.execute(name, args);
         const mutated =
@@ -532,4 +555,5 @@ export {
   extractStrings,
   inspectBinaryBuffer,
   DEFENSE_TOOLS,
+  LAB_TOOLS,
 };
