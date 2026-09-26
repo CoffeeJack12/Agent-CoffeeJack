@@ -1541,6 +1541,7 @@ export async function createApp({
             previousStyle,
             previousTopic,
             previousSpeakerPersona,
+            previousSecurityTarget: previousState?.securityTarget || null,
             store,
           });
           timing.mark("context_resolved");

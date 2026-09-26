@@ -1,5 +1,6 @@
 import { MODES } from "./preferences.mjs";
 import { enabledPacks } from "./capabilities.mjs";
+import { extractSecurityFileTarget } from "./security/target.mjs";
 
 const empathy =
   /\b(exhausted|exhausting|tired|sad|lonely|anxious|depressed|heartbroken|grief|rough day|bad day|overwhelmed|stressed|feeling down|miss you)\b|تعبان|مرهق|حزين|قلق|منهك|ضايق|صعب علي|يوم سيء/i;
@@ -69,6 +70,7 @@ function scoreSignals(text, attachments, history) {
     hacker: hacker.test(text) ? 3 : 0,
     secret_agent: secret.test(text) ? 2 : 0,
   };
+  if (extractSecurityFileTarget(text)) scores.hacker += 3;
   if (attachments.some((p) => /\.(m?js|tsx?|py|html|css|json|sql|cjs|mjs)$/i.test(p)))
     scores.developer += 4;
   if (attachments.some((p) => /\.(png|jpe?g|webp)$/i.test(p))) scores.hacker += 1;

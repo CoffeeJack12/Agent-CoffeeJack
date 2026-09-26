@@ -370,7 +370,28 @@ export function formatFinalOutputContract(style = {}) {
       "Do not answer in English. Preserve the active topic.",
     );
   }
+  lines.push(
+    "Tool results are Jack's observations, never user-authored data.",
+    'Never say "the data you provided", "the output you gave me", or "your network data" about tool output.',
+    'Say "I observed...", "The inspection returned...", or "The tool reported...".',
+  );
   return lines.join("\n");
+}
+
+const USER_PROVIDED_TOOL_SPEECH = [
+  [/the data you(?:'ve| have)? provided/gi, "The inspection returned"],
+  [/the output you(?:'ve| have)? (?:gave me|provided|sent)/gi, "The tool reported"],
+  [/the (?:network |process |tool )?data you (?:gave|sent|shared)/gi, "The inspection returned"],
+  [/your network data/gi, "the observed network snapshot"],
+  [/your process data/gi, "the observed process snapshot"],
+];
+
+export function rewriteUserProvidedToolSpeech(text = "") {
+  let next = String(text || "");
+  for (const [pattern, replacement] of USER_PROVIDED_TOOL_SPEECH) {
+    next = next.replace(pattern, replacement);
+  }
+  return next;
 }
 
 function countDialectStuffTokens(body) {

@@ -12,7 +12,16 @@ import {
   priorityTurnOverrides,
 } from "./turn-priority.mjs";
 import { classifyPcDiagnosticIntent } from "./pc-diagnostics.mjs";
-import { classifySecurityIntent } from "./security/index.mjs";
+import {
+  canReuseSecurityFileTarget,
+  classifySecurityIntent,
+  withSecurityTarget,
+} from "./security/index.mjs";
+import {
+  extractSecurityFileTarget,
+  isSecurityTargetFollowUp,
+  securityBinaryExtension,
+} from "./security/target.mjs";
 import {
   applyStylePatch,
   classifyArabicFollowUp,
@@ -375,7 +384,7 @@ export function classifyConversationIntent(text = "", { history = [] } = {}) {
 /**
  * Full pre-routing resolution: effective intent + tool/memory/evidence policy.
  * @param {string} rawText
- * @param {{ history?: any[], user?: object, previousStyle?: object, previousTopic?: string|null, store?: object|null }} [options]
+ * @param {{ history?: any[], user?: object, previousStyle?: object, previousTopic?: string|null, previousSecurityTarget?: object|null, store?: object|null }} [options]
  */
 export function resolveTurnContext(
   rawText = "",
@@ -385,6 +394,7 @@ export function resolveTurnContext(
     previousStyle = null,
     previousTopic = null,
     previousSpeakerPersona = null,
+    previousSecurityTarget = null,
     store = null,
   } = {},
 ) {
@@ -466,10 +476,43 @@ export function resolveTurnContext(
     : styleBefore;
   const styleChanged = Boolean(styleCommand);
 
-  const securityIntent = !classified.conversational
+  let securityIntent = !classified.conversational
     ? classifySecurityIntent(trimmed)
     : null;
   if (securityIntent) {
+    const currentFile = extractSecurityFileTarget(trimmed);
+    if (
+      !currentFile &&
+      !securityIntent.argsHint?.path &&
+      canReuseSecurityFileTarget(securityIntent) &&
+      previousSecurityTarget?.path &&
+      isSecurityTargetFollowUp(trimmed)
+    ) {
+      securityIntent = withSecurityTarget(securityIntent, {
+        path: previousSecurityTarget.path,
+        extension:
+          previousSecurityTarget.extension ||
+          securityBinaryExtension(previousSecurityTarget.path),
+        explicit: false,
+        reused: true,
+      });
+    }
+    const securityTopic =
+      securityIntent.argsHint?.path ||
+      (securityIntent.argsHint?.pid != null
+        ? `PID ${securityIntent.argsHint.pid}`
+        : securityIntent.kind);
+    const isolatedSnapshot = {
+      lastAssistant: "",
+      lastUser: trimmed,
+      lastExecutableProposal: "",
+      lastOptions: [],
+      lastTopic: securityTopic,
+      canonicalTopic: securityTopic,
+      transientFacts: [],
+      recentTurns: [],
+      messages: [],
+    };
     return {
       rawText: trimmed,
       effectiveIntent: securityIntent.effectiveIntent,
@@ -479,7 +522,7 @@ export function resolveTurnContext(
       expandWithContext: false,
       taskHint: securityIntent.kind,
       selectKey: null,
-      snapshot,
+      snapshot: isolatedSnapshot,
       fastPath: false,
       allowResearch: false,
       allowVerification: false,
@@ -490,7 +533,8 @@ export function resolveTurnContext(
       needsVerification: false,
       explicitVerify: false,
       explicitRemember: false,
-      resetTaskState: false,
+      resetTaskState: true,
+      isolateSecurityContext: true,
       priorityLane: "normal",
       priority: { lane: "normal", reason: "security_toolkit" },
       securityIntent,
@@ -501,12 +545,10 @@ export function resolveTurnContext(
         formatFinalOutputContract(conversationStyle) +
         "\n" +
         speakerPrompt,
-      threadContext: formatCompactThreadContext(snapshot, {
-        style: conversationStyle,
-      }),
+      threadContext: "",
       styleChanged: false,
       semantic,
-      canonicalTopic,
+      canonicalTopic: securityTopic,
       speakerPersona,
       instantGreeting: false,
     };
@@ -1007,13 +1049,80 @@ export function shouldAttachVerification({
   );
 }
 
+const SECURITY_TOOL_COMPANIONS = Object.freeze({
+  // Explicit security intents expose only the intended tool unless a
+  // workflow later declares a small companion set here.
+});
+
+export function lockedSecurityTools(turn) {
+  const tool = turn?.securityIntent?.tool;
+  if (!tool) return null;
+  const extras = SECURITY_TOOL_COMPANIONS[tool];
+  return extras?.length ? [tool, ...extras] : [tool];
+}
+
+function parseToolArguments(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) return { ...value };
+  if (typeof value !== "string" || !value.trim()) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * When a security intent names a tool, that tool is authoritative.
+ * Drop unrelated security/process/network/terminal calls and inject argsHint.
+ */
+export function applyAuthoritativeSecurityTool(
+  response,
+  securityIntent,
+  { invoked = false } = {},
+) {
+  if (!securityIntent?.tool || invoked) return response;
+  const required = securityIntent.tool;
+  const hint =
+    securityIntent.argsHint && typeof securityIntent.argsHint === "object"
+      ? { ...securityIntent.argsHint }
+      : {};
+  const calls = Array.isArray(response?.tool_calls) ? response.tool_calls : [];
+  const requiredCall = calls.find(
+    (call) => (call.function?.name || call.name) === required,
+  );
+  const args = {
+    ...hint,
+    ...parseToolArguments(requiredCall?.function?.arguments ?? requiredCall?.arguments),
+  };
+  if (hint.path) args.path = hint.path;
+  if (hint.pid != null) args.pid = hint.pid;
+  return {
+    ...response,
+    tool_calls: [
+      {
+        ...(requiredCall || {}),
+        function: {
+          ...(requiredCall?.function || {}),
+          name: required,
+          arguments: args,
+        },
+      },
+    ],
+  };
+}
+
 /**
  * Filter tool definitions for this turn's policy.
  */
 export function filterToolsForTurn(definitions = [], turn) {
   if (!turn) return definitions;
+  const locked = lockedSecurityTools(turn);
   return definitions.filter((def) => {
     const name = def?.function?.name || def?.name;
+    if (locked) return locked.includes(name);
     if (!turn.allowResearch && (name === "research" || name === "web_search"))
       return false;
     if (!turn.allowRememberTool && name === "remember") return false;

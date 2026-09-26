@@ -1,5 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { localizedSystemNote } from "./conversation-style.mjs";
+import {
+  localizedSystemNote,
+  rewriteUserProvidedToolSpeech,
+} from "./conversation-style.mjs";
 import {
   isLimitsQuestion,
   practicalLimitsReply,
@@ -213,7 +216,7 @@ export function stateContext(state) {
 }
 
 export function guardResponse(state, candidate, languageText = "", options = {}) {
-  let text = candidate;
+  let text = rewriteUserProvidedToolSpeech(candidate);
   const rejected = [];
   const registry = options.registry ?? [];
   const pcEnabled = registry.some(
