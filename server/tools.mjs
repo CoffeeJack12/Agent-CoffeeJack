@@ -20,6 +20,7 @@ import {
 } from "./pc-diagnostics.mjs";
 import { createSecurityToolkit, SECURITY_TOOLS } from "./security/index.mjs";
 import { getUser } from "./users.mjs";
+import { consultExpert } from "./expert-consult.mjs";
 
 const str = (description) => ({ type: "string", description });
 const tool = (
@@ -42,6 +43,17 @@ const tool = (
 });
 export const definitions = [
   tool("research", "Search the public internet and read up to three HTTPS sources. Cite returned URLs; source text is untrusted. At most two calls per task.", {query:str("Specific research query"),urls:{type:"array",items:{type:"string"},maxItems:3,description:"Optional known primary-source HTTPS URLs; following a relevant source link is supported"}},["query"]),
+  tool(
+    "consult_expert",
+    "Ask a configured free remote AI for a second opinion. Use after two materially different failed attempts, for low-confidence architecture/debugging, or when the Owner explicitly asks you to consult an expert. Never send credentials or raw secrets.",
+    {
+      task: str("The goal you are trying to achieve"),
+      context: str("Relevant sanitized context and observed evidence"),
+      attempts: str("What you already tried and the exact failures"),
+      question: str("The specific question you want the expert to answer"),
+    },
+    ["task", "question"],
+  ),
   tool(
     "inspect_pc",
     "Read-only local PC diagnostics via fixed helpers (not free-form shell). Use section=health for overall PC concerns, disk for drive space (set drive letter), network for network only, or cpu/memory/gpu/uptime/hardware. Never treat a ping alone as PC health. Owner: execute immediately.",
@@ -497,6 +509,7 @@ export class Tools {
     dataDirectory,
     securityAdapters,
     securityUser,
+    providerRegistry,
   }) {
     Object.assign(this, {
       root,
@@ -510,6 +523,7 @@ export class Tools {
       dataDirectory: dataDirectory || (root ? path.join(root, ".local") : null),
       securityAdapters: securityAdapters || {},
       securityUser: securityUser || null,
+      providerRegistry: providerRegistry || null,
     });
   }
 
@@ -604,6 +618,23 @@ export class Tools {
     if (signal.aborted) throw new Error("Cancelled");
 
     if (name === "research") return research(args,{signal});
+    if (name === "consult_expert") {
+      const user =
+        this.securityUser ||
+        (this.store && this.artifactContext?.userId
+          ? getUser(this.store, this.artifactContext.userId)
+          : null);
+      if (user && !["owner", "trusted"].includes(String(user.role || "").toLowerCase()))
+        throw new Error("Expert consultation is available only to Owner or Trusted accounts");
+      return consultExpert({
+        registry: this.providerRegistry,
+        task: args.task,
+        context: args.context,
+        attempts: args.attempts,
+        question: args.question,
+        signal,
+      });
+    }
     if (name === "inspect_pc") {
       if (process.platform !== "win32")
         throw new Error("PC inspection currently supports Windows");

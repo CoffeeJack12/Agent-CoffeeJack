@@ -182,6 +182,7 @@ export async function createApp({
     artifactDirectory: artifacts,
     artifactBase: artifacts,
     dataDirectory: data,
+    providerRegistry: registry,
     approve: async (name, args, signal) => {
       const user = active?.userId
         ? getUser(store, active.userId)

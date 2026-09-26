@@ -18,6 +18,7 @@ export const TOOL_PACKS = Object.freeze({
   remember: ["memory"],
   recall: ["memory"],
   research: ["research", "web"],
+  consult_expert: ["research"],
   project_map: ["developer", "files"],
   search_code: ["developer", "files"],
   apply_patch: ["developer", "files"],
@@ -91,7 +92,7 @@ export const CAPABILITY_DEFS = Object.freeze([
     id: "research",
     name: "Web research",
     packs: ["research", "web"],
-    tools: ["research"],
+    tools: ["research", "consult_expert"],
     gamingModeAvailability: false,
   },
   {

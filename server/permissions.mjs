@@ -235,7 +235,7 @@ export function toolCapability(toolName, args = {}) {
     (name === "git" && !/\b(?:status|diff|log|show)\b/i.test(commandText(args)))
   )
     return "git_write";
-  if (name === "research") return "research";
+  if (["research", "consult_expert"].includes(name)) return "research";
   if (name === "web_search") return "web_search";
   if (name === "browser") return "browser";
   if (name === "desktop")

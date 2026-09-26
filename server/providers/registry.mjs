@@ -293,6 +293,15 @@ export function createDefaultRegistry(ollama) {
   );
   registry.register(createAnthropicProvider());
   registry.register(createGoogleProvider());
+  registry.register(
+    createOpenAICompatibleProvider({
+      id: "groq",
+      name: "Groq",
+      envKey: "GROQ_API_KEY",
+      baseUrlEnv: "GROQ_BASE_URL",
+      defaultBaseUrl: "https://api.groq.com/openai/v1",
+    }),
+  );
 
   if (process.env.OPENAI_COMPAT_BASE_URL && process.env.OPENAI_COMPAT_API_KEY) {
     registry.register(
