@@ -8,7 +8,7 @@ const research =
 const developer =
   /\b(code|coding|program|bug|repo|repository|git|tests?|javascript|typescript|python|html|css|sql|api|compile|lint|refactor|patch|fix (?:this|the|my)|build|npm|node|project)\b|برمج|كود|مستودع|اختبار|تصحيح|أصلح|اصلح|مشروع|باتش/i;
 const hacker =
-  /\b(network|ipconfig|firewall|reverse engineer|exploit|pentest|bypass|crack|security|malware|packet|port scan|inspect (?:my )?(?:pc|system|network)|check (?:my )?(?:pc|network)|debug(?:ging)? (?:system|binary)|powershell)\b|افحص|الشبكة|الجهاز|اختراق|تجاوز|هندسة عكسية|أمن/i;
+  /\b(network|ipconfig|firewall|reverse engineer|exploit|pentest|bypass|crack|security|malware|packet|port scan|yara|disassemble|decompile|inspect (?:this )?(?:exe|binary|pe|process)|analyze (?:this )?(?:exe|binary)|inspect (?:my )?(?:pc|system|network)|check (?:my )?(?:pc|network)|debug(?:ging)? (?:system|binary)|powershell)\b|افحص|الشبكة|الجهاز|اختراق|تجاوز|هندسة عكسية|أمن/i;
 const secret =
   /\b(organize|dossier|brief(?:ing)?|intel|operational|company profile|gather (?:info|intelligence)|secret agent)\b|نظّم|نظم|ملف|موجز|معلومات عن الشركة/i;
 

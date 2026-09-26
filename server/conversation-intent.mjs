@@ -12,6 +12,7 @@ import {
   priorityTurnOverrides,
 } from "./turn-priority.mjs";
 import { classifyPcDiagnosticIntent } from "./pc-diagnostics.mjs";
+import { classifySecurityIntent } from "./security/index.mjs";
 import {
   applyStylePatch,
   classifyArabicFollowUp,
@@ -464,6 +465,52 @@ export function resolveTurnContext(
     ? applyStylePatch(styleBefore, styleCommand.patch)
     : styleBefore;
   const styleChanged = Boolean(styleCommand);
+
+  const securityIntent = !classified.conversational
+    ? classifySecurityIntent(trimmed)
+    : null;
+  if (securityIntent) {
+    return {
+      rawText: trimmed,
+      effectiveIntent: securityIntent.effectiveIntent,
+      directive: securityIntent.directive,
+      intent: "task",
+      conversational: false,
+      expandWithContext: false,
+      taskHint: securityIntent.kind,
+      selectKey: null,
+      snapshot,
+      fastPath: false,
+      allowResearch: false,
+      allowVerification: false,
+      allowMemoryWrite: false,
+      allowRememberTool: false,
+      allowWebSearch: false,
+      allowMemoryRecall: false,
+      needsVerification: false,
+      explicitVerify: false,
+      explicitRemember: false,
+      resetTaskState: false,
+      priorityLane: "normal",
+      priority: { lane: "normal", reason: "security_toolkit" },
+      securityIntent,
+      conversationStyle,
+      stylePrompt:
+        formatConversationStylePrompt(conversationStyle) +
+        "\n" +
+        formatFinalOutputContract(conversationStyle) +
+        "\n" +
+        speakerPrompt,
+      threadContext: formatCompactThreadContext(snapshot, {
+        style: conversationStyle,
+      }),
+      styleChanged: false,
+      semantic,
+      canonicalTopic,
+      speakerPersona,
+      instantGreeting: false,
+    };
+  }
 
   // Structured Windows diagnostics beat free-form terminal invention.
   const pcDiag = !classified.conversational
@@ -970,6 +1017,11 @@ export function filterToolsForTurn(definitions = [], turn) {
     if (!turn.allowResearch && (name === "research" || name === "web_search"))
       return false;
     if (!turn.allowRememberTool && name === "remember") return false;
+    if (
+      String(turn.taskHint || "").startsWith("security_") &&
+      name === "terminal"
+    )
+      return false;
     return true;
   });
 }

@@ -19,6 +19,7 @@ export const PACKS = {
   memory: "Memory",
   research: "Research",
   developer: "Developer tools",
+  reverse_security: "Reverse engineering / security",
 };
 const all = Object.keys(PACKS);
 export const MODES = {
@@ -31,7 +32,7 @@ export const MODES = {
   hacker: {
     label: "Hacker",
     description:
-      "System analysis, networking, cybersecurity, reverse engineering, debugging and technical investigation.",
+      "System analysis, networking, cybersecurity, reverse engineering, PE inspection, strings, YARA, process/module inspection, network inspection, focused disassembly/decompilation, and bounded packet capture.",
     packs: all,
   },
   developer: {
@@ -232,7 +233,7 @@ export function preferencePrompt(p, { effectiveMode } = {}) {
       : modeId === "empathy"
         ? "EMPATHY MODE: Stay conversational. Do not launch computer/terminal/browser tools unless the user explicitly asks for a machine action."
         : modeId === "hacker"
-          ? "HACKER MODE: Investigate with terminal, files, search, research, browser, developer tools, Git and desktop inspection as appropriate. Prefer evidence over explaining commands."
+          ? "HACKER MODE: Use dedicated reverse_security tools first for PE inspection, hashing/comparison, strings, YARA, process/module inspection, network snapshots, focused disassembly/decompilation, and bounded packet capture. Do not invent terminal commands when a dedicated security tool exists. Prefer evidence labels (observed/derived/assessment/unverified)."
           : modeId === "developer"
             ? "DEVELOPER MODE: Inspect the repo, patch, run tests and report verified results."
             : modeId === "secret_agent"

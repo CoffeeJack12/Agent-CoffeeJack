@@ -20,6 +20,8 @@ const CAPABILITIES = new Set([
   "user_management",
   "gaming_toggle",
   "self_repair",
+  "security_inspect",
+  "security_capture",
 ]);
 
 const APPROVAL = new Set([
@@ -47,6 +49,7 @@ const OWNER_ALLOW = new Set([
   "user_management",
   "gaming_toggle",
   "self_repair",
+  "security_inspect",
 ]);
 
 const TRUSTED_ALLOW = new Set([
@@ -93,6 +96,28 @@ export function authorize({
     return result("deny", "No active user identity");
   if (!CAPABILITIES.has(capability))
     return result("deny", `Unknown capability: ${capability || "none"}`);
+  const roleEarly = String(user.role ?? "").toLowerCase();
+  if (capability === "security_capture") {
+    if (roleEarly === "owner")
+      return result(
+        "require_approval",
+        "Packet capture requires explicit Owner approval",
+      );
+    return result("deny", "Packet capture is Owner-only");
+  }
+  if (capability === "security_inspect") {
+    if (roleEarly === "owner")
+      return result("allow", "Owner read-only security inspection");
+    if (roleEarly === "trusted")
+      return result(
+        "require_approval",
+        "Trusted security inspection requires explicit permission",
+      );
+    return result(
+      "deny",
+      "Host-level reverse-engineering tools are unavailable",
+    );
+  }
   if (
     capability === "chat" &&
     action === "remember" &&
@@ -191,6 +216,20 @@ export function toolCapability(toolName, args = {}) {
       ? "desktop_view"
       : "desktop_control";
   if (name === "inspect_pc") return "system_inspect";
+  if (
+    [
+      "security_binary_inspect",
+      "security_strings",
+      "security_hash",
+      "security_yara_scan",
+      "security_process_inspect",
+      "security_network_snapshot",
+      "security_disassemble",
+      "security_decompile",
+    ].includes(name)
+  )
+    return "security_inspect";
+  if (name === "security_packet_capture") return "security_capture";
   if (name === "remember") return "chat";
   if (["delete_file", "delete_files"].includes(name)) return "delete_files";
   if (name === "gaming_toggle") return "gaming_toggle";
@@ -228,6 +267,10 @@ export function approvalConsequence(toolName, args = {}) {
       return `This clicks or types on the live Windows desktop${labeled}. The UI changes immediately.`;
     case "files_write":
       return `This writes a workspace file${labeled}. An existing file is backed up first.`;
+    case "security_capture":
+      return args?.includePayload
+        ? `This captures live network packets including payloads${labeled}. Captures may contain private data and are stored only under .local/security/captures. They are not automatically deleted.`
+        : `This starts a metadata-only network packet capture${labeled}. Packet headers are stored locally. Payloads are not stored unless you separately approve full-payload mode.`;
     default:
       return `This runs ${String(toolName || "the action")}${labeled}. Confirm to proceed.`;
   }
@@ -250,6 +293,8 @@ export function permissionSummary(user) {
     "gaming_toggle",
     "user_management",
     "self_repair",
+    "security_inspect",
+    "security_capture",
   ];
   return keys
     .map((capability) => {
@@ -275,7 +320,22 @@ export function canSelfRepair(user) {
  * Temporary compatibility bridge for the legacy global autoApprove setting.
  * It may only turn an owner's require_approval decision into allow.
  */
-export function applyLegacyOwnerAutoApprove(decision, user, autoApprove) {
+export function shouldSkipLegacyAutoApprove(toolName) {
+  return String(toolName || "") === "security_packet_capture";
+}
+
+/**
+ * Temporary compatibility bridge for the legacy global autoApprove setting.
+ * It may only turn an owner's require_approval decision into allow.
+ * Packet capture never auto-approves — it needs exact Owner approval.
+ */
+export function applyLegacyOwnerAutoApprove(
+  decision,
+  user,
+  autoApprove,
+  toolName,
+) {
+  if (shouldSkipLegacyAutoApprove(toolName)) return decision;
   if (
     autoApprove === true &&
     user?.role === "owner" &&

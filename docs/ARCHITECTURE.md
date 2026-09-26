@@ -13,6 +13,7 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
                                                  ├─ document readers
                                                  ├─ PowerShell / Git / package manager
                                                  ├─ isolated Playwright browser
+                                                 ├─ reverse engineering / security toolkit
                                                  └─ explicit Windows desktop adapter
 ```
 
@@ -41,12 +42,13 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/store.mjs`: parameterized SQLite statements with WAL and foreign keys.
 - `server/files.mjs`: realpath confinement and document extraction.
 - `server/tools.mjs`: tool schemas and implementations; command cancellation kills the process tree on Windows.
+- `server/security/`: dedicated reverse-engineering toolkit — bounded PE parser, strings, hashing, optional Ghidra/Rizin/YARA adapters (detect-first, never auto-install), read-only process/network snapshots, Owner-approved metadata-only packet capture. Results use observed/derived/assessment/unverified labels. Host-level tools are Owner-direct for read-only inspection; Trusted needs explicit permission; Standard/Guest are denied. Packet capture is Owner-only and never auto-approved.
 - `scripts/desktop.ps1`: screenshot/mouse/keyboard operations invoked with structured base64 JSON, without command interpolation.
 - `public/`: Arabic RTL frontend; untrusted model/tool strings are escaped before rendering.
 
 ## Data and lifecycle
 
-`.local/coffeejack.sqlite` stores users, sessions, external identities, workspaces, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals, activity and workspaces are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. The owner workspace points at the existing CoffeeJack/project path without moving it; other users get `.local/workspaces/<user-id>/`. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
+`.local/coffeejack.sqlite` stores users, sessions, external identities, workspaces, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals, activity and workspaces are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. The owner workspace points at the existing CoffeeJack/project path without moving it; other users get `.local/workspaces/<user-id>/`. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. `.local/security/` holds Ghidra analysis projects and per-user packet captures (`.local/security/captures/<user-id>/`). Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
 
 Only one agent task runs at a time. Mutating tools suspend until their exact operation is approved (or auto-approval is explicitly enabled). Approval expires after five minutes, and cancellation rejects pending approvals. Enabling gaming mode aborts the active task, waits for its cleanup, closes the automation browser and unloads all resident Ollama models. Configured process names are checked every 15 seconds. The next user request reloads its selected model after gaming mode ends.
 

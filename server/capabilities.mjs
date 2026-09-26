@@ -1,6 +1,7 @@
 import { definitions } from "./tools.mjs";
 import { MODES } from "./preferences.mjs";
 import { permissionSummary as buildPermissionSummary } from "./permissions.mjs";
+import { detectSecurityTools } from "./security/detect.mjs";
 
 /** Tool → capability packs required for that tool to run. */
 export const TOOL_PACKS = Object.freeze({
@@ -22,6 +23,15 @@ export const TOOL_PACKS = Object.freeze({
   apply_patch: ["developer", "files"],
   run_tests: ["developer", "terminal"],
   run_check: ["developer", "terminal"],
+  security_binary_inspect: ["reverse_security"],
+  security_strings: ["reverse_security"],
+  security_hash: ["reverse_security"],
+  security_yara_scan: ["reverse_security"],
+  security_process_inspect: ["reverse_security"],
+  security_network_snapshot: ["reverse_security"],
+  security_disassemble: ["reverse_security"],
+  security_decompile: ["reverse_security"],
+  security_packet_capture: ["reverse_security"],
 });
 
 const APPROVAL_TOOLS = new Set([
@@ -32,6 +42,7 @@ const APPROVAL_TOOLS = new Set([
   "inspect_pc",
   "apply_patch",
   "run_check",
+  "security_packet_capture",
 ]);
 
 /** Logical capability ids Jack can report. Tools map into these. */
@@ -124,6 +135,23 @@ export const CAPABILITY_DEFS = Object.freeze([
     alwaysUnavailable: true,
     gamingModeAvailability: false,
   },
+  {
+    id: "reverse_security",
+    name: "Reverse engineering / security",
+    packs: ["reverse_security"],
+    tools: [
+      "security_binary_inspect",
+      "security_strings",
+      "security_hash",
+      "security_yara_scan",
+      "security_process_inspect",
+      "security_network_snapshot",
+      "security_disassemble",
+      "security_decompile",
+      "security_packet_capture",
+    ],
+    gamingModeAvailability: false,
+  },
 ]);
 
 const registeredTools = new Set(
@@ -137,7 +165,7 @@ export function enabledPacks(preferences) {
 export function capabilityPolicy(preferences, text = "") {
   const enabled = enabledPacks(preferences);
   const explicitAction =
-    /\b(?:inspect|check|run|open|read|write|search|find|browse|install|debug|test|fix)\b|افحص|شغل|شغّل|افتح|ابحث|اقرأ|اصلح|أصلح/i.test(
+    /\b(?:inspect|check|run|open|read|write|search|find|browse|install|debug|test|fix|analyze|reverse|disassemble|decompile|yara|capture|hash)\b|افحص|شغل|شغّل|افتح|ابحث|اقرأ|اصلح|أصلح/i.test(
       text,
     );
   return {
@@ -258,6 +286,7 @@ export function buildCapabilityRegistry({
   modelCapabilities = [],
   platform = process.platform,
   text = "",
+  securityTools = null,
 } = {}) {
   const packs = enabledPacks(preferences);
   const policy = capabilityPolicy(preferences, text);
@@ -292,6 +321,10 @@ export function buildCapabilityRegistry({
     const permissionRequired = def.tools.some((name) =>
       APPROVAL_TOOLS.has(name),
     );
+    const optionalHostTools =
+      def.id === "reverse_security"
+        ? securityTools || detectSecurityTools()
+        : null;
     return {
       id: def.id,
       name: def.name,
@@ -302,6 +335,7 @@ export function buildCapabilityRegistry({
       modeCompatibility: modesFor(def.packs.length ? def.packs : ["memory"]),
       gamingModeAvailability: def.gamingModeAvailability,
       packs: [...def.packs],
+      optionalHostTools,
     };
   });
 }
@@ -311,11 +345,24 @@ export function capabilitySummary(registry) {
     if (!cap.available) return `${cap.name}: unavailable`;
     if (!cap.enabled) return `${cap.name}: disabled`;
     const note = cap.permissionRequired ? " (approval may be required)" : "";
-    return `${cap.name}: enabled${note}`;
+    const host = formatOptionalHostTools(cap.optionalHostTools);
+    return `${cap.name}: enabled${note}${host}`;
   };
   return `AVAILABLE NOW (live runtime — do not invent other limits):\n${registry
     .map((cap) => `- ${line(cap)}`)
     .join("\n")}`;
+}
+
+function formatOptionalHostTools(detected) {
+  if (!detected?.tools) return "";
+  const bits = [
+    `ghidra=${detected.ghidra ? "yes" : "no"}`,
+    `rizin=${detected.rizin ? "yes" : "no"}`,
+    `yara=${detected.yara ? "yes" : "no"}`,
+    `pktmon=${detected.pktmon ? "yes" : "no"}`,
+    `tshark=${detected.tshark ? "yes" : "no"}`,
+  ];
+  return ` [optional host tools: ${bits.join(", ")}]`;
 }
 
 export function capabilityPrompt(
@@ -335,7 +382,8 @@ export function capabilityPrompt(
     enabled.includes("files") ||
     enabled.includes("inspect_pc") ||
     enabled.includes("desktop") ||
-    enabled.includes("browser");
+    enabled.includes("browser") ||
+    enabled.includes("reverse_security");
   const web =
     enabled.includes("research") ||
     enabled.includes("web") ||

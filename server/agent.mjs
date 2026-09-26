@@ -19,6 +19,7 @@ import { resolveEffectiveMode } from "./auto-mode.mjs";
 import { applyAutomaticMemory } from "./auto-memory.mjs";
 import { permissionSummary } from "./permissions.mjs";
 import { filterToolsForTurn } from "./conversation-intent.mjs";
+import { slimSecurityForRemote, SECURITY_TOOLS } from "./security/index.mjs";
 import {
   formatConversationStylePrompt,
   formatFinalOutputContract,
@@ -1013,6 +1014,20 @@ function toolCallKey(name, args) {
 
 /** Slim tool payloads for event storage so evidence packs keep structured sources. */
 function eventDetailForStorage(name, args, result) {
+  if (SECURITY_TOOLS.includes(name) && result && typeof result === "object") {
+    return {
+      args: {
+        path: args?.path ? fileBaseName(args.path) : undefined,
+        otherPath: args?.otherPath ? fileBaseName(args.otherPath) : undefined,
+        action: args?.action,
+        pid: args?.pid,
+        name: args?.name,
+        function: args?.function,
+        includePayload: Boolean(args?.includePayload),
+      },
+      result: slimSecurityForRemote(result, { maxChars: 2500 }),
+    };
+  }
   if (name === "research" && result && typeof result === "object" && !result.error) {
     const mapSource = (s) => {
       const url = String(s?.url || s?.href || "").slice(0, 300);
@@ -1046,6 +1061,16 @@ function toolFeedback(result, toolName = "tool") {
   let payload = result ?? null;
   if (toolName === "research" && payload && typeof payload === "object") {
     payload = summarizeResearchForModel(payload);
+  }
+  if (
+    SECURITY_TOOLS.includes(toolName) &&
+    payload &&
+    typeof payload === "object"
+  ) {
+    payload = {
+      ...payload,
+      observed: slimSecurityObservedForLocal(payload.observed),
+    };
   }
   if (payload && typeof payload === "object" && !Array.isArray(payload)) {
     payload = {
@@ -1104,4 +1129,34 @@ function uiToolResult(name, result) {
   return { truncated: true, preview: json.slice(0, 2000) };
 }
 
-export { toolFeedback, summarizeResearchForModel };
+function fileBaseName(input) {
+  return String(input || "")
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .pop();
+}
+
+function slimSecurityObservedForLocal(observed = {}) {
+  if (!observed || typeof observed !== "object") return observed;
+  const copy = { ...observed };
+  delete copy.bytes;
+  delete copy.raw;
+  delete copy.hex;
+  delete copy.payload;
+  if (Array.isArray(copy.items) && copy.items.length > 80)
+    copy.items = copy.items.slice(0, 80);
+  if (typeof copy.disassembly === "string")
+    copy.disassembly = copy.disassembly.slice(0, 4000);
+  if (typeof copy.decompilation === "string")
+    copy.decompilation = copy.decompilation.slice(0, 4000);
+  if (Array.isArray(copy.packets))
+    copy.packets = copy.packets.slice(0, 40).map((p) => {
+      const row = { ...p };
+      delete row.payload;
+      return row;
+    });
+  return copy;
+}
+
+export { toolFeedback, summarizeResearchForModel, eventDetailForStorage };

@@ -37,6 +37,8 @@ test("CapabilityRegistry reflects enabled packs, platform and gaming", () => {
   assert.equal(byId.desktop.enabled, true);
   assert.equal(byId.git.enabled, true);
   assert.equal(byId.developer.enabled, true);
+  assert.equal(byId.reverse_security.enabled, true);
+  assert.ok(byId.reverse_security.optionalHostTools);
   assert.equal(byId.voice.available, false);
   assert.equal(byId.vision.enabled, false);
   const summary = capabilitySummary(registry);
@@ -49,6 +51,7 @@ test("CapabilityRegistry reflects enabled packs, platform and gaming", () => {
     platform: "win32",
   });
   assert.equal(gaming.find((c) => c.id === "terminal").enabled, false);
+  assert.equal(gaming.find((c) => c.id === "reverse_security").enabled, false);
   assert.equal(gaming.find((c) => c.id === "memory").enabled, true);
 });
 

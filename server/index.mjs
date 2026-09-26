@@ -178,6 +178,7 @@ export async function createApp({
     store,
     artifactDirectory: artifacts,
     artifactBase: artifacts,
+    dataDirectory: data,
     approve: async (name, args, signal) => {
       const user = active?.userId
         ? getUser(store, active.userId)
@@ -200,6 +201,7 @@ export async function createApp({
         decision,
         user,
         store.get("autoApprove", false),
+        name,
       );
       if (decision.decision === "allow") return;
       if (decision.decision === "deny")
