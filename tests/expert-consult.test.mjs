@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { consultExpert, expertStatus } from "../server/expert-consult.mjs";
+import {
+  consultExpert,
+  expertStatus,
+  isExplicitExpertConsultRequest,
+} from "../server/expert-consult.mjs";
 
 function fakeRegistry({ failGoogle = false } = {}) {
   const calls = [];
@@ -29,6 +33,16 @@ function fakeRegistry({ failGoogle = false } = {}) {
     },
   };
 }
+
+test("explicit expert request matcher handles Arabic and English", () => {
+  assert.equal(
+    isExplicitExpertConsultRequest("استشر خبير واديني أفضل طريقة"),
+    true,
+  );
+  assert.equal(isExplicitExpertConsultRequest("consult an expert about this"), true);
+  assert.equal(isExplicitExpertConsultRequest("ask the expert for a second opinion"), true);
+  assert.equal(isExplicitExpertConsultRequest("حسن سرعة الردود"), false);
+});
 
 test("expert status discovers free providers", () => {
   const registry = fakeRegistry();

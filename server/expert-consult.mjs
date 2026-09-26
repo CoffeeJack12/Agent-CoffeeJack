@@ -4,6 +4,13 @@ const DEFAULT_GOOGLE_MODEL = "gemini-3.8-flash";
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-120b";
 const MAX_FIELD_CHARS = 6000;
 
+const EXPLICIT_EXPERT_REQUEST =
+  /\b(?:consult|ask)\s+(?:(?:an?|the)\s+)?expert\b|\bsecond\s+opinion\b|(?:استشر|استشير|شاور)\s+(?:خبير|مستشار)/iu;
+
+export function isExplicitExpertConsultRequest(text = "") {
+  return EXPLICIT_EXPERT_REQUEST.test(String(text || ""));
+}
+
 function env(name) {
   return String(process.env[name] || "").trim();
 }

@@ -19,6 +19,7 @@ import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
 import { isPureGreeting, emitInstantGreeting } from "./greeting.mjs";
 import { createDefaultRegistry } from "./providers/index.mjs";
+import { isExplicitExpertConsultRequest } from "./expert-consult.mjs";
 import {
   buildCouncilPlan,
   runCouncil,
@@ -1719,10 +1720,75 @@ export async function createApp({
                 }
               : undefined,
           });
-          // Provider-native Council — skipped entirely on fast path (no probe, no UI card).
+
+          const explicitExpertRequest =
+            !useFastPath && isExplicitExpertConsultRequest(b.text);
+          let explicitExpertResult = null;
+          let explicitExpertError = null;
+          if (explicitExpertRequest) {
+            const expertArgs = {
+              task: b.text,
+              context: turn.threadContext || "",
+              attempts: "",
+              question:
+                "Give CoffeeJack the best expert recommendation for this request. Be concise, practical, and do not claim you executed anything.",
+            };
+            emit({
+              type: "tool",
+              name: "consult_expert",
+              args: expertArgs,
+              status: "running",
+            });
+            try {
+              explicitExpertResult = await tools.execute(
+                "consult_expert",
+                expertArgs,
+                controller.signal,
+              );
+              store.event(
+                boundChat.id,
+                "consult_expert",
+                {
+                  provider: explicitExpertResult.provider,
+                  model: explicitExpertResult.model,
+                  redacted: explicitExpertResult.redacted,
+                  sanitized: explicitExpertResult.sanitized,
+                },
+                "done",
+              );
+              emit({
+                type: "tool",
+                name: "consult_expert",
+                status: "done",
+                result: {
+                  provider: explicitExpertResult.provider,
+                  model: explicitExpertResult.model,
+                  advice: explicitExpertResult.advice,
+                  sanitized: explicitExpertResult.sanitized,
+                },
+              });
+            } catch (error) {
+              explicitExpertError = String(error?.message || error);
+              store.event(
+                boundChat.id,
+                "consult_expert",
+                { error: explicitExpertError },
+                "error",
+              );
+              emit({
+                type: "tool",
+                name: "consult_expert",
+                status: "error",
+                result: { error: explicitExpertError },
+              });
+            }
+          }
+
+          // Provider-native Council — skipped entirely on fast path and when
+          // the Owner explicitly asks for the external expert.
           let councilResult = null;
           let councilPlan = null;
-          if (!useFastPath) {
+          if (!useFastPath && !explicitExpertRequest) {
             timing.mark("council_start");
             try {
               await registry.refresh(controller.signal);
@@ -1812,7 +1878,9 @@ export async function createApp({
           } else {
             councilPlan = {
               enabled: false,
-              triggerReason: "fast_path",
+              triggerReason: explicitExpertRequest
+                ? "explicit_expert_consult"
+                : "fast_path",
               participants: [],
             };
             timing.mark("council_start");
@@ -1852,9 +1920,15 @@ export async function createApp({
             user,
             turnPolicy: turn,
             timing,
+            expertAlreadyConsulted: explicitExpertRequest,
             councilContext: useFastPath
               ? turn.directive || ""
               : [
+                  explicitExpertResult?.advice
+                    ? `External expert (${explicitExpertResult.provider}/${explicitExpertResult.model}) advice:\n${explicitExpertResult.advice}`
+                    : explicitExpertError
+                      ? `External expert consultation failed: ${explicitExpertError}`
+                      : "",
                   councilResult?.synthesis || "",
                   turn.directive || "",
                   selfRepairDiagnosis
