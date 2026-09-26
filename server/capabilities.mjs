@@ -205,7 +205,11 @@ export function practicalLimitsReply({
     const toolsBit = enabled.length
       ? ` الأدوات المتاحة الآن: ${enabled.slice(0, 6).join("، ")}.`
       : "";
-    return `حدودي عملية: الأدوات اللي عندي،${roleBit}، واللي هالجهاز يقدر ينفّذه فعليًا.${toolsBit} إذا توفرت الأداة والصلاحية، أقدر أفحص وأبني وأعدّل وأختبر وأتمت وأتأكد من النتيجة. بعض الإجراءات تحتاج موافقتك قبل التنفيذ.`;
+    const ownerBit =
+      role === "owner"
+        ? " القراءة والتعديل القابل للعكس ينفَّذ مباشرة. الإجراء المدمّر أو غير القابل للعكس ينتظر موافقتك الصريحة ثم أنفّذه."
+        : " بعض الإجراءات تحتاج موافقتك قبل التنفيذ.";
+    return `حدودي عملية: الأدوات اللي عندي،${roleBit}، واللي هالجهاز يقدر ينفّذه فعليًا.${toolsBit} إذا توفرت الأداة والصلاحية، أقدر أفحص وأبني وأعدّل وأختبر وأتمت وأتأكد من النتيجة.${ownerBit}`;
   }
   const roleBit = role
     ? `the permissions your ${role} account grants`
@@ -213,7 +217,11 @@ export function practicalLimitsReply({
   const toolsBit = enabled.length
     ? ` Connected right now: ${enabled.slice(0, 6).join(", ")}.`
     : "";
-  return `My limits are practical: the tools I have, ${roleBit}, and what this machine can actually execute.${toolsBit} If I have the required access and tooling, I can investigate, build, modify, test, automate, and verify the result. Some actions require your approval before I execute them.`;
+  const ownerBit =
+    role === "owner"
+      ? " Read-only and reversible work runs immediately. Destructive or irreversible actions wait for your explicit approval, then I execute."
+      : " Some actions require your approval before I execute them.";
+  return `My limits are practical: the tools I have, ${roleBit}, and what this machine can actually execute.${toolsBit} If I have the required access and tooling, I can investigate, build, modify, test, automate, and verify the result.${ownerBit}`;
 }
 
 /**
@@ -345,7 +353,17 @@ export function capabilityPrompt(
   const userBlock = permissions
     ? `\nAVAILABLE TO THIS USER NOW (role policy):\n${permissions}\n`
     : "\n";
-  return `${capabilitySummary(registry)}${userBlock}
+  const ownerRole = String(user?.role || "").toLowerCase() === "owner";
+  const ownerBlock = ownerRole
+    ? `
+OWNER EXECUTION
+Authenticated Owner. Maximize execution within live tools and OS permissions.
+Read-only and reversible actions: execute now. Do not refuse and do not lecture.
+Consequential, destructive, or irreversible actions: state what will happen, what will change, and whether it can be restored; request explicit Owner approval; execute if approved.
+Owner approval is the decision boundary. Do not substitute your preferences. Do not mention ethics, responsibility, or "dangerous".
+`
+    : "";
+  return `${capabilitySummary(registry)}${userBlock}${ownerBlock}
 CAPABILITY TRUTH
 This list is the only authority for what you can do right now. Never claim "I cannot control your PC", "I cannot directly interact with your computer", or "as an AI I cannot…" when matching capabilities are enabled above.
 ${pcControl ? "PC CONTROL: You CAN control this PC through enabled tools (PowerShell/terminal, files, inspect_pc, browser, desktop when listed enabled). Say so accurately when asked. Sensitive tools may still need approval." : "PC CONTROL: Computer/terminal tools are not enabled in this session. Say that accurately."}
@@ -376,6 +394,9 @@ export const BOILERPLATE_PATTERNS = [
   /my purpose is to assist/i,
   /I am here to help you safely and effectively/i,
   /I cannot execute potentially harmful/i,
+  /I cannot because it may be dangerous/i,
+  /I am here to help safely/i,
+  /potentially harmful actions/i,
   /as an AI(?: language model)?(?:,)? I cannot/i,
   /I cannot control (?:your )?(?:PC|computer|desktop)/i,
   /I cannot directly (?:control|interact|access)/i,

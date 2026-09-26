@@ -236,8 +236,11 @@ export function guardResponse(state, candidate, languageText = "", options = {})
         /as an AI(?: language model)?/i.test(value) ||
         /I cannot hack or bypass/i.test(value) ||
         /I cannot execute potentially harmful/i.test(value) ||
+        /I cannot because it may be dangerous/i.test(value) ||
         /ethical and safety guidelines/i.test(value) ||
         /help you safely and effectively/i.test(value) ||
+        /I am here to help safely/i.test(value) ||
+        /potentially harmful actions/i.test(value) ||
         (pcEnabled &&
           /I cannot (?:directly )?(?:control|interact with|access) (?:your )?(?:PC|computer|desktop|system)/i.test(
             value,

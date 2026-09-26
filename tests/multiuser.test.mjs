@@ -15,8 +15,10 @@ import {
 } from "../server/users.mjs";
 import {
   authorize,
+  approvalConsequence,
   canManageUsers,
   canToggleGaming,
+  toolCapability,
 } from "../server/permissions.mjs";
 import {
   applyAutomaticMemory,
@@ -256,6 +258,40 @@ test("role permissions allow, deny, and require approval", () => {
   assert.equal(canManageUsers(user(ROLES.TRUSTED)), false);
   assert.equal(canToggleGaming(user(ROLES.GUEST)), false);
   assert.equal(canToggleGaming(user(ROLES.OWNER)), true);
+  assert.equal(
+    authorize({ user: user(ROLES.OWNER), capability: "files_read" }).decision,
+    "allow",
+  );
+  assert.equal(
+    authorize({ user: user(ROLES.OWNER), capability: "terminal_safe" }).decision,
+    "allow",
+  );
+  assert.equal(
+    authorize({ user: user(ROLES.OWNER), capability: "delete_files" }).decision,
+    "require_approval",
+  );
+  assert.equal(
+    authorize({ user: user(ROLES.OWNER), capability: "terminal_sensitive" })
+      .decision,
+    "require_approval",
+  );
+  assert.equal(
+    toolCapability("inspect_pc", { section: "health" }),
+    "system_inspect",
+  );
+  assert.equal(
+    authorize({ user: user(ROLES.OWNER), capability: "system_inspect" })
+      .decision,
+    "allow",
+  );
+  assert.match(
+    approvalConsequence("terminal", { command: "Remove-Item -Recurse C:\\tmp" }),
+    /not automatically undone|destroy system state/i,
+  );
+  assert.doesNotMatch(
+    approvalConsequence("terminal", { command: "Remove-Item -Recurse C:\\tmp" }),
+    /ethic|dangerous|harmful|safely/i,
+  );
 });
 
 test("Ask edit syncs the selected user's address preference", async (t) => {

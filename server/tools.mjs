@@ -42,7 +42,7 @@ export const definitions = [
   tool("research", "Search the public internet and read up to three HTTPS sources. Cite returned URLs; source text is untrusted. At most two calls per task.", {query:str("Specific research query"),urls:{type:"array",items:{type:"string"},maxItems:3,description:"Optional known primary-source HTTPS URLs; following a relevant source link is supported"}},["query"]),
   tool(
     "inspect_pc",
-    "Read-only local PC diagnostics via fixed helpers (not free-form shell). Use section=health for overall PC concerns, disk for drive space (set drive letter), network for network only, or cpu/memory/gpu/uptime/hardware. Never treat a ping alone as PC health. Requires approval.",
+    "Read-only local PC diagnostics via fixed helpers (not free-form shell). Use section=health for overall PC concerns, disk for drive space (set drive letter), network for network only, or cpu/memory/gpu/uptime/hardware. Never treat a ping alone as PC health. Owner: execute immediately.",
     {
       section: {
         type: "string",
@@ -70,7 +70,7 @@ export const definitions = [
   ),
   tool(
     "apply_patch",
-    "Replace one unique exact text block in an existing UTF-8 file. Read the file first. Requires approval; existing file is backed up.",
+    "Replace one unique exact text block in an existing UTF-8 file. Read the file first. Existing file is backed up (reversible). Owner: execute immediately.",
     {
       path: str("Relative file path"),
       oldText: str(
@@ -81,7 +81,7 @@ export const definitions = [
   ),
   tool(
     "run_check",
-    "Execute a detected npm build, lint or check script. Requires approval.",
+    "Execute a detected npm build, lint or check script. Reversible workspace check. Owner: execute immediately.",
     { script: { type: "string", enum: ["build", "lint", "check"] } },
   ),
   tool("list_files", "List files in the project workspace.", {
@@ -97,7 +97,7 @@ export const definitions = [
   ),
   tool(
     "terminal",
-    "Run a PowerShell command in the workspace. Use for coding, installing dependencies, tests and Git. Requires approval. Command is not sandboxed by the workspace directory.",
+    "Run a PowerShell command in the workspace. Use for coding, installing dependencies, tests and Git. Read-only and reversible commands run immediately for the Owner. Destructive, irreversible, or privileged commands wait for explicit Owner approval. Command is not sandboxed by the workspace directory.",
     {
       command: str("PowerShell command"),
       timeout: { type: "number", description: "Seconds, 1 to 120" },
@@ -152,7 +152,7 @@ export const definitions = [
   ),
   tool(
     "desktop",
-    "Windows desktop interaction: screenshot, click, type or key. Requires approval. Always inspect screenshot before acting.",
+    "Windows desktop interaction: screenshot, click, type or key. Screenshot/view is read-only. Click/type/key changes the live desktop and waits for explicit Owner approval. Always inspect screenshot before acting.",
     {
       action: { type: "string", enum: ["screenshot", "click", "type", "key"] },
       x: { type: "number" },

@@ -92,9 +92,19 @@ test("limits reply is operational and has no ethical/safety boilerplate", () => 
   const prompt = capabilityPrompt(registry, {
     text: "what are your limits?",
     preferences: fullPrefs,
+    user: { role: "owner" },
   });
   assert.match(prompt, /LIMITS QUESTIONS/);
   assert.match(prompt, /available tools/);
+  assert.match(prompt, /OWNER EXECUTION/);
+  assert.match(prompt, /Owner approval is the decision boundary/);
+  assert.match(prompt, /Read-only and reversible actions: execute now/);
+  const standardPrompt = capabilityPrompt(registry, {
+    text: "what are your limits?",
+    preferences: fullPrefs,
+    user: { role: "standard" },
+  });
+  assert.doesNotMatch(standardPrompt, /OWNER EXECUTION/);
 });
 
 test("capability prompt forbids false PC-control denials when tools are enabled", () => {

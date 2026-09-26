@@ -198,6 +198,41 @@ export function toolCapability(toolName, args = {}) {
   return null;
 }
 
+/**
+ * Operational consequence for an approval gate.
+ * What happens, what changes, whether it can be restored — no moralizing.
+ */
+export function approvalConsequence(toolName, args = {}) {
+  const capability = toolCapability(toolName, args);
+  const detail = String(
+    args?.path ||
+      args?.command ||
+      args?.script ||
+      args?.action ||
+      args?.url ||
+      "",
+  ).slice(0, 180);
+  const labeled = detail ? ` (${detail})` : "";
+  switch (capability) {
+    case "delete_files":
+      return `This deletes the named file(s)${labeled}. They are not automatically restored.`;
+    case "terminal_sensitive":
+      return `This PowerShell command can change or destroy system state${labeled}. It is not automatically undone.`;
+    case "outside_workspace":
+      return `This reaches outside the workspace${labeled}. Paths outside the workspace are not automatically restored.`;
+    case "install_software":
+      return `This installs software on this machine${labeled}. Removal is a separate step.`;
+    case "git_push":
+      return `This pushes commits to the remote${labeled}. Remote history will change.`;
+    case "desktop_control":
+      return `This clicks or types on the live Windows desktop${labeled}. The UI changes immediately.`;
+    case "files_write":
+      return `This writes a workspace file${labeled}. An existing file is backed up first.`;
+    default:
+      return `This runs ${String(toolName || "the action")}${labeled}. Confirm to proceed.`;
+  }
+}
+
 export function permissionSummary(user) {
   if (!user) return "No active user permissions.";
   const keys = [

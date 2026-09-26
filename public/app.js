@@ -548,7 +548,10 @@ function setComposerPlaceholder() {
 function showApproval(event) {
   const el = $("#approval");
   el.classList.remove("hidden");
-  el.innerHTML = `<h3>${escape(tr("approval.title", { name: event.name }))}</h3><pre>${escape(JSON.stringify(event.args, null, 2))}</pre><button class="primary" id="allowTool">${escape(tr("approval.allow"))}</button><button class="ghost" id="denyTool">${escape(tr("approval.deny"))}</button>`;
+  const consequence = event.consequence
+    ? `<p>${escape(event.consequence)}</p>`
+    : "";
+  el.innerHTML = `<h3>${escape(tr("approval.title", { name: event.name }))}</h3>${consequence}<pre>${escape(JSON.stringify(event.args, null, 2))}</pre><button class="primary" id="allowTool">${escape(tr("approval.allow"))}</button><button class="ghost" id="denyTool">${escape(tr("approval.deny"))}</button>`;
   for (const [id, allow] of [
     ["allowTool", true],
     ["denyTool", false],

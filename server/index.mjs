@@ -37,6 +37,7 @@ import { workspacePath } from "./files.mjs";
 import { getPersona, validatePersona, selfModel } from "./personality.mjs";
 import {
   applyLegacyOwnerAutoApprove,
+  approvalConsequence,
   authorize,
   canManageUsers,
   canSelfRepair,
@@ -214,9 +215,17 @@ export async function createApp({
         };
         const cancel = () => finish(false);
         const timer = setTimeout(cancel, 300000);
-        approvals.set(id, { id, name, args, finish, userId: user.id });
+        const consequence = approvalConsequence(name, args);
+        approvals.set(id, {
+          id,
+          name,
+          args,
+          finish,
+          userId: user.id,
+          consequence,
+        });
         signal.addEventListener("abort", cancel, { once: true });
-        active?.emit({ type: "approval", id, name, args });
+        active?.emit({ type: "approval", id, name, args, consequence });
       });
     },
   });
@@ -842,7 +851,12 @@ export async function createApp({
           }),
           approvals: [...approvals.values()]
             .filter((pending) => pending.userId === user.id)
-            .map(({ id, name, args }) => ({ id, name, args })),
+            .map(({ id, name, args, consequence }) => ({
+              id,
+              name,
+              args,
+              ...(consequence ? { consequence } : {}),
+            })),
           selfRepair: {
             settings: selfRepair.settings(),
             canApply: canSelfRepair(user),
