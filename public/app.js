@@ -6,6 +6,8 @@ import {
   t,
   applyDocumentLocale,
   applyStaticI18n,
+  persistAppLanguageHint,
+  readAppLanguageHint,
 } from "/i18n.js";
 import { createDropdown, mountDropdown } from "/dropdown.js";
 import {
@@ -41,6 +43,8 @@ const dropdowns = {
   persona: {},
 };
 const tr = (key, vars) => t(key, state.locale, vars);
+const UI_DATE_LOCALES = { ar: "ar-SA", en: "en-US" };
+const uiDateLocale = () => UI_DATE_LOCALES[state.locale] || "en-US";
 function modeOptions() {
   return Object.keys(preferenceCatalog?.modes ?? {
     auto: {},
@@ -51,15 +55,115 @@ function modeOptions() {
     secret_agent: {},
   }).map((value) => ({ value, label: tr(`mode.${value}.label`) }));
 }
-function applyAppLanguage(appLanguage = "en") {
+function updateConnectionChrome(status) {
+  if (!status) {
+    if ($("#connectionLabel"))
+      $("#connectionLabel").textContent = tr("connection.disconnected");
+    $("#connectionDot")?.classList.remove("ready");
+    return;
+  }
+  const models = status.models ?? [];
+  const ready =
+    !status.modelError &&
+    models.some((m) => m.name === status.settings?.model);
+  $("#connectionDot")?.classList.toggle("ready", ready && !status.gaming);
+  if ($("#connectionLabel"))
+    $("#connectionLabel").textContent = status.gaming
+      ? tr("connection.gamingPriority")
+      : ready
+        ? tr("connection.local")
+        : tr("connection.modelNotReady");
+  const gaming = $("#gaming");
+  if (gaming) {
+    gaming.classList.toggle("on", status.gaming);
+    gaming.setAttribute("aria-pressed", String(status.gaming));
+  }
+  const gamingLabel = $("#gaming span");
+  if (gamingLabel)
+    gamingLabel.textContent = status.gaming
+      ? tr("gaming.modeOn")
+      : tr("gaming.mode");
+}
+
+function remountSettingsModelDropdowns() {
+  const status = state.status;
+  const form = $("#settingsForm");
+  if (!status || !form || !$("#modelSelectHost")) return;
+  for (const [name, host] of [
+    ["model", "#modelSelectHost"],
+    ["codingModel", "#codingModelHost"],
+    ["visionModel", "#visionModelHost"],
+  ]) {
+    const names = [
+      ...new Set(
+        [...status.models.map((m) => m.name), status.settings[name]].filter(
+          Boolean,
+        ),
+      ),
+    ];
+    dropdowns.settingsModels[name] = mountDropdown(host, {
+      name,
+      options: [
+        ...(name === "model"
+          ? [{ value: "auto", label: tr("settings.autoOption") }]
+          : [{ value: "", label: tr("settings.sameAsPrimary") }]),
+        ...names
+          .filter((value) => value && value !== "auto")
+          .map((value) => ({ value, label: value })),
+      ],
+      value: status.settings[name] || (name === "model" ? "auto" : ""),
+      ariaLabel: tr(
+        name === "model"
+          ? "settings.primaryModel"
+          : name === "codingModel"
+            ? "settings.codingModel"
+            : "settings.visionModel",
+      ),
+    });
+  }
+}
+
+async function refreshLocalizedLists() {
+  if (!state.status) return;
+  const jobs = [];
+  if (state.view === "memory") jobs.push(loadMemories());
+  if (state.view === "activity") jobs.push(loadEvents());
+  if (state.view === "lab") jobs.push(loadSecurityLab());
+  if (state.view === "settings") {
+    jobs.push(loadPreferences(), loadUsers(), loadSelfRepairPanel());
+  }
+  if (state.view === "chat") jobs.push(history());
+  await Promise.all(jobs.map((job) => job.catch(report)));
+}
+
+async function applyAppLanguage(appLanguage = "en") {
   const locale = resolveAppLocale(appLanguage);
+  const changed = state.locale !== locale.lang;
   state.locale = locale.lang;
   applyDocumentLocale(locale);
+  persistAppLanguageHint(locale.lang);
   applyStaticI18n(document, state.locale);
-  $("#pageTitle").textContent = tr(`page.${state.view}`);
-  setComposerPlaceholder();
-  mountRoutingDropdowns();
-  if (Object.keys(dropdowns.persona).length) mountPersonaDropdowns(personaValues());
+  document.title = tr("page.documentTitle");
+  if ($("#pageTitle")) $("#pageTitle").textContent = tr(`page.${state.view}`);
+  try {
+    setComposerPlaceholder();
+    mountRoutingDropdowns();
+    if (Object.keys(dropdowns.settingsModels).length)
+      remountSettingsModelDropdowns();
+    if (Object.keys(dropdowns.persona).length) {
+      mountPersonaDropdowns(personaValues());
+      previewPersona();
+    }
+    if (state.status) {
+      renderAccountIdentity(state.status);
+      renderProviders(state.status.providers, state.status);
+      updateConnectionChrome(state.status);
+      if (state.status.jack) updateSelfModel(state.status.jack);
+    }
+  } catch (error) {
+    console.error("applyAppLanguage", error);
+  }
+  if (changed) await refreshLocalizedLists();
 }
 function mountRoutingDropdowns() {
   if (!$("#jackModeHost") || !$("#taskModeHost") || !$("#modelHost")) return;
@@ -241,10 +345,10 @@ function renderProviders(providers, status) {
     refresh.type = "button";
     refresh.className = "secondary";
     refresh.dataset.providersRefresh = "1";
-    refresh.textContent = tr("providers.refresh");
     refresh.onclick = () => refreshStatus().catch(report);
     host.parentElement.append(refresh);
   }
+  if (refresh) refresh.textContent = tr("providers.refresh");
 }
 function isPublicRemoteBrowser() {
   const host = String(location.hostname || "").toLowerCase();
@@ -381,7 +485,7 @@ async function refreshStatus() {
         return;
       }
     }
-    applyAppLanguage(status.preferences?.appLanguage ?? "en");
+    await applyAppLanguage(status.preferences?.appLanguage ?? "en");
     if (!state.modeInitialized) {
       state.currentMode = status.preferences?.mode ?? "auto";
       state.taskMode = "auto";
@@ -390,21 +494,11 @@ async function refreshStatus() {
       mountRoutingDropdowns();
     }
     if (status.jack) updateSelfModel(status.jack);
+    updateConnectionChrome(status);
+    renderProviders(status.providers, status);
     const ready =
       !status.modelError &&
-      status.models.some((m) => m.name === status.settings.model);
-    $("#connectionDot").classList.toggle("ready", ready && !status.gaming);
-    $("#connectionLabel").textContent = status.gaming
-      ? tr("connection.gamingPriority")
-      : ready
-        ? tr("connection.local")
-        : tr("connection.modelNotReady");
-    renderProviders(status.providers, status);
-    $("#gaming").classList.toggle("on", status.gaming);
-    $("#gaming").setAttribute("aria-pressed", String(status.gaming));
-    $("#gaming span").textContent = status.gaming
-      ? tr("gaming.modeOn")
-      : tr("gaming.mode");
+      (status.models ?? []).some((m) => m.name === status.settings?.model);
     if (status.gaming)
       notice(
         tr("gaming.notice"),
@@ -914,7 +1008,7 @@ async function loadSecurityLab() {
   state.lab = data;
   fillLabList("#labTargets", data.targets, (target) => {
     const el = labCard(
-      `${target.name} · ${target.host} · ${target.environment} · ${target.enabled ? "on" : "off"}\n${target.authorization_note}\n${target.target_id}`,
+      `${target.name} · ${target.host} · ${target.environment} · ${target.enabled ? tr("lab.target.on") : tr("lab.target.off")}\n${target.authorization_note}\n${target.target_id}`,
     );
     const remove = document.createElement("button");
     remove.type = "button";
@@ -934,7 +1028,7 @@ async function loadSecurityLab() {
     data.lessons,
     (lesson) =>
       labCard(
-        `${lesson.control} · ${lesson.target_id}\n${lesson.observation}\nconfidence ${lesson.confidence}`,
+        `${lesson.control} · ${lesson.target_id}\n${lesson.observation}\n${tr("lab.confidence")} ${lesson.confidence}`,
       ),
   );
   fillLabList(
@@ -942,19 +1036,21 @@ async function loadSecurityLab() {
     data.findings,
     (finding) =>
       labCard(
-        `EXPECTED: ${finding.expected}\nOBSERVED: ${finding.observed}\nGAP: ${finding.gap}\nIMPACT: ${finding.impact}`,
+        `${tr("lab.finding.expected")}: ${finding.expected}\n${tr("lab.finding.observed")}: ${finding.observed}\n${tr("lab.finding.gap")}: ${finding.gap}\n${tr("lab.finding.impact")}: ${finding.impact}`,
       ),
   );
   const active = $("#labActive");
   active.innerHTML = "";
   if (data.active) {
     active.append(
-      labCard(`run ${data.active.runId || data.active.run_id} · target ${data.active.targetId || data.active.target_id}`),
+      labCard(
+        `${tr("lab.active.run")} ${data.active.runId || data.active.run_id} · ${tr("lab.active.target")} ${data.active.targetId || data.active.target_id}`,
+      ),
     );
   } else if (data.latest_run) {
     active.append(
       labCard(
-        `${data.latest_run.status} · ${data.latest_run.case_count} cases · ${data.latest_run.run_id}`,
+        `${data.latest_run.status} · ${data.latest_run.case_count} ${tr("lab.cases")} · ${data.latest_run.run_id}`,
       ),
     );
   } else {
@@ -965,7 +1061,10 @@ async function loadSecurityLab() {
   evidence.append(
     labCard(
       data.latest_run
-        ? `Latest run ${data.latest_run.run_id} · ${data.latest_run.case_count} recorded cases`
+        ? tr("lab.evidence.latest", {
+            id: data.latest_run.run_id,
+            count: data.latest_run.case_count,
+          })
         : tr("lab.empty"),
     ),
   );
@@ -977,18 +1076,21 @@ async function loadSecurityLab() {
       id,
       installed: row.installed,
     })),
-    (row) => labCard(`${row.id}: ${row.installed ? "detected" : "not detected"} (no auto-install)`),
+    (row) =>
+      labCard(
+        `${row.id}: ${row.installed ? tr("lab.tools.detected") : tr("lab.tools.notDetected")} (${tr("lab.tools.noAutoInstall")})`,
+      ),
   );
   const plans = $("#labPlans");
   plans.innerHTML = "";
   plans.append(
     labCard(
-      "baseline → mutate → observe → classify → compare → store lesson → next (max 10 rounds / 25 cases / 200 global)",
+      tr("lab.plan.pipeline"),
     ),
   );
   const matrix = $("#labMatrix");
   matrix.innerHTML = "";
-  matrix.append(labCard("source · destination · protocol · port · expected · observed · result"));
+  matrix.append(labCard(tr("lab.matrix.headers")));
 }
 
 $("#labTargetForm")?.addEventListener("submit", async (event) => {
@@ -1180,18 +1282,26 @@ $("#chatForm").onsubmit = async (event) => {
           const el = document.createElement("details");
           el.className = "tool-step council-step";
           const ok = item.status === "done";
-          const title = item.title || "AI Council";
+          const title = item.title || tr("council.title");
           el.innerHTML = `<summary>${ok ? "✓" : "◌"} ${escape(title)} · ${escape(item.detail || item.status || "")}</summary>`;
           if (item.evidenceTypes?.length || item.verification) {
             const meta = document.createElement("div");
             meta.className = "council-summary";
             meta.textContent = [
               item.evidenceTypes?.length
-                ? `Evidence: ${item.evidenceTypes.join(", ")}`
+                ? tr("council.evidence", {
+                    types: item.evidenceTypes.join(", "),
+                  })
                 : "",
-              item.verification ? `Verification: ${item.verification}` : "",
+              item.verification
+                ? tr("council.verification", { value: item.verification })
+                : "",
               item.testsVerified != null
-                ? `Tests verified: ${item.testsVerified ? "yes" : "no"}`
+                ? tr("council.testsVerified", {
+                    value: item.testsVerified
+                      ? tr("council.yes")
+                      : tr("council.no"),
+                  })
                 : "",
             ]
               .filter(Boolean)
@@ -1250,7 +1360,7 @@ $("#chatForm").onsubmit = async (event) => {
                   : [];
               if (item.name === "research" && item.status !== "error") {
                 el.querySelector("summary").textContent =
-                  `Research ✓ · ${sources.length} sources`;
+                  tr("research.sources", { count: sources.length });
                 pre.remove();
                 const list = document.createElement("ul");
                 list.className = "research-sources";
@@ -1466,16 +1576,13 @@ async function loadMemories() {
     for (const m of items) {
       const el = document.createElement("div");
       el.className = "card";
-      el.innerHTML = `<small>${escape(tr(`memory.kind.${m.kind}`))} · ${new Date(m.created).toLocaleDateString(state.locale === "ar" ? "ar-SA" : "en-US")}</small><p>${escape(m.content)}</p>`;
+      el.innerHTML = `<small>${escape(tr(`memory.kind.${m.kind}`))} · ${new Date(m.created).toLocaleDateString(uiDateLocale())}</small><p>${escape(m.content)}</p>`;
       const edit = document.createElement("button");
       edit.type = "button";
       edit.className = "ghost";
-      edit.textContent = state.locale === "ar" ? "تعديل" : "Edit";
+      edit.textContent = tr("memory.edit");
       edit.onclick = async () => {
-        const content = prompt(
-          state.locale === "ar" ? "عدّل الذاكرة" : "Edit memory",
-          m.content,
-        )?.trim();
+        const content = prompt(tr("memory.editPrompt"), m.content)?.trim();
         if (!content || content === m.content) return;
         await api("memories/" + m.id, { method: "DELETE" });
         await api("memories", {
@@ -1521,7 +1628,7 @@ async function loadEvents() {
   for (const item of events) {
     const el = document.createElement("details");
     el.className = "card";
-    el.innerHTML = `<summary>${item.status === "done" ? "✓" : "!"} ${escape(item.tool)} <small> · ${new Date(item.created).toLocaleString(state.locale === "ar" ? "ar-SA" : "en-US")}</small></summary><pre>${escape(JSON.stringify(JSON.parse(item.detail), null, 2))}</pre>`;
+    el.innerHTML = `<summary>${item.status === "done" ? "✓" : "!"} ${escape(item.tool)} <small> · ${new Date(item.created).toLocaleString(uiDateLocale())}</small></summary><pre>${escape(JSON.stringify(JSON.parse(item.detail), null, 2))}</pre>`;
     $("#events").append(el);
   }
 }
@@ -1532,39 +1639,7 @@ async function loadSettings() {
   await loadPreferences();
   await loadUsers();
   const form = $("#settingsForm");
-  for (const [name, host] of [
-    ["model", "#modelSelectHost"],
-    ["codingModel", "#codingModelHost"],
-    ["visionModel", "#visionModelHost"],
-  ]) {
-    const names = [
-      ...new Set(
-        [
-          ...status.models.map((m) => m.name),
-          status.settings[name],
-        ].filter(Boolean),
-      ),
-    ];
-    dropdowns.settingsModels[name] = mountDropdown(host, {
-      name,
-      options: [
-        ...(name === "model"
-          ? [{ value: "auto", label: "Auto" }]
-          : [{ value: "", label: tr("settings.sameAsPrimary") }]),
-        ...names
-          .filter((value) => value && value !== "auto")
-          .map((value) => ({ value, label: value })),
-      ],
-      value: status.settings[name] || (name === "model" ? "auto" : ""),
-      ariaLabel: tr(
-        name === "model"
-          ? "settings.primaryModel"
-          : name === "codingModel"
-            ? "settings.codingModel"
-            : "settings.visionModel",
-      ),
-    });
-  }
+  remountSettingsModelDropdowns();
   for (const key of ["workspace", "instructions"])
     form.elements[key].value = status.settings[key];
   for (const key of ["autoApprove", "autoGaming"])
@@ -1682,9 +1757,8 @@ $("#createUserForm").onsubmit = async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const role = form.elements.namedItem("role").value;
-  const confirmOwner = role === "owner" && confirm(
-    "Create an Owner with full user-management and system permissions?",
-  );
+  const confirmOwner =
+    role === "owner" && confirm(tr("users.createOwnerConfirm"));
   if (role === "owner" && !confirmOwner) return;
   await api("users", {
     method: "POST",
@@ -1713,7 +1787,8 @@ $("#ownerCredentialsForm")?.addEventListener("submit", async (event) => {
     });
     form.elements.password.value = "";
     form.elements.confirmPassword.value = "";
-    if (message) message.textContent = data.user?.email || "Saved";
+    if (message)
+      message.textContent = data.user?.email || tr("owner.credentials.saved");
     await refreshStatus();
     await loadUsers();
   } catch (error) {
@@ -1871,33 +1946,24 @@ function mountPersonaDropdowns(values = {}) {
 }
 function previewPersona() {
   const values = personaValues();
-  const english = values.language === "en";
-  $("#previewQuestion").textContent = english
-    ? "Jack, my code broke."
-    : values.dialect === "standard"
-      ? "يا Jack، توقف الكود عن العمل."
-      : "يا Jack، الكود خرب.";
-  const examples = english
-    ? {
-        playful:
-          "Send the first error. The code picked drama; we pick the cause, then we break it properly.",
-        subtle: "First error. One bug at a time—no speeches.",
-        off: "Send the first error and the relevant code. I’ll isolate the cause, patch it, and test.",
-      }
-    : values.dialect === "standard"
-      ? {
-          playful:
-            "أرسل أول رسالة خطأ. الكود قرر المسرح؛ إحنا نقرر السبب وبعدها نكسر المشكلة.",
-          subtle: "أول رسالة خطأ. خطوة واحدة. بلا خطب.",
-          off: "أرسل أول رسالة خطأ والجزء المرتبط بها من الكود. أحدد السبب، أصلحه، ثم أختبر.",
-        }
-      : {
-          playful:
-            "هات أول رسالة خطأ. الكود اختار الدراما؛ إحنا نمسك السبب ونخلّصه. قهوتك اختيارية.",
-          subtle: "خلّينا نشوف أول رسالة خطأ. خطوة خطوة، من غير تمثيل.",
-          off: "أرسل أول رسالة خطأ والكود المرتبط بها. أحدد السبب، أعدّله، وأختبر.",
-        };
-  $("#personaPreview").textContent = examples[values.humor];
+  const replyLang = values.language === "en" ? "en" : "ar";
+  if (replyLang === "en") {
+    $("#previewQuestion").textContent = t("persona.previewQuestion.en", "en");
+    $("#personaPreview").textContent = t(
+      `persona.previewAnswer.en.${values.humor}`,
+      "en",
+    );
+  } else {
+    const dialect = values.dialect === "standard" ? "standard" : "jeddah";
+    $("#previewQuestion").textContent = t(
+      `persona.previewQuestion.ar.${dialect}`,
+      "ar",
+    );
+    $("#personaPreview").textContent = t(
+      `persona.previewAnswer.ar.${dialect}.${values.humor}`,
+      "ar",
+    );
+  }
   for (const button of document.querySelectorAll("[data-persona-preset]")) {
     const preset = presets[button.dataset.personaPreset];
     const selected =
@@ -1907,22 +1973,29 @@ function previewPersona() {
   }
 }
 function updateSelfModel(jack) {
-  const formatter = new Intl.NumberFormat(state.locale === "ar" ? "ar-SA" : "en-US");
-  $("#memoryCount").textContent = formatter.format(jack.memories);
-  $("#conversationCount").textContent = formatter.format(jack.conversations);
-  $("#toolCount").textContent = formatter.format(jack.completedTools);
-  $("#selfState").textContent = tr(
-    `persona.self.state.${jack.state === "gaming" ? "gaming" : jack.state === "working" ? "working" : "ready"}`,
-  );
-  $("#jackPresence").textContent =
-    jack.state === "gaming"
-      ? tr("welcome.presence.gaming")
-      : jack.state === "working"
-        ? tr("welcome.presence.working")
-        : tr("welcome.presence.here");
-  $("#personalityShortcut").textContent = tr(
-    `persona.shortcut.${jack.persona.humor}`,
-  );
+  if (!jack) return;
+  const formatter = new Intl.NumberFormat(uiDateLocale());
+  if ($("#memoryCount"))
+    $("#memoryCount").textContent = formatter.format(jack.memories ?? 0);
+  if ($("#conversationCount"))
+    $("#conversationCount").textContent = formatter.format(jack.conversations ?? 0);
+  if ($("#toolCount"))
+    $("#toolCount").textContent = formatter.format(jack.completedTools ?? 0);
+  if ($("#selfState"))
+    $("#selfState").textContent = tr(
+      `persona.self.state.${jack.state === "gaming" ? "gaming" : jack.state === "working" ? "working" : "ready"}`,
+    );
+  if ($("#jackPresence"))
+    $("#jackPresence").textContent =
+      jack.state === "gaming"
+        ? tr("welcome.presence.gaming")
+        : jack.state === "working"
+          ? tr("welcome.presence.working")
+          : tr("welcome.presence.here");
+  if ($("#personalityShortcut"))
+    $("#personalityShortcut").textContent = tr(
+      `persona.shortcut.${jack.persona?.humor || "playful"}`,
+    );
   const r = jack.lastReflection;
   if (r) {
     const outcome = r.outcome === "step-limit" ? "stepLimit" : r.outcome;
@@ -2103,7 +2176,7 @@ async function loadPreferences() {
           onChange: async (value) => {
             if (key === "mode") drawPacks();
             if (key === "appLanguage") {
-              applyAppLanguage(value);
+              await applyAppLanguage(value);
               try {
                 await api("preferences", {
                   method: "POST",
@@ -2203,7 +2276,7 @@ $("#accountLogout")?.addEventListener("click", async () => {
   }
 });
 
-applyAppLanguage("en");
+await applyAppLanguage(readAppLanguageHint());
 await refreshStatus();
 if (!publicLoginRedirect) {
   await loadPreferences().catch(report);

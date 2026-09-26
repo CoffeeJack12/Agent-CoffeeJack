@@ -1749,3 +1749,61 @@ body.access-locked main {
   color: var(--text);
   padding: 8px 10px;
 }
+
+/* App language direction: sidebar at inline-start (left in English, right in Arabic). */
+html[dir="ltr"] .sidebar {
+  right: auto;
+  left: 0;
+  border-left: 0;
+  border-right: 1px solid var(--line);
+}
+html[dir="ltr"] main {
+  margin-right: 0;
+  margin-left: 248px;
+}
+html[dir="rtl"] .sidebar {
+  left: auto;
+  right: 0;
+  border-right: 0;
+  border-left: 1px solid var(--line);
+}
+html[dir="rtl"] main {
+  margin-left: 0;
+  margin-right: 248px;
+}
+@media (max-width: 1050px) {
+  html[dir="ltr"] main {
+    margin-left: 224px;
+    width: calc(100% - 224px);
+  }
+  html[dir="rtl"] main {
+    margin-right: 224px;
+    width: calc(100% - 224px);
+  }
+}
+@media (max-width: 760px) {
+  html[dir="ltr"] main {
+    margin-left: 66px;
+    width: calc(100% - 66px);
+  }
+  html[dir="rtl"] main {
+    margin-right: 66px;
+    width: calc(100% - 66px);
+  }
+}
+
+/* Keep technical values LTR even when the chrome is Arabic. */
+html[dir="rtl"] input[type="email"],
+html[dir="rtl"] input[type="password"],
+html[dir="rtl"] input[type="url"],
+html[dir="rtl"] input[type="number"],
+html[dir="rtl"] input[dir="ltr"],
+html[dir="rtl"] textarea[dir="ltr"],
+html[dir="rtl"] select[dir="ltr"],
+html[dir="rtl"] code,
+html[dir="rtl"] pre,
+html[dir="rtl"] kbd {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: isolate;
+}

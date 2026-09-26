@@ -1,6 +1,19 @@
 import { mountBranding } from "/branding.js";
+import {
+  applyDocumentLocale,
+  applyStaticI18n,
+  readAppLanguageHint,
+  resolveAppLocale,
+  t,
+} from "/i18n.js";
 
 mountBranding();
+
+const locale = resolveAppLocale(readAppLanguageHint());
+applyDocumentLocale(locale);
+applyStaticI18n(document, locale.lang);
+document.title = t("page.authTitle", locale.lang);
+const tr = (key) => t(key, locale.lang);
 
 const page = location.pathname.replace(/\/$/, "") || "/login";
 const form = document.querySelector("#authForm");
@@ -9,45 +22,42 @@ const lead = document.querySelector("#authLead");
 const submit = document.querySelector("#authSubmit");
 const errorEl = document.querySelector("#authError");
 const noteEl = document.querySelector("#authNote");
-const MAIL_UNCONFIGURED =
-  "Email delivery is not configured yet. Contact the administrator.";
-const SESSION_EXPIRED = "Your session expired. Please log in again.";
 
 const copy = {
   "/login": {
-    title: "Sign in",
-    lead: "Sign in with your CoffeeJack email and password.",
-    submit: "Sign in",
+    title: tr("auth.signIn"),
+    lead: tr("auth.lead.login"),
+    submit: tr("auth.submit.login"),
     password: "current-password",
   },
   "/signup": {
-    title: "Create account",
-    lead: "New accounts are Standard only. There is no public Owner signup.",
-    submit: "Create account",
+    title: tr("auth.createAccount"),
+    lead: tr("auth.lead.signup"),
+    submit: tr("auth.submit.signup"),
     password: "new-password",
   },
   "/forgot": {
-    title: "Forgot password",
-    lead: "If an account exists, reset instructions are sent.",
-    submit: "Send",
+    title: tr("auth.forgot"),
+    lead: tr("auth.lead.forgot"),
+    submit: tr("auth.submit.forgot"),
   },
   "/reset": {
-    title: "New password",
-    lead: "Enter the reset code you received and a new password.",
-    submit: "Save",
+    title: tr("auth.reset"),
+    lead: tr("auth.lead.reset"),
+    submit: tr("auth.submit.reset"),
     password: "new-password",
-    tokenLabel: "Password reset code",
+    tokenLabel: tr("auth.code.reset"),
   },
   "/verify": {
-    title: "Confirm email",
-    lead: "Enter the email confirmation code you received. This is not a session token.",
-    submit: "Confirm",
-    tokenLabel: "Email confirmation code",
+    title: tr("auth.verify"),
+    lead: tr("auth.lead.verify"),
+    submit: tr("auth.submit.verify"),
+    tokenLabel: tr("auth.code.verify"),
   },
 }[page] || {
-  title: "Sign in",
+  title: tr("auth.signIn"),
   lead: "",
-  submit: "Sign in",
+  submit: tr("auth.submit.login"),
 };
 
 title.textContent = copy.title;
@@ -94,12 +104,12 @@ function showNote(text) {
   noteEl.textContent = text || "";
 }
 function sessionMessage(data, fallback) {
-  if (data?.code === "session_expired") return SESSION_EXPIRED;
-  if (/invalid session token/i.test(data?.error || "")) return SESSION_EXPIRED;
+  if (data?.code === "session_expired") return tr("auth.sessionExpired");
+  if (/invalid session token/i.test(data?.error || "")) return tr("auth.sessionExpired");
   return data?.error || fallback;
 }
 function mailNote(mail, extra) {
-  if (mail && mail.configured === false) return MAIL_UNCONFIGURED;
+  if (mail && mail.configured === false) return tr("auth.mailUnconfigured");
   return extra || mail?.message || "";
 }
 
@@ -118,7 +128,7 @@ async function loadMailConfig() {
   try {
     const res = await fetch("/api/auth/config", { credentials: "same-origin" });
     const data = await res.json();
-    if (data.mail?.configured === false) showNote(MAIL_UNCONFIGURED);
+    if (data.mail?.configured === false) showNote(tr("auth.mailUnconfigured"));
     return data;
   } catch {
     return null;
@@ -129,7 +139,7 @@ async function recognizeVerifySession() {
   const res = await fetch("/api/auth/me", { credentials: "same-origin" });
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    showError(SESSION_EXPIRED);
+    showError(tr("auth.sessionExpired"));
     setTimeout(() => location.assign("/login"), 1600);
     return null;
   }
@@ -151,7 +161,7 @@ resendBtn?.addEventListener("click", async () => {
   try {
     const { res, data } = await authFetch("/api/auth/resend");
     if (!res.ok) {
-      showError(sessionMessage(data, "Could not send"));
+      showError(sessionMessage(data, tr("auth.error.send")));
       if (data.code === "session_expired" || /invalid session token/i.test(data.error || ""))
         setTimeout(() => location.assign("/login"), 1600);
       return;
@@ -179,10 +189,10 @@ form.addEventListener("submit", async (event) => {
   try {
     if (page === "/signup") {
       const { res, data } = await authFetch("/api/auth/register", body);
-      if (!res.ok) throw new Error(data.error || "Could not create the account");
+      if (!res.ok) throw new Error(data.error || tr("auth.error.create"));
       if (/^\d{6}$/.test(data.devToken || ""))
         sessionStorage.setItem("cj_dev_verify", data.devToken);
-      if (data.mail?.configured === false) showNote(MAIL_UNCONFIGURED);
+      if (data.mail?.configured === false) showNote(tr("auth.mailUnconfigured"));
       location.assign("/verify");
       return;
     }
@@ -191,7 +201,7 @@ form.addEventListener("submit", async (event) => {
         email: body.email,
         password: body.password,
       });
-      if (!res.ok) throw new Error(data.error || "Could not sign in");
+      if (!res.ok) throw new Error(data.error || tr("auth.error.signIn"));
       if (
         data.user?.role !== "owner" &&
         data.user?.email &&
@@ -205,7 +215,7 @@ form.addEventListener("submit", async (event) => {
       const { res, data } = await authFetch("/api/auth/forgot", {
         email: body.email,
       });
-      if (!res.ok) throw new Error(data.error || "Could not submit the request");
+      if (!res.ok) throw new Error(data.error || tr("auth.error.forgot"));
       showNote(mailNote(data.mail, data.message));
       return;
     }
@@ -216,7 +226,7 @@ form.addEventListener("submit", async (event) => {
         password: body.password,
         confirmPassword: body.confirmPassword,
       });
-      if (!res.ok) throw new Error(data.error || "Could not reset the password");
+      if (!res.ok) throw new Error(data.error || tr("auth.error.reset"));
       location.assign("/login");
       return;
     }
@@ -225,7 +235,7 @@ form.addEventListener("submit", async (event) => {
         code: body.code,
       });
       if (!res.ok) {
-        showError(sessionMessage(data, data.error || "Could not confirm"));
+        showError(sessionMessage(data, data.error || tr("auth.error.verify")));
         return;
       }
       location.assign("/");
