@@ -74,7 +74,7 @@ export function standardCapabilityList() {
   return [...STANDARD_ALLOW];
 }
 
-/** Public registered accounts must verify email before any AI/tool work. Owner/local bootstrap is unchanged. */
+/** Public registered accounts must verify email before any AI/tool work. Owner is the authenticated session user only. */
 export function publicAccountNeedsVerification(user) {
   if (!user || user.role === "owner") return false;
   return Boolean(user.email) && !user.email_verified;

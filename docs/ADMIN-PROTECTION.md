@@ -27,4 +27,4 @@ https://admin.coffeejack-agent.com
 2. Create a second Access application limited to the Owner email.
 3. Point that application at `/admin` or `admin.coffeejack-agent.com`.
 4. Remove Access from the public hostname only after Standard signup/login is verified live.
-5. Keep loopback (`127.0.0.1`) as the local Owner bootstrap.
+5. Require CoffeeJack email/password on loopback (`127.0.0.1` / `localhost`); do not auto-sign in the Owner.

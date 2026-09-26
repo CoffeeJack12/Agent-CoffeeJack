@@ -446,15 +446,22 @@ test("publicBase uses configured host, not a tunnel loopback Host header", async
   assert.doesNotMatch(latest.text, /127\.0\.0\.1/);
 });
 
-test("local Owner bootstrap still works on direct loopback", async (t) => {
+test("direct loopback /api/status without session is denied and does not bootstrap Owner", async (t) => {
   const { port, app } = await nativeApp(t);
+  const before = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
   const res = await httpReq(port, "/api/status", {
     host: "127.0.0.1",
     origin: "http://127.0.0.1",
   });
-  assert.equal(res.status, 200);
-  assert.equal(res.data.user.role, "owner");
-  assert.equal(res.data.user.id, resolveLocalOwner(app.store).id);
+  assert.equal(res.status, 401);
+  assert.equal(res.data.code, "authentication_required");
+  assert.equal(res.data.user, undefined);
+  const after = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
+  assert.equal(after, before);
 });
 
 test("protected API routes require a native session", async (t) => {
@@ -517,15 +524,45 @@ test("public auth pages and static assets remain reachable without a session", a
   }
 });
 
-test("direct localhost GET / still serves the app shell", async (t) => {
-  const { port } = await nativeApp(t);
+test("direct localhost GET / without session redirects to /login", async (t) => {
+  const { port, app } = await nativeApp(t);
+  const before = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
   const res = await httpReq(port, "/", {
     host: "127.0.0.1",
     origin: "http://127.0.0.1",
   });
+  assert.equal(res.status, 302);
+  assert.equal(res.headers.location, "/login");
+  const after = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
+  assert.equal(after, before);
+});
+
+test("direct localhost GET / with a valid session serves the app", async (t) => {
+  const { port, app } = await nativeApp(t);
+  const owner = resolveLocalOwner(app.store);
+  await attachOwnerCredentials(app.store, owner, {
+    email: "owner@local.test",
+    password: strong,
+    confirmPassword: strong,
+  });
+  const login = await httpReq(port, "/api/auth/login", {
+    host: "127.0.0.1",
+    origin: "http://127.0.0.1",
+    method: "POST",
+    body: { email: "owner@local.test", password: strong },
+  });
+  assert.equal(login.status, 200);
+  const res = await httpReq(port, "/", {
+    host: "127.0.0.1",
+    origin: "http://127.0.0.1",
+    cookie: login.cookie.token,
+  });
   assert.equal(res.status, 200);
   assert.match(String(res.headers["content-type"] || ""), /text\/html/);
-  assert.notEqual(res.headers.location, "/login");
   assert.match(res.data.raw || "", /id="messages"|CoffeeJack/i);
 });
 

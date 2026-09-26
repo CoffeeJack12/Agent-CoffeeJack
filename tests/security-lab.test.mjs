@@ -763,7 +763,11 @@ test("Owner API can use Security Lab; Standard and Guest cannot", async (t) => {
   });
   assert.equal(guestDenied.status, 403);
 
-  const html = await (await fetch(base + "/")).text();
+  const html = await (
+    await fetch(base + "/", {
+      headers: { "X-CoffeeJack-Token": app.token },
+    })
+  ).text();
   assert.match(html, /id="labView"/);
   assert.match(html, /navSecurityLab/);
   assert.match(html, /Authorized Targets|lab.targets/);

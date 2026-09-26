@@ -263,10 +263,13 @@ function isSessionAuthFailure(error) {
 }
 let publicLoginRedirect = false;
 function leavePublicAppForLogin(error) {
-  if (!isPublicRemoteBrowser() || !isSessionAuthFailure(error)) return false;
+  if (!isSessionAuthFailure(error)) return false;
   publicLoginRedirect = true;
   location.replace("/login");
   return true;
+}
+function isCloudflareBoundSession() {
+  return state.status?.identitySource === "cloudflare";
 }
 function sessionHeaders(extra = {}) {
   const headers = {
@@ -1570,7 +1573,7 @@ async function loadSettings() {
   mountRoutingDropdowns();
 }
 async function switchUser(userId) {
-  if (state.status?.identitySource !== "local")
+  if (isCloudflareBoundSession())
     throw new Error(tr("users.remoteSwitchHelp"));
   if (state.busy) throw new Error(tr("chat.stopFirst"));
   const result = await api("session/switch", {
@@ -1607,7 +1610,7 @@ async function loadUsers() {
   if (owner) loadSelfRepairPanel().catch(report);
   syncSecurityLabNav(state.status);
   $("#usersList").innerHTML = "";
-  const localSession = state.status?.identitySource === "local";
+  const localSession = !isCloudflareBoundSession();
   if (owner && !localSession) {
     const help = document.createElement("p");
     help.id = "remoteSwitchHelp";

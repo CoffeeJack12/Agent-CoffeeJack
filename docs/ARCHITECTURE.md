@@ -24,13 +24,13 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/task-state.mjs`: user-grounded task context and pre-emission clarification/tone guard, persisted per chat.
 - `server/planner.mjs`: bounded execution stages, tool evidence and one-repair test-claim evaluator.
 
-- `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
+- `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher. Unauthenticated `GET /` on localhost and native remote redirects to `/login`. Owner identity comes only from the authenticated CoffeeJack session user id.
 - `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions (expiry/source) and audit events.
 - `server/identity.mjs`: Cloudflare Access ↔ CoffeeJack user mapping (`external_identities`); pending unmapped remote users.
 - `server/workspaces.mjs`: per-user workspaces, memberships, chat binding, owner migration and path authorization helpers.
 - `server/permissions.mjs`: owner/trusted/standard/guest role policy and per-capability allow, deny or approval decisions.
 - `server/access.mjs`: optional Cloudflare Access JWT boundary; env validation diagnostics; returns verified identity attributes or false. The listener stays on loopback.
-- `server/trust.mjs`: local vs remote classification — tunnel markers on loopback never become local owner; X-Forwarded-* is not trusted for locality.
+- `server/trust.mjs`: local vs remote classification — tunnel markers on loopback never become local owner; X-Forwarded-* is not trusted for locality. Direct loopback still uses local Origin/cookie rules but never auto-signs in the Owner.
 - `server/router.mjs`: smart Auto Model selection via ProviderRegistry (with legacy Ollama-only path), reason codes, remote Ask approval flag and fallback model lists.
 - `server/providers/`: ProviderRegistry and adapters (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys only).
 - `server/council.mjs`: provider-native multi-model consultation (distinct participants, budgets, timeouts, partial failure, max 2 evidence rounds; Jack sole tool executor).

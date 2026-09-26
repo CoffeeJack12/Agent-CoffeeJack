@@ -6,7 +6,9 @@ Status: application-side Access JWT verification, identity mapping, tunnel-aware
 
 ```text
 DIRECT LOOPBACK  Host 127.0.0.1/localhost, no Cloudflare markers
-                 → local owner bootstrap OK
+                 → local origin/cookie rules
+                 → CoffeeJack email/password session required
+                 → never auto-sign in Owner
 
 TUNNEL / REMOTE  Host = COFFEEJACK_REMOTE_HOST
               or loopback Host + CF markers (Cf-Ray, Cf-Connecting-IP, Access JWT, …)
@@ -34,7 +36,7 @@ Intended origin for the tunnel service: **http://127.0.0.1:3210**. Ollama stays 
 | `CF_ACCESS_OWNER_EMAIL` | Optional owner auto-link (Cloudflare Access mode only) |
 | `CF_ACCESS_AUTO_CREATE_ROLE` | Optional `standard` auto-create (Cloudflare Access mode only) |
 
-Native mode requires only `COFFEEJACK_REMOTE_AUTH=native` and `COFFEEJACK_REMOTE_HOST`. Cloudflare Access JWT env vars are not required and spoofed CF identity headers grant no privilege. `publicBase` is always `https://<COFFEEJACK_REMOTE_HOST>`. Unauthenticated `GET /` redirects to `/login`; `/login`, `/signup`, `/forgot`, `/reset`, and `/verify` stay public.
+Native mode requires only `COFFEEJACK_REMOTE_AUTH=native` and `COFFEEJACK_REMOTE_HOST`. Cloudflare Access JWT env vars are not required and spoofed CF identity headers grant no privilege. `publicBase` is always `https://<COFFEEJACK_REMOTE_HOST>`. Unauthenticated `GET /` redirects to `/login` on localhost and the public host; `/login`, `/signup`, `/forgot`, `/reset`, and `/verify` stay public. Owner identity comes only from the authenticated CoffeeJack session.
 
 `validateAccessEnvironment` / startup fail closed on incomplete config. Templates: `deploy/cloudflare/`.
 

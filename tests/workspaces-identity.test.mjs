@@ -298,15 +298,20 @@ test("disabled mapped user is denied", async (t) => {
   assert.equal(resolved.reason, "disabled_user");
 });
 
-test("local owner bootstrap still works without login friction", async (t) => {
-  const { base, hostHeader } = await running(t);
+test("localhost /api/status without session does not bootstrap Owner", async (t) => {
+  const { app, base, hostHeader } = await running(t);
+  const before = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
   const res = await req(base, hostHeader, "", "/api/status");
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 401);
   const data = await res.json();
-  assert.equal(data.user.role, "owner");
-  assert.equal(data.identitySource, "local");
-  assert.ok(data.activeWorkspace?.name);
-  assert.ok(data.token);
+  assert.equal(data.code, "authentication_required");
+  assert.equal(data.user, undefined);
+  const after = app.store.db
+    .prepare("SELECT COUNT(*) AS n FROM sessions WHERE revoked IS NULL")
+    .get().n;
+  assert.equal(after, before);
 });
 
 test("remote mapped owner session never falls back for unknown identity", async (t) => {
@@ -376,10 +381,10 @@ test("spoofed CF headers on loopback do not become remote owner", async (t) => {
   const res = await req(base, hostHeader, "", "/api/status", "GET", undefined, {
     "Cf-Access-Jwt-Assertion": jwt({ email: "attacker@evil.com", sub: "x" }),
   });
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 401);
   const data = await res.json();
-  assert.equal(data.identitySource, "local");
-  assert.equal(data.user.role, "owner");
+  assert.equal(data.user, undefined);
+  assert.notEqual(data.identitySource, "cloudflare");
 });
 
 test("session revocation and expiry reject access", async (t) => {
@@ -455,8 +460,7 @@ test("active workspace binds per chat and path escape fails", async (t) => {
 
 test("cross-user workspace IDOR denied via API", async (t) => {
   const { app, base, hostHeader, dir } = await running(t);
-  const ownerToken = (await req(base, hostHeader, "", "/api/status")).body
-    .token;
+  const ownerToken = app.token;
   const userA = createUser(app.store, {
     displayName: "UserA",
     role: "standard",

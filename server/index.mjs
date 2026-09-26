@@ -140,6 +140,8 @@ export async function createApp({
   const owner = resolveLocalOwner(store);
   await ensureOwnerWorkspace(store, { root, dataDirectory: data });
   await migrateLegacyArtifacts(store, artifacts, { root });
+  // In-process/test handle only. Anonymous browser requests never receive this
+  // token as a cookie or inferred Owner session — localhost still requires login.
   const boot = createSession(store, owner.id, { source: "local" });
   let token = boot.token;
   const ollama = providedOllama ?? new Ollama(process.env.OLLAMA_URL);
@@ -730,19 +732,9 @@ export async function createApp({
       }
       if (route === "/api/status" && req.method === "GET") {
         if (!identity) {
-          if (!isLocal) {
-            if (nativeRemote) return authenticationRequired();
+          if (!isLocal && !nativeRemote)
             return json(res, 403, { error: "Remote authentication required" });
-          } else {
-            const localSession = createSession(store, owner.id, {
-              source: "local",
-            });
-            identity = {
-              token: localSession.token,
-              user: getUser(store, owner.id),
-              session: getSession(store, localSession.token),
-            };
-          }
+          return authenticationRequired();
         }
         const user = identity.user;
         if (user.role !== "owner")
@@ -2026,7 +2018,7 @@ export async function createApp({
         return json(res, 200, result);
       }
       if (req.method !== "GET") return json(res, 404, { error: "Not found" });
-      if (nativeRemote && !isLocal && route === "/") {
+      if (route === "/" && (isLocal || nativeRemote)) {
         const shell = sessionIdentity(req);
         if (!shell?.user) {
           res.writeHead(302, {

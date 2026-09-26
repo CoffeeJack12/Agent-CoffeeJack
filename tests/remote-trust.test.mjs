@@ -351,7 +351,8 @@ test("remote owner cannot switch profiles; local switch cannot bypass Cloudflare
   assert.equal(denied.data.token, undefined);
   const unchanged = await httpReq(port, "/api/status", { ...remote, token: first.data.token });
   assert.equal(unchanged.data.user.id, owner.id);
-  const local = await httpReq(port, "/api/status");
+  const local = await httpReq(port, "/api/status", { token: app.token });
+  assert.equal(local.status, 200);
   const switched = await httpReq(port, "/api/session/switch", {
     token: local.data.token, method: "POST", body: { userId: target.id },
   });
