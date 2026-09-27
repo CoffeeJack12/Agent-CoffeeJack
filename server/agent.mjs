@@ -655,6 +655,7 @@ ${finalContract}`;
 
       const requiresActionTool =
         turnPolicy?.taskHint === "steam_action" ||
+        turnPolicy?.taskHint === "luatools_action" ||
         (turnPolicy?.taskHint === "pc_action" &&
           Boolean(turnPolicy?.snapshot?.lastUser));
       if (
