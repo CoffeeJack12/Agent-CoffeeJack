@@ -44,6 +44,8 @@ import { isPureGreeting } from "./greeting.mjs";
 const CONFIRM =
   /^(?:y(?:eah|ep|ea|up|a)?|yes|sure|ok(?:ay)?|alright|right|correct|affirmative|do it|go ahead|proceed|please do|go for it|sounds good|that(?:'s| is) fine|نعم|ايوه|أيوه|أيوا|ايوا|يب|تمام|اوك|أوك|موافق|نفّذ|نفذ|سويه|سوّيه|يلا|امش|يمشي)[.!؟\s]*$/iu;
 
+const LUATOOLS_MENTION = /\blua[\s_-]*t?ools?\b/iu;
+
 const REJECT =
   /^(?:n(?:o|ope|ah)?|cancel|never ?mind|don'?t|stop|غلط|لا|كانسل|الغي|ألغ(?:ي|ى)?)[.!؟\s]*$/iu;
 
@@ -727,7 +729,7 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
   if (barePcUse) {
     const priorObjective =
       priorUser || snapshot.canonicalTopic || snapshot.lastTopic || "";
-    const priorIsLuaTools = /\bluatools\b/iu.test(priorObjective);
+    const priorIsLuaTools = LUATOOLS_MENTION.test(priorObjective);
     const priorIsSteam = /\bsteam\b|ستيم/iu.test(priorObjective);
     return {
       taskHint: priorIsLuaTools
@@ -753,15 +755,15 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
   }
 
   const luaToolsAction =
-    /\bluatools\b/iu.test(trimmed) &&
-    /\b(?:use|inspect|check|status|list|manage|open|launch|find|look\s+for|search)\b|(?:استخدم|افحص|شيك|تحقق|اعرض|إدارة|ادارة|افتح|شغل|ابحث|دور)/iu.test(
+    LUATOOLS_MENTION.test(trimmed) &&
+    /\b(?:use|inspect|check|status|list|manage|open|launch|find|look\s+for|search|install|download)\b|(?:استخدم|افحص|شيك|تحقق|اعرض|إدارة|ادارة|افتح|شغل|ابحث|دور|ثبت|حمّل|حمل|نزّل|نزل)/iu.test(
       trimmed,
     );
   if (luaToolsAction) {
     const previousUserText = String(snapshot.lastUser || "");
-    const priorLuaToolsContext = /\bluatools\b|\bsteam\b|ستيم|\bgame\b|لعبة/iu.test(
-      previousUserText,
-    );
+    const priorLuaToolsContext =
+      LUATOOLS_MENTION.test(previousUserText) ||
+      /\bsteam\b|ستيم|\bgame\b|لعبة/iu.test(previousUserText);
     return {
       taskHint: "luatools_action",
       effectiveIntent: trimmed,

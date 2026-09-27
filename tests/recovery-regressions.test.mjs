@@ -211,3 +211,17 @@ test("Use my pc after a LuaTools request remains a LuaTools action", () => {
   assert.equal(turn.taskHint, "luatools_action");
   assert.match(turn.effectiveIntent, /LuaTools/i);
 });
+
+test("LuaTools typo plus download request stays on LuaTools and excludes security tools", () => {
+  const turn = resolveTurnContext(
+    "Hey jack download CONTROL Resonant. From luaools",
+    { history: [] },
+  );
+  assert.equal(turn.taskHint, "luatools_action");
+  const offered = filterToolsForTurn(definitions, turn).map(
+    (entry) => entry.function.name,
+  );
+  assert.ok(offered.includes("luatools"));
+  assert.equal(offered.includes("security_strings"), false);
+  assert.equal(offered.some((name) => name.startsWith("security_")), false);
+});
