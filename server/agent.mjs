@@ -137,6 +137,47 @@ function verifiedSteamReply(result, requestText = "") {
   return "";
 }
 
+function verifiedLuaToolsReply(result, requestText = "") {
+  if (!result || typeof result !== "object") return "";
+  const action = String(result.action || "").toLowerCase();
+  if (!["inspect_app", "inspect_artifacts", "verify_state"].includes(action))
+    return "";
+  const verification =
+    action === "verify_state" ? result : result.verification;
+  if (!verification || typeof verification !== "object") return "";
+  const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
+  const appId = Number(result.app_id || verification.app_id || 0) || null;
+  const name = result.appmanifest?.name || null;
+  const build = result.appmanifest?.buildid || null;
+  const mode = verification.selected_mode || result.settings?.selected_mode || null;
+  const verified = verification.verified === true;
+  const missing = Array.isArray(verification.missing_installed_depot_manifests)
+    ? verification.missing_installed_depot_manifests.length
+    : 0;
+  if (verified) {
+    return arabic
+      ? [
+          "تم التحقق محليًا عبر LuaTools" + (name ? " من " + name : "") + (appId ? " — App ID " + appId : "") + ".",
+          "Lua موجود، appmanifest موجود، سجل الإكمال موجود، وملفات الـdepot المثبتة مكتملة.",
+          verification.vault_hash_matches_active === true ? "Hash الـLua يطابق الـvault." : "",
+          verification.history_reveal_matches_active === true ? "مسار السجل يطابق ملف Lua النشط." : "",
+          build ? "Build ID: " + build + "." : "",
+          mode ? "Mode: " + mode + "." : "",
+        ].filter(Boolean).join("\n")
+      : [
+          "Verified locally through LuaTools" + (name ? ": " + name : "") + (appId ? " — App ID " + appId : "") + ".",
+          "Lua artifact, appmanifest, completed history, and installed depot manifests are present.",
+          verification.vault_hash_matches_active === true ? "The active Lua hash matches the vault." : "",
+          verification.history_reveal_matches_active === true ? "The history reveal path matches the active Lua file." : "",
+          build ? "Build ID: " + build + "." : "",
+          mode ? "Mode: " + mode + "." : "",
+        ].filter(Boolean).join("\n");
+  }
+  return arabic
+    ? "فحصت الحالة محليًا عبر LuaTools" + (appId ? " لـ App ID " + appId : "") + "، لكن التحقق غير مكتمل" + (missing ? "؛ توجد " + missing + " ملفات depot مثبتة ناقصة." : ".")
+    : "I inspected the local LuaTools state" + (appId ? " for App ID " + appId : "") + ", but verification is incomplete" + (missing ? "; " + missing + " installed depot manifest(s) are missing." : ".");
+}
+
 export async function runAgent({
   store,
   ollama,
@@ -513,6 +554,7 @@ ${finalContract}`;
   const successfulSteamActions = new Set();
   const verifiedSteamResults = new Map();
   let steamImmediateReply = "";
+  let luaToolsImmediateReply = "";
   let styleRevisionAttempts = 0;
   let jeddawiRenderMeta = null;
   const jeddawiActive = shouldInvokeJeddawiRenderer(
@@ -1191,6 +1233,13 @@ ${finalContract}`;
             throw new Error(result.error);
           failedCallHistory.delete(callKey);
           successfulTools++;
+          if (
+            name === "luatools" &&
+            turnPolicy?.taskHint === "luatools_action"
+          ) {
+            const reply = verifiedLuaToolsReply(result, text);
+            if (reply) luaToolsImmediateReply = reply;
+          }
           if (name === "steam" && result?.action) {
             const steamActionName = String(result.action);
             successfulSteamActions.add(steamActionName);
@@ -1269,6 +1318,16 @@ ${finalContract}`;
         }
       }
 
+      if (luaToolsImmediateReply) {
+        transcript += luaToolsImmediateReply;
+        store.message(chatId, "assistant", luaToolsImmediateReply);
+        taskState.status = "completed";
+        store.saveTaskState(chatId, taskState);
+        reflect("completed");
+        emit({ type: "token", text: luaToolsImmediateReply });
+        emit({ type: "done", tokens: totalTokens });
+        return;
+      }
       if (steamImmediateReply) {
         transcript += steamImmediateReply;
         store.message(chatId, "assistant", steamImmediateReply);
