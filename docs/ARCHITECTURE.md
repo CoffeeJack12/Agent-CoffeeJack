@@ -21,6 +21,7 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/task-state.mjs`: user-grounded task context and pre-emission clarification/tone guard, persisted per chat.
 - `server/planner.mjs`: bounded execution stages, tool evidence and one-repair test-claim evaluator.
 - `server/game-saves/`: adapter-owned game-save inspect/prepare/apply/restore with SHA-256 jobs, immutable backups, and Owner approval for live writes. The Sinking City 2 adapter includes a native Frogwares DynamicSave parser and five ammo-box asset references recovered from a byte-verified Astra/Codex reference edit; unsupported builds still fail closed.
+- `server/luatools.mjs`: dedicated LuaTools discovery/status integration. It reads safe local state, lists active managed App IDs with hashes, inspects LuaVault metadata, and can open/navigate known LuaTools pages after approval. It does not expose auth/API-key contents or treat UI navigation as task completion.
 
 - `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
 - `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions (expiry/source) and audit events.

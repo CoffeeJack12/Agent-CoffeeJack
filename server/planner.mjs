@@ -41,6 +41,7 @@ const stage = (name) =>
     game_save_prepare: "edit",
     game_save_apply: "edit",
     game_save_restore: "edit",
+    luatools: "inspect",
     run_tests: "test",
     run_check: "check",
     git_diff: "review",

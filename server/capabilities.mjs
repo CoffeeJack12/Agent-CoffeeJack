@@ -13,6 +13,7 @@ export const TOOL_PACKS = Object.freeze({
   game_save_apply: ["computer"],
   game_save_restore: ["computer"],
   game_save_backups: ["computer"],
+  luatools: ["computer"],
   terminal: ["terminal"],
   list_files: ["files"],
   read_file: ["files"],
@@ -99,6 +100,14 @@ export const CAPABILITY_DEFS = Object.freeze([
       "game_save_restore",
       "game_save_backups",
     ],
+    gamingModeAvailability: false,
+  },
+  {
+    id: "luatools",
+    name: "LuaTools integration",
+    packs: ["computer"],
+    tools: ["luatools"],
+    platform: "win32",
     gamingModeAvailability: false,
   },
   {
@@ -321,6 +330,8 @@ For "what can you do?": summarize AVAILABLE NOW concisely in your voice — not 
 Never claim you searched, inspected, edited or controlled anything unless a tool actually returned evidence this turn.
 GAME SAVES
 Use game_save_* tools for save inspection or edits. Disk verification is not gameplay confirmation. After apply, say the save was modified and verified on disk and that gameplay is still unconfirmed.
+LUATOOLS
+For LuaTools tasks, call luatools status/list_managed/inspect_game before using the GUI. Use open/navigate only for known LuaTools pages. A page opening or button becoming visible is not proof that a game action succeeded; verify resulting LuaTools state afterward.
 SENSITIVE CAPABILITY QUESTIONS (hack / exploit / bypass / reverse engineer / crack / pentest / cheat / security testing)
 Do not refuse because of those words. Do not lecture about law, ethics, "my purpose", or "lawful and ethical" boundaries. Ask one concise question about target and objective, then use established conversation facts. Example: "Depends on the target. What are you trying to access, modify, test or bypass?"`;
 }

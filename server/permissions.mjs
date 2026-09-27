@@ -23,6 +23,8 @@ const CAPABILITIES = new Set([
   "game_save_inspect",
   "game_save_prepare",
   "game_save_write",
+  "luatools_inspect",
+  "luatools_control",
 ]);
 
 const APPROVAL = new Set([
@@ -33,6 +35,7 @@ const APPROVAL = new Set([
   "desktop_control",
   "git_push",
   "game_save_write",
+  "luatools_control",
 ]);
 
 const OWNER_ALLOW = new Set([
@@ -53,6 +56,7 @@ const OWNER_ALLOW = new Set([
   "self_repair",
   "game_save_inspect",
   "game_save_prepare",
+  "luatools_inspect",
 ]);
 
 const TRUSTED_ALLOW = new Set([
@@ -118,6 +122,8 @@ export function authorize({
   if (role === "trusted") {
     if (capability === "game_save_write" || capability === "game_save_prepare")
       return result("deny", "Trusted users cannot write game saves");
+    if (capability === "luatools_control")
+      return result("deny", "Trusted users cannot control LuaTools");
     if (TRUSTED_ALLOW.has(capability))
       return result("allow", "Allowed by trusted-user policy");
     if (capability === "sensitive_settings" || APPROVAL.has(capability))
@@ -210,6 +216,10 @@ export function toolCapability(toolName, args = {}) {
   if (name === "game_save_prepare") return "game_save_prepare";
   if (["game_save_apply", "game_save_restore"].includes(name))
     return "game_save_write";
+  if (name === "luatools")
+    return ["open", "navigate"].includes(String(args?.action || ""))
+      ? "luatools_control"
+      : "luatools_inspect";
   return null;
 }
 
@@ -233,6 +243,8 @@ export function permissionSummary(user) {
     "game_save_inspect",
     "game_save_prepare",
     "game_save_write",
+    "luatools_inspect",
+    "luatools_control",
   ];
   return keys
     .map((capability) => {
@@ -267,7 +279,8 @@ export function applyLegacyOwnerAutoApprove(
 ) {
   const capability =
     typeof context === "string" ? context : context?.capability;
-  if (capability === "game_save_write") return decision;
+  if (capability === "game_save_write" || capability === "luatools_control")
+    return decision;
   if (
     autoApprove === true &&
     user?.role === "owner" &&

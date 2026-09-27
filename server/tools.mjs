@@ -22,6 +22,7 @@ import {
   createManagerFromTools,
   rejectedAbsolutePathArgs,
 } from "./game-saves/index.mjs";
+import { runLuaToolsAction, LUATOOLS_PAGES } from "./luatools.mjs";
 import { getUser, resolveLocalOwner } from "./users.mjs";
 
 const str = (description) => ({ type: "string", description });
@@ -212,6 +213,23 @@ export const definitions = [
     { jobId: str("Optional job id to filter") },
     [],
   ),
+  tool(
+    "luatools",
+    "Dedicated LuaTools integration. Use status/list_managed/inspect_game before touching the GUI. open and navigate only bring up LuaTools or move between its known pages; they do not click game actions or change Steam state.",
+    {
+      action: {
+        type: "string",
+        enum: ["status", "list_managed", "inspect_game", "open", "navigate"],
+      },
+      appId: str("Steam App ID for inspect_game"),
+      page: {
+        type: "string",
+        enum: LUATOOLS_PAGES,
+        description: "LuaTools page for navigate",
+      },
+    },
+    ["action"],
+  ),
 ];
 
 export function runProcess(
@@ -294,6 +312,7 @@ export class Tools {
     artifactDirectory,
     artifactBase,
     gameSave,
+    luaTools,
   }) {
     Object.assign(this, {
       root,
@@ -305,6 +324,7 @@ export class Tools {
       artifactBase: artifactBase || artifactDirectory,
       artifactContext: null,
       gameSave: gameSave || {},
+      luaTools: luaTools || {},
     });
   }
 
@@ -394,8 +414,11 @@ export class Tools {
       "game_save_apply",
       "game_save_restore",
     ];
+    const luaToolsControl =
+      name === "luatools" && ["open", "navigate"].includes(args.action);
     if (
       writeActions.includes(name) ||
+      luaToolsControl ||
       (name === "browser" && ["click", "fill"].includes(args.action))
     )
       await this.approve(name, args, signal);
@@ -440,6 +463,8 @@ export class Tools {
         return manager.restore({ jobId: args.jobId, signal });
       return manager.backups({ jobId: args.jobId });
     }
+    if (name === "luatools")
+      return runLuaToolsAction(args, { signal, paths: this.luaTools });
     if (name === "research") return research(args,{signal});
     if (name === "inspect_pc") {
       if (process.platform !== "win32")

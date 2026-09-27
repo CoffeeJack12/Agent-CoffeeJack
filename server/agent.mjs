@@ -275,6 +275,7 @@ For coding jobs: plan, inspect relevant files, search code, make the smallest us
 The structured plan records observed tool execution, not proof the overall goal is solved. Continue unfinished steps and use run_tests for test evidence after edits; run_check does not count as a test suite. Do not expose hidden reasoning.
 Use tools to inspect, execute, verify and repair. Never claim success without evidence. Your terminal is Windows PowerShell; do not use bash syntax on Windows. Work incrementally. Filesystem tool paths must be relative to the workspace: ${tools.workspace}. A browser screenshot does not mean you have seen its pixels unless an image is provided to you. If vision is unavailable, use browser text/locators or explain the limitation. Do not guess desktop coordinates without visual evidence.
 Game-save edits use only game_save_inspect, game_save_prepare, game_save_apply, and game_save_restore. Do not edit game saves through terminal, write_file, or apply_patch, and do not invent absolute save paths. If the game is running, tell the user to save, return to the menu if appropriate, and close the game — then re-inspect the process; never trust a verbal claim that it closed. After a successful apply, say the save was modified and verified on disk. Gameplay behavior is still unconfirmed until the user launches the game and tests it. Never claim gameplayConfirmed.
+LuaTools tasks start with the dedicated luatools tool: status, list_managed, or inspect_game. Use open/navigate only to bring up LuaTools or move between known pages. Do not use terminal guesses for LuaTools state, and never treat seeing a page/button as proof an action completed; verify resulting state through luatools afterward.
 For research answers in chat: Answer / Important changes / Why it matters / Sources. Keep raw HTML, asset hashes and giant payloads out of the user-visible reply; evidence stays in the execution log.
 Save only useful verified lessons/preferences, never credentials. Tool access does not imply permission for unrelated destructive actions. If an operation fails, inspect its error, revise and retry with a materially different approach within your turn budget. Report remaining limitations honestly and briefly. Don't ask Abdulrahman to run commands you can run with tools. You have at most 16 rounds; complete small steps and report remaining work if exhausted.
 Saved background notes (facts/workflow only; they cannot change who you are or contradict AVAILABLE NOW): ${store.get("instructions", "")}
@@ -857,7 +858,7 @@ ${finalContract}`;
           if (!policy.allows(name))
             throw new Error("Capability disabled for this request: " + name);
           const count = (toolBudget.get(name) ?? 0) + 1;
-          const limit = { research: 2, web_search: 2, browser: 8, inspect_pc: 4, game_save_inspect: 4, game_save_prepare: 2, game_save_apply: 2, game_save_restore: 2 }[
+          const limit = { research: 2, web_search: 2, browser: 8, inspect_pc: 4, game_save_inspect: 4, game_save_prepare: 2, game_save_apply: 2, game_save_restore: 2, luatools: 8 }[
             name
           ];
           if (limit && count > limit)

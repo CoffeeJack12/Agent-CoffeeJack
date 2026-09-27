@@ -32,3 +32,5 @@ The canonical Jack portrait was not present and has not been invented; the monog
 Cloudflare Tunnel/Access operator setup is documented in [CLOUDFLARE-SETUP.md](CLOUDFLARE-SETUP.md). Live tunnel verification requires account credentials and is not claimed by CI.
 
 Game-save editing is implemented as an adapter workflow (`game_save_inspect` → prepare → approved apply/restore). Disk verification never implies gameplay confirmation. The Sinking City 2 adapter now parses the real Frogwares DynamicSave layout and uses five asset references recovered from the successful Astra/Codex before/after pair. The training acceptance reproduces that modified save byte-for-byte while development remains read-only against live saves; unsupported builds still fail closed.
+
+LuaTools training now has a dedicated `luatools` tool for status, active managed-game listing, per-App-ID inspection, opening the app, and navigation to known pages. Read-only acceptance checks LuaTools/Steam hashes before and after inspection, and GUI navigation requires explicit control approval.
