@@ -14,3 +14,5 @@ deploy/cloudflare/*.json
 !deploy/cloudflare/*.example.*
 **/tunnel-token*
 **/*credentials*.json
+__pycache__/
+*.pyc

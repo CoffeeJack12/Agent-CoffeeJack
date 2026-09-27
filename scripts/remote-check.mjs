@@ -157,13 +157,25 @@ async function main() {
   if (access.mode === "disabled")
     record(
       "WARN",
-      "Cloudflare Access mode",
-      "disabled (local-only) — set all four required env vars to enable",
+      "Remote authentication",
+      "disabled (local-only) — set COFFEEJACK_REMOTE_AUTH=native and COFFEEJACK_REMOTE_HOST, or the four Cloudflare Access env vars",
     );
   else if (access.mode === "ready")
-    record("PASS", "Cloudflare Access config", "ready");
+    record(
+      "PASS",
+      access.remoteAuth === "native"
+        ? "Native remote auth config"
+        : "Cloudflare Access config",
+      "ready",
+    );
   else {
-    record("FAIL", "Cloudflare Access config", "incomplete");
+    record(
+      "FAIL",
+      access.remoteAuth === "native"
+        ? "Native remote auth config"
+        : "Cloudflare Access config",
+      "incomplete",
+    );
     for (const issue of access.issues) record("FAIL", "config detail", issue);
   }
 

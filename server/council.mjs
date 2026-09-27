@@ -11,9 +11,9 @@ const EXPLICIT =
 const COMPLEX =
   /\b(?:architect(?:ure)?|refactor (?:the )?(?:entire |whole )?|difficult bug|root cause|compare approaches|trade-?offs?|deep research|carefully reason|security (?:review|analysis)|ambiguous|multiple (?:valid )?designs?)\b|إعادة هيكلة|سبب جذري|عمارة|مقارنة/i;
 const SIMPLE =
-  /^(?:hi|hello|hey|thanks|thank you|ok|okay|yo|مرحبا|هلا|شكرا)[.!؟\s]*$/i;
+  /^(?:hi|hello|hey|thanks|thank you|thx|ty|ok|okay|yo|yea|yeah|yes|sure|continue|the second(?: one)?|مرحبا|هلا|شكرا|شكراً|نعم|ايوه|تمام|اوك|كمل|الثاني)[.!؟\s]*$/iu;
 const SIMPLE_TASK =
-  /\b(?:translate|read (?:this |the )?file|what time|weather|rename|list files?)\b|^what is \d|^who are you\b/i;
+  /\b(?:translate|summarize|rewrite|shorten|read (?:this |the )?file|what time|weather|rename|list files?|yes\/no|preference)\b|^what is \d|^who are you\b/i;
 
 const MAX_PROMPT = 8000;
 const MAX_OUTPUT = 2500;
@@ -57,18 +57,17 @@ export function shouldConsultCouncil({
 
   const complex =
     COMPLEX.test(text) ||
-    taskKind === "coding" ||
-    effectiveMode === "developer" ||
     effectiveMode === "hacker" ||
-    effectiveMode === "research" ||
-    failedAttempts >= 1;
+    failedAttempts >= 2;
 
-  if (mode === "on" && complex)
+  // "on" still requires a genuinely complex signal — coding alone is not enough.
+  if (mode === "on" && (COMPLEX.test(text) || EXPLICIT.test(text) || failedAttempts >= 2))
     return { consult: true, reason: "council_on_complex" };
+  // Auto: only explicit difficulty / repeated failure — never ordinary chat or routine coding.
   if (mode === "auto" && (COMPLEX.test(text) || failedAttempts >= 2))
     return { consult: true, reason: "auto_complex" };
-  if (mode === "auto" && complex && distinct.length >= 3)
-    return { consult: true, reason: "auto_multi_model" };
+  void complex;
+  void taskKind;
   return { consult: false, reason: "not_warranted" };
 }
 
@@ -627,9 +626,11 @@ function clip(text, n = 400) {
  * Build a bounded evidence pack from tool events for this chat turn.
  */
 export function buildEvidencePack(events = [], { taskType = "general", chatId } = {}) {
-  const rows = (events || []).filter(
-    (e) => !chatId || e.chat_id === chatId || e.chatId === chatId,
-  );
+  // Store.events() is newest-first; process chronologically so the
+  // latest verification run wins over earlier failed attempts in the same turn.
+  const rows = (events || [])
+    .filter((e) => !chatId || e.chat_id === chatId || e.chatId === chatId)
+    .sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
   const pack = {
     taskType,
     changedFiles: [],
@@ -752,6 +753,8 @@ export function buildEvidencePack(events = [], { taskType = "general", chatId } 
     }
   }
 
+  if (pack.tests?.passed)
+    pack.failures = pack.failures.filter((failure) => failure.type !== "tests");
   pack.changedFiles = pack.changedFiles.slice(0, 12);
   pack.failures = pack.failures.slice(0, 8);
   pack.warnings = pack.warnings.slice(0, 8);

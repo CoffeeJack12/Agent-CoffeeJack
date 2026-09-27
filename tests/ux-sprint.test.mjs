@@ -105,7 +105,7 @@ test("App language and assistant language catalogs stay separate", () => {
     "ar",
     "mixed",
   ]);
-  assert.ok(DEFAULT_PREFERENCES.appLanguage);
+  assert.equal(DEFAULT_PREFERENCES.appLanguage, "en");
   assert.ok(DEFAULT_PREFERENCES.language);
   assert.notEqual(
     JSON.stringify(APP_LANGUAGES),

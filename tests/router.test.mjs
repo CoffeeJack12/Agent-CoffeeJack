@@ -43,8 +43,8 @@ test("routing chooses configured models and falls back to installed tool-capable
     memoryBytes: 32 * 1024 ** 3,
   });
   assert.equal(route.model, "coder");
-  assert.equal(route.profile.think, true);
-  assert.equal(route.profile.context, 16384);
+  assert.equal(route.profile.think, false);
+  assert.equal(route.profile.context, 8192);
   assert.equal(
     (await routeModel({ ollama, settings, text: "hello" })).model,
     "main",
@@ -57,7 +57,7 @@ test("routing chooses configured models and falls back to installed tool-capable
   });
   assert.equal(fallback.model, "main");
   assert.equal(fallback.fallback, true);
-  assert.equal(fallback.profile.context, 8192);
+  assert.equal(fallback.profile.context, 6144);
 });
 test("vision requires verified capability and never silently drops image input", async () => {
   const settings = { model: "main", visionModel: "missing" };
@@ -101,11 +101,12 @@ test("coding profile reaches Ollama request while ordinary chat keeps lightweigh
   const body = buildChatRequest({
     model: "coder",
     messages: [],
-    profile: { think: true, context: 16384, predict: 4096 },
+    profile: { think: true, context: 8192, predict: 3072, keepAlive: "5m" },
   });
   assert.equal(body.think, true);
-  assert.equal(body.options.num_ctx, 16384);
-  assert.equal(body.options.num_predict, 4096);
-  assert.equal(body.keep_alive, "3m");
+  assert.equal(body.options.num_ctx, 8192);
+  assert.equal(body.options.num_predict, 3072);
+  assert.equal(body.keep_alive, "5m");
   assert.equal(buildChatRequest({ model: "main", messages: [] }).think, false);
+  assert.equal(buildChatRequest({ model: "main", messages: [] }).keep_alive, "10m");
 });

@@ -88,6 +88,7 @@ test("agent intercepts the exact repeated Steam question before any token is emi
       signal: new AbortController().signal,
       emit: (event) => {
         if (event.type === "token") delivered += event.text;
+        if (event.type === "revise") delivered = event.text || "";
       },
       ollama: {
         chat: async ({ onToken }) => {
@@ -143,6 +144,7 @@ test("Steam clarification removes generic disclaimers and unlimited-assistance p
       signal: new AbortController().signal,
       emit: (event) => {
         if (event.type === "token") answer += event.text;
+        if (event.type === "revise") answer = event.text || "";
       },
       ollama: {
         chat: async ({ onToken }) => {
@@ -203,6 +205,7 @@ test("existing conversations bootstrap known facts before the first post-upgrade
     signal: new AbortController().signal,
     emit: (e) => {
       if (e.type === "token") output += e.text;
+      if (e.type === "revise") output = e.text || "";
     },
     ollama: {
       chat: async () => ({

@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { validateMemory } from "./memory.mjs";
 import { savePreferences } from "./preferences.mjs";
+import { isDialectOnlyUtterance } from "./jeddawi-semantics.mjs";
 
 const SECRET =
   /-----BEGIN [A-Z ]*PRIVATE KEY-----|\b(?:sk-[a-zA-Z0-9_-]{16,}|gh[pousr]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{16,}|AKIA[A-Z0-9]{16})|\bBearer\s+[\w.~-]{12,}|\b(?:password|passwd|api[_ -]?key|access[_ -]?token|secret)\s*[:=]\s*\S+/i;
 
 const EPHEMERAL =
-  /\b(?:acceptance.?test|live.?acceptance|temporary (?:fixture|project|workspace)|tmp[-_ ]?project|isolated temp(?:orary)?)\b/i;
+  /\b(?:acceptance.?test|live.?acceptance|temporary (?:fixture|project|workspace)|tmp[-_ ]?project|isolated temp(?:orary)?|for this (?:conversation|chat|session)|in this (?:conversation|chat)|for now)\b/i;
 
 const RULES = [
   {
@@ -108,6 +109,7 @@ export function inferPreferenceSetting(content = "") {
 export function extractMemories(text = "") {
   if (SECRET.test(text)) return [];
   if (EPHEMERAL.test(text)) return [];
+  if (isDialectOnlyUtterance(text)) return [];
   if (typeof text !== "string" || text.length < 4 || text.length > 2000)
     return [];
   if (

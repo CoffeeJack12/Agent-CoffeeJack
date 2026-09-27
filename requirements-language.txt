@@ -1,0 +1,4 @@
+wordfreq==3.1.1
+rapidfuzz==3.14.6
+PyArabic==0.6.15
+farasapy==0.1.1

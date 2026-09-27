@@ -149,13 +149,19 @@ async function main() {
   const owner = resolveLocalOwner(app.store);
 
   try {
-    // A — local owner
-    const local = await request(port, "/api/status", { host: "127.0.0.1" });
+    // A — localhost requires an authenticated session (no Owner bootstrap)
+    const anonymous = await request(port, "/api/status", { host: "127.0.0.1" });
+    assert.equal(anonymous.status, 401);
+    pass("A LOCALHOST ANONYMOUS DENIED");
+    const local = await request(port, "/api/status", {
+      host: "127.0.0.1",
+      token: app.token,
+    });
     assert.equal(local.status, 200);
     assert.equal(local.data.identitySource, "local");
     assert.equal(local.data.user.role, "owner");
     assert.ok(local.data.activeWorkspace);
-    pass("A LOCAL OWNER", local.data.user.display_name);
+    pass("A2 LOCAL AUTHENTICATED OWNER", local.data.user.display_name);
 
     // Tunnel markers on loopback must NOT become local owner
     const tunnelSpoof = await request(port, "/api/status", {

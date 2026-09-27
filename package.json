@@ -16,13 +16,17 @@
     "test:live": "node scripts/live-ollama-acceptance.mjs",
     "remote:check": "node scripts/remote-check.mjs",
     "test:remote-acceptance": "node scripts/remote-acceptance.mjs",
-    "test:security": "node --test tests/security-defense.test.mjs tests/remote-trust.test.mjs tests/workspaces-identity.test.mjs tests/access.test.mjs tests/multiuser.test.mjs tests/artifacts-isolation.test.mjs"
+    "test:security": "node --test tests/security-defense.test.mjs tests/remote-trust.test.mjs tests/workspaces-identity.test.mjs tests/access.test.mjs tests/multiuser.test.mjs tests/artifacts-isolation.test.mjs tests/accounts.test.mjs tests/email.test.mjs tests/auth-codes.test.mjs tests/native-remote-auth.test.mjs tests/localhost-auth.test.mjs tests/security-toolkit.test.mjs tests/security-routing.test.mjs tests/security-defense-network.test.mjs tests/security-lab.test.mjs",
+    "test:security-lab": "node --test tests/security-lab.test.mjs",
+    "test:security-toolkit": "node --test tests/security-toolkit.test.mjs",
+    "test:network-defense": "node --test tests/security-defense-network.test.mjs"
   },
   "dependencies": {
     "dompurify": "^3.4.15",
     "exceljs": "^4.4.0",
     "mammoth": "^1.10.0",
     "marked": "^18.0.13",
+    "nodemailer": "^10.0.10",
     "pdfjs-dist": "^5.4.149",
     "playwright": "^1.55.0"
   },

@@ -13,6 +13,9 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
                                                  ├─ document readers
                                                  ├─ PowerShell / Git / package manager
                                                  ├─ isolated Playwright browser
+                                                 ├─ reverse engineering / security toolkit
+                                                 ├─ firewall / network-defense toolkit
+                                                 ├─ adaptive security validation lab
                                                  └─ explicit Windows desktop adapter
 ```
 
@@ -21,13 +24,13 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/task-state.mjs`: user-grounded task context and pre-emission clarification/tone guard, persisted per chat.
 - `server/planner.mjs`: bounded execution stages, tool evidence and one-repair test-claim evaluator.
 
-- `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher.
+- `server/index.mjs`: HTTP routing, database-backed session/Origin checks, per-user API scoping, uploads, approval lifecycle, cancellation, model routing and gaming process watcher. Unauthenticated `GET /` on localhost and native remote redirects to `/login`. Owner identity comes only from the authenticated CoffeeJack session user id.
 - `server/users.mjs`: restart-safe multi-user migration, local profiles, sessions (expiry/source) and audit events.
 - `server/identity.mjs`: Cloudflare Access ↔ CoffeeJack user mapping (`external_identities`); pending unmapped remote users.
 - `server/workspaces.mjs`: per-user workspaces, memberships, chat binding, owner migration and path authorization helpers.
 - `server/permissions.mjs`: owner/trusted/standard/guest role policy and per-capability allow, deny or approval decisions.
 - `server/access.mjs`: optional Cloudflare Access JWT boundary; env validation diagnostics; returns verified identity attributes or false. The listener stays on loopback.
-- `server/trust.mjs`: local vs remote classification — tunnel markers on loopback never become local owner; X-Forwarded-* is not trusted for locality.
+- `server/trust.mjs`: local vs remote classification — tunnel markers on loopback never become local owner; X-Forwarded-* is not trusted for locality. Direct loopback still uses local Origin/cookie rules but never auto-signs in the Owner.
 - `server/router.mjs`: smart Auto Model selection via ProviderRegistry (with legacy Ollama-only path), reason codes, remote Ask approval flag and fallback model lists.
 - `server/providers/`: ProviderRegistry and adapters (Ollama local; OpenAI / Anthropic / Google / OpenAI-compatible via env keys only).
 - `server/council.mjs`: provider-native multi-model consultation (distinct participants, budgets, timeouts, partial failure, max 2 evidence rounds; Jack sole tool executor).
@@ -41,12 +44,15 @@ Browser UI → loopback HTTP + streaming NDJSON → Jack agent loop
 - `server/store.mjs`: parameterized SQLite statements with WAL and foreign keys.
 - `server/files.mjs`: realpath confinement and document extraction.
 - `server/tools.mjs`: tool schemas and implementations; command cancellation kills the process tree on Windows.
+- `server/security/`: dedicated reverse-engineering toolkit — bounded PE parser, strings, hashing, optional Ghidra/Rizin/YARA adapters (detect-first, never auto-install), read-only process/network snapshots, Owner-approved metadata-only packet capture. Results use observed/derived/assessment/unverified labels. Host-level tools are Owner-direct for read-only inspection; Trusted needs explicit permission; Standard/Guest are denied. Packet capture is Owner-only and never auto-approved. Explicit binary paths (`extractSecurityFileTarget`) lock the turn to `security_binary_inspect` and isolate stale process/network context.
+- `server/security/defense/`: defensive firewall and network-control assessment — Windows Firewall policy evaluation, bounded port/DNS/route/TLS tests, segmentation matrix, benign WAF checks on Owner-authorized targets only, synthetic IDS canaries, and local service mapping. Rule changes backup first, require Owner approval, and support rollback. No evasion or exploit execution.
+- `server/security/adaptive/`: Adaptive Security Validation Lab — Owner-controlled authorized-target registry, bounded HTTP/network mutations, baseline vs observed comparison, target-scoped lessons, optional telemetry adapters, policy-gap reports, and an Owner-only UI. Tests require `target_id`. Lessons never authorize another host. Hard budgets: 10 rounds / 25 cases / 200 global.
 - `scripts/desktop.ps1`: screenshot/mouse/keyboard operations invoked with structured base64 JSON, without command interpolation.
 - `public/`: Arabic RTL frontend; untrusted model/tool strings are escaped before rendering.
 
 ## Data and lifecycle
 
-`.local/coffeejack.sqlite` stores users, sessions, external identities, workspaces, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals, activity and workspaces are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. The owner workspace points at the existing CoffeeJack/project path without moving it; other users get `.local/workspaces/<user-id>/`. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
+`.local/coffeejack.sqlite` stores users, sessions, external identities, workspaces, audit events, settings, messages, editable memories and tool events. Chats, memories, preferences, approvals, activity and workspaces are scoped to the authenticated session user. Legacy single-user data is assigned to the generated local owner during migration. The owner workspace points at the existing CoffeeJack/project path without moving it; other users get `.local/workspaces/<user-id>/`. `.local/backups` holds replaced-file backups. `.local/browser` stores the isolated browser session. `.local/artifacts` holds tool screenshots. `.local/security/` holds Ghidra analysis projects, per-user packet captures (`.local/security/captures/<user-id>/`), and Security Lab datasets under `.local/security/lab/` (targets, lessons, runs). Model/runtime binaries live in `.runtime`. None of these folders belongs in Git.
 
 Only one agent task runs at a time. Mutating tools suspend until their exact operation is approved (or auto-approval is explicitly enabled). Approval expires after five minutes, and cancellation rejects pending approvals. Enabling gaming mode aborts the active task, waits for its cleanup, closes the automation browser and unloads all resident Ollama models. Configured process names are checked every 15 seconds. The next user request reloads its selected model after gaming mode ends.
 

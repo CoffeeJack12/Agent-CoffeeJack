@@ -7,9 +7,48 @@ function emailOk(email) {
   );
 }
 
+export const REMOTE_AUTH_NATIVE = "native";
+export const REMOTE_AUTH_CLOUDFLARE = "cloudflare_access";
+
+const PUBLIC_HOST_RE =
+  /^(?=.{1,253}$)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/;
+
+export function isPublicHostname(host) {
+  const value = String(host || "").trim().toLowerCase();
+  return PUBLIC_HOST_RE.test(value) && !value.endsWith(".localhost");
+}
+
+export function resolveRemoteAuthMode(env = process.env) {
+  const raw = String(env.COFFEEJACK_REMOTE_AUTH || "")
+    .trim()
+    .toLowerCase();
+  if (!raw) return "";
+  if (raw === REMOTE_AUTH_NATIVE || raw === REMOTE_AUTH_CLOUDFLARE) return raw;
+  return "invalid";
+}
+
+export function isNativeRemoteAccess(access) {
+  return Boolean(access && access.mode === REMOTE_AUTH_NATIVE && access.hostname);
+}
+
+export function isPublicRemoteAuthRoute(method, route) {
+  const verb = String(method || "").toUpperCase();
+  const pathName = String(route || "");
+  if (verb === "GET" && pathName === "/api/auth/config") return true;
+  return (
+    verb === "POST" &&
+    [
+      "/api/auth/register",
+      "/api/auth/login",
+      "/api/auth/forgot",
+      "/api/auth/reset",
+    ].includes(pathName)
+  );
+}
+
 /**
- * Validate Cloudflare Access env without returning secret values.
- * @returns {{ ok: boolean, mode: 'disabled'|'ready'|'incomplete', issues: string[], summary: object }}
+ * Validate remote-auth env without returning secret values.
+ * @returns {{ ok: boolean, mode: 'disabled'|'ready'|'incomplete', remoteAuth: string, issues: string[], summary: object }}
  */
 export function validateAccessEnvironment(env = process.env) {
   const host = env.COFFEEJACK_REMOTE_HOST?.trim() || "";
@@ -18,8 +57,39 @@ export function validateAccessEnvironment(env = process.env) {
   const emailsRaw = env.CF_ACCESS_ALLOWED_EMAILS?.trim() || "";
   const ownerEmail = env.CF_ACCESS_OWNER_EMAIL?.trim() || "";
   const autoCreate = env.CF_ACCESS_AUTO_CREATE_ROLE?.trim() || "";
+  const requested = resolveRemoteAuthMode(env);
   const present = [host, team, aud, emailsRaw].filter(Boolean).length;
   const issues = [];
+  if (requested === "invalid")
+    issues.push(
+      'COFFEEJACK_REMOTE_AUTH must be "native" or "cloudflare_access".',
+    );
+
+  if (requested === REMOTE_AUTH_NATIVE) {
+    const summary = {
+      COFFEEJACK_REMOTE_AUTH: REMOTE_AUTH_NATIVE,
+      COFFEEJACK_REMOTE_HOST: host ? "set" : "missing",
+      CF_ACCESS_TEAM_DOMAIN: "not_required",
+      CF_ACCESS_AUD: "not_required",
+      CF_ACCESS_ALLOWED_EMAILS: "not_required",
+      CF_ACCESS_OWNER_EMAIL: "not_required",
+      CF_ACCESS_AUTO_CREATE_ROLE: "not_required",
+    };
+    if (!host)
+      issues.push(
+        "Native remote auth requires COFFEEJACK_REMOTE_HOST (for example coffeejack-agent.com).",
+      );
+    else if (!isPublicHostname(host))
+      issues.push("COFFEEJACK_REMOTE_HOST must be a public lowercase hostname.");
+    return {
+      ok: issues.length === 0,
+      mode: issues.length ? "incomplete" : "ready",
+      remoteAuth: REMOTE_AUTH_NATIVE,
+      issues,
+      summary,
+    };
+  }
+
   const summary = {
     COFFEEJACK_REMOTE_HOST: host ? "set" : "missing",
     CF_ACCESS_TEAM_DOMAIN: team ? "set" : "missing",
@@ -29,8 +99,14 @@ export function validateAccessEnvironment(env = process.env) {
     CF_ACCESS_AUTO_CREATE_ROLE: autoCreate || "off",
   };
 
-  if (present === 0) {
-    return { ok: true, mode: "disabled", issues: [], summary };
+  if (present === 0 && requested !== REMOTE_AUTH_CLOUDFLARE) {
+    return {
+      ok: issues.length === 0,
+      mode: issues.length ? "incomplete" : "disabled",
+      remoteAuth: "disabled",
+      issues,
+      summary,
+    };
   }
   if (present < 4) {
     issues.push(
@@ -67,8 +143,21 @@ export function validateAccessEnvironment(env = process.env) {
   return {
     ok: issues.length === 0,
     mode: issues.length ? "incomplete" : "ready",
+    remoteAuth: REMOTE_AUTH_CLOUDFLARE,
     issues,
     summary,
+  };
+}
+
+export function createNativeRemoteAccess(hostname) {
+  const host = String(hostname || "").trim().toLowerCase();
+  if (!isPublicHostname(host)) throw new Error("Invalid remote hostname");
+  return {
+    mode: REMOTE_AUTH_NATIVE,
+    hostname: host,
+    async authorize() {
+      return null;
+    },
   };
 }
 
@@ -78,15 +167,25 @@ export function accessFromEnvironment(env = process.env) {
   if (check.mode === "disabled") return null;
   if (!check.ok) {
     throw new Error(
-      "Cloudflare Access configuration invalid:\n- " + check.issues.join("\n- "),
+      check.remoteAuth === REMOTE_AUTH_NATIVE
+        ? "Native remote authentication configuration invalid:\n- " +
+            check.issues.join("\n- ")
+        : "Cloudflare Access configuration invalid:\n- " +
+            check.issues.join("\n- "),
     );
   }
-  return createAccessGuard({
-    hostname: env.COFFEEJACK_REMOTE_HOST.trim(),
-    teamDomain: env.CF_ACCESS_TEAM_DOMAIN.trim(),
-    audience: env.CF_ACCESS_AUD.trim(),
-    emails: env.CF_ACCESS_ALLOWED_EMAILS.split(","),
-  });
+  const hostname = env.COFFEEJACK_REMOTE_HOST.trim();
+  if (check.remoteAuth === REMOTE_AUTH_NATIVE)
+    return createNativeRemoteAccess(hostname);
+  return Object.assign(
+    createAccessGuard({
+      hostname,
+      teamDomain: env.CF_ACCESS_TEAM_DOMAIN.trim(),
+      audience: env.CF_ACCESS_AUD.trim(),
+      emails: env.CF_ACCESS_ALLOWED_EMAILS.split(","),
+    }),
+    { mode: REMOTE_AUTH_CLOUDFLARE },
+  );
 }
 
 export function createAccessGuard(

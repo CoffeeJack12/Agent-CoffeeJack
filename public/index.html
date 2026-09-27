@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -16,28 +16,31 @@
         ></a
       >
       <button id="newChat" class="new-chat">
-        <span>＋</span> <span data-i18n="nav.newChat">محادثة جديدة</span> <kbd data-i18n="nav.newChatShortcut">Ctrl K</kbd>
+        <span>＋</span> <span data-i18n="nav.newChat">New chat</span> <kbd data-i18n="nav.newChatShortcut">Ctrl K</kbd>
       </button>
-      <div class="nav-label" data-i18n="nav.workspace">مساحتك</div>
+      <div class="nav-label" data-i18n="nav.workspace">Your space</div>
       <nav>
         <button class="nav active" data-view="chat">
-          <span>◌</span> <span data-i18n="nav.chat">المحادثة</span></button
-        ><button class="nav" data-view="memory"><span>◇</span> <span data-i18n="nav.memory">الذاكرة</span></button
+          <span>◌</span> <span data-i18n="nav.chat">Chat</span></button
+        ><button class="nav" data-view="memory"><span>◇</span> <span data-i18n="nav.memory">Memory</span></button
         ><button class="nav" data-view="activity">
-          <span>≋</span> <span data-i18n="nav.activity">سجل التنفيذ</span></button
+          <span>≋</span> <span data-i18n="nav.activity">Activity log</span></button
         ><button class="nav" data-view="persona">
-          <span>✦</span> <span data-i18n="nav.persona">شخصية Jack</span></button
+          <span>✦</span> <span data-i18n="nav.persona">Jack persona</span></button
         ><button class="nav" data-view="settings">
-          <span>⚙</span> <span data-i18n="nav.settings">الإعدادات</span>
+          <span>⚙</span> <span data-i18n="nav.settings">Settings</span>
+        </button
+        ><button class="nav hidden" id="navSecurityLab" data-view="lab">
+          <span>▣</span> <span data-i18n="nav.lab">Security Lab</span>
         </button>
       </nav>
-      <div class="nav-label history-label" data-i18n="nav.history">المحادثات الأخيرة</div>
+      <div class="nav-label history-label" data-i18n="nav.history">Recent chats</div>
       <input
         id="historySearch"
         class="history-search"
-        placeholder="ابحث في محادثاتك…"
+        placeholder="Search your chats…"
         data-i18n-placeholder="chat.searchPlaceholder"
-        aria-label="البحث في المحادثات"
+        aria-label="Search chats"
         data-i18n-aria="chat.searchAria"
       />
       <div id="history" class="history"></div>
@@ -45,13 +48,17 @@
         <div class="private">
           <i></i>
           <div>
-            <span data-i18n="sidebar.private.title">على جهازك. لك وحدك.</span><small data-i18n="sidebar.private.detail">الذاكرة والمحادثات تُحفظ محليًا</small>
+            <span data-i18n="sidebar.private.title">On your machine. Yours alone.</span><small data-i18n="sidebar.private.detail">Memory and chats are stored locally</small>
           </div>
         </div>
         <div class="profile">
           <div id="profileAvatar" class="avatar">A</div>
-          <div><span id="profileName">عبدالرحمن</span><small id="profileRole" data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
+          <div><span id="profileName">Abdulrahman</span><small id="profileRole" data-i18n="sidebar.profile.workspace">Personal workspace</small></div>
           <span class="version">v0.2</span>
+        </div>
+        <div class="auth-account-links">
+          <a href="/login" data-i18n="nav.account">Account</a>
+          <button type="button" id="accountLogout" class="ghost" data-i18n="nav.logout">Log out</button>
         </div>
       </div>
     </aside>
@@ -59,26 +66,26 @@
       <header>
         <div>
           <span class="eyebrow" data-i18n="header.workspace">JACK WORKSPACE</span>
-          <h1 id="pageTitle">المحادثة</h1>
+          <h1 id="pageTitle">Chat</h1>
         </div>
         <div class="header-actions">
           <button
             id="themeToggle"
             class="ghost theme-toggle"
-            title="تبديل المظهر"
+            title="Toggle theme"
             data-i18n-title="header.themeToggle"
-            aria-label="تبديل المظهر"
+            aria-label="Toggle theme"
             data-i18n-aria="header.themeToggle"
           >
             ☼
           </button>
-          <button id="mobileNew" class="ghost" aria-label="محادثة جديدة" data-i18n-aria="header.newChat">
+          <button id="mobileNew" class="ghost" aria-label="New chat" data-i18n-aria="header.newChat">
             ＋
           </button>
           <span class="connection"
             ><i id="connectionDot"></i
-            ><span id="connectionLabel" data-i18n="connection.connecting">جارٍ الاتصال</span></span
-          ><button id="gaming" class="ghost">♧ <span data-i18n="gaming.mode">وضع الألعاب</span></button>
+            ><span id="connectionLabel" data-i18n="connection.connecting">Connecting…</span></span
+          ><button id="gaming" class="ghost">♧ <span data-i18n="gaming.mode">Gaming mode</span></button>
         </div>
       </header>
       <section id="chatView" class="view chat-view">
@@ -90,66 +97,90 @@
             <span data-jack-slot="icon" data-hero></span>
           </div>
           <div class="presence">
-            <i></i><span id="jackPresence" data-i18n="welcome.presence.here">Jack هنا</span
+            <i></i><span id="jackPresence" data-i18n="welcome.presence.here">Jack is here</span>
             ><span class="presence-separator">·</span
-            ><button id="personalityShortcut">هادئ. حاد. جاهز للشغل.</button>
+            ><button id="personalityShortcut" data-i18n="persona.shortcut.playful">Sharp, witty when needed</button>
           </div>
-          <h2><span data-i18n="welcome.headline.line1">فكّر أبعد.</span><br /><span data-i18n="welcome.headline.line2">خلّ التنفيذ عليّ.</span></h2>
+          <h2><span data-i18n="welcome.headline.line1">Think bigger.</span><br /><span data-i18n="welcome.headline.line2">Leave execution to me.</span></h2>
           <p>
-            <span data-i18n="welcome.body.line1">أنا Jack. أفحص، أبني، وأتحقق من النتيجة.</span><br /><span data-i18n="welcome.body.line2">عقلك الإضافي. على جهازك. وتحت سيطرتك.</span>
+            <span data-i18n="welcome.body.line1">I'm Jack. I inspect, build, and verify the result.</span><br /><span data-i18n="welcome.body.line2">Your extra mind. On your machine. Under your control.</span>
           </p>
           <div class="suggestions">
             <button
-              data-prompt="ابنِ لي صفحة شخصية بسيطة بالعربي داخل مجلد portfolio، ثم اختبرها في المتصفح."
+              data-prompt="Build me a simple personal page in English inside a portfolio folder, then test it in the browser."
+              data-i18n-prompt="welcome.suggest.build.prompt"
               data-mode="coding"
             >
-              <span class="suggest-icon">⌘</span><strong data-i18n="welcome.suggest.build.title">خلّينا نبني شيء</strong
-              ><small data-i18n="welcome.suggest.build.detail">موقع، برنامج، أو فكرة جديدة</small
+              <span class="suggest-icon">⌘</span><strong data-i18n="welcome.suggest.build.title">Let's build something</strong
+              ><small data-i18n="welcome.suggest.build.detail">A site, app, or new idea</small>
               ><span class="arrow">↖</span>
             </button>
             <button
-              data-prompt="ابحث على الويب عن آخر أخبار التقنية اليوم، ولخص أهم ثلاثة أخبار مع روابط المصادر."
+              data-prompt="Search the web for today's top tech news and summarize the three most important stories with source links."
+              data-i18n-prompt="welcome.suggest.search.prompt"
             >
-              <span class="suggest-icon">◎</span><strong data-i18n="welcome.suggest.search.title">ابحث معي</strong
-              ><small data-i18n="welcome.suggest.search.detail">معلومات أوضح، من مصادرها</small
+              <span class="suggest-icon">◎</span><strong data-i18n="welcome.suggest.search.title">Search with me</strong
+              ><small data-i18n="welcome.suggest.search.detail">Clearer information, from the source</small>
               ><span class="arrow">↖</span>
             </button>
             <button
-              data-prompt="يا Jack، أعطني تعليقًا طريفًا عن التسويف، وبعدها ساعدني أبدأ بمهمة واحدة صغيرة."
+              data-prompt="Jack, give me a witty comment about procrastination, then help me start one small task."
+              data-i18n-prompt="welcome.suggest.mood.prompt"
             >
-              <span class="suggest-icon">✦</span><strong data-i18n="welcome.suggest.mood.title">غيّر جوّي</strong
-              ><small data-i18n="welcome.suggest.mood.detail">شوية خفة دم، وبداية أخف</small
+              <span class="suggest-icon">✦</span><strong data-i18n="welcome.suggest.mood.title">Change the mood</strong
+              ><small data-i18n="welcome.suggest.mood.detail">A little humor, a lighter start</small>
               ><span class="arrow">↖</span>
             </button>
           </div>
         </div>
         <div id="messages" class="messages" aria-live="polite"></div>
         <button id="jumpBottom" class="ghost jump-bottom hidden">
-          <span data-i18n="composer.jumpBottom">↓ آخر رد</span>
+          <span data-i18n="composer.jumpBottom">↓ Latest reply</span>
         </button>
         <div id="approval" class="approval hidden"></div>
         <div class="composer-area">
           <div id="notice" class="notice hidden" role="status"></div>
           <div id="attachments" class="attachments"></div>
-          <form id="chatForm" class="composer">
-            <div class="composer-main">
-              <textarea
-                id="prompt"
-                dir="auto"
-                rows="1"
-                placeholder="اكتب لـ Jack..."
-                data-i18n-placeholder="composer.placeholder"
-                aria-label="رسالتك إلى Jack"
-                data-i18n-aria="composer.ariaLabel"
-              ></textarea>
-              <div class="composer-actions">
+          <form id="chatForm" class="composer" autocomplete="off">
+            <textarea
+              id="prompt"
+              dir="auto"
+              rows="1"
+              placeholder="Message Jack..."
+              data-i18n-placeholder="composer.placeholder"
+              aria-label="Your message to Jack"
+              data-i18n-aria="composer.ariaLabel"
+            ></textarea>
+            <div class="composer-bar">
+              <div class="composer-bar-left">
+                <button
+                  type="button"
+                  id="attach"
+                  class="composer-icon-btn"
+                  title="Attach file"
+                  data-i18n-title="composer.attach"
+                  aria-label="Attach file"
+                  data-i18n-aria="composer.attach"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path
+                      d="M12 5v14M5 12h14"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      stroke-linecap="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+              <div class="composer-bar-right">
                 <button
                   id="stop"
                   type="button"
                   class="stop hidden"
-                  aria-label="إيقاف"
+                  aria-label="Stop"
                   data-i18n-aria="composer.stop"
-                  title="إيقاف"
+                  title="Stop"
                   data-i18n-title="composer.stop"
                 >
                   <span class="stop-icon"></span>
@@ -158,7 +189,7 @@
                   id="send"
                   type="submit"
                   class="send is-idle"
-                  aria-label="إرسال"
+                  aria-label="Send"
                   data-i18n-aria="composer.send"
                   aria-disabled="true"
                 >
@@ -175,36 +206,8 @@
                 </button>
               </div>
             </div>
-            <div class="composer-toolbar">
-              <button
-                type="button"
-                id="attach"
-                class="attach"
-                title="إرفاق ملف"
-                data-i18n-title="composer.attach"
-                aria-label="إرفاق ملف"
-                data-i18n-aria="composer.attach"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path
-                    d="M12 5v14M5 12h14"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                  />
-                </svg>
-              </button>
-              <label class="toolbar-dropdown"><span data-i18n="composer.currentMode">النمط الحالي</span><div id="jackModeHost" class="dropdown-host"></div></label>
-              <label class="toolbar-dropdown"><span data-i18n="composer.taskType">نوع المهمة</span><div id="taskModeHost" class="dropdown-host"></div></label>
-              <label class="toolbar-dropdown"><span data-i18n="settings.autoModel">موديل تلقائي</span><div id="modelHost" class="dropdown-host"></div></label>
-              <span id="modelLabel" class="model-label">qwen3:8b · Local</span>
-              <span id="runStatus" class="composer-status"></span>
-            </div>
+            <span id="runStatus" class="sr-only" aria-live="polite"></span>
           </form>
-          <p class="composer-footnote">
-            <span data-i18n="composer.footnote">محلي أولًا · الأدوات تحت سيطرتك · Enter للإرسال</span>
-          </p>
         </div>
         <input
           type="file"
@@ -217,82 +220,81 @@
         <div class="persona-heading">
           <div>
           <span class="eyebrow" data-i18n="persona.eyebrow">MEET THE MIND BEHIND THE MUG</span>
-            <h2><span data-i18n="persona.title.line1">شخصية ثابتة.</span><br /><span data-i18n="persona.title.line2">بطريقتك أنت.</span></h2>
-            <p data-i18n="persona.intro">ذكي، حاد، وعملي. مزح أسود لما يناسب، ونتائج بدون تمثيل.</p>
+            <h2><span data-i18n="persona.title.line1">A steady persona.</span><br /><span data-i18n="persona.title.line2">Your way.</span></h2>
+            <p data-i18n="persona.intro">Sharp, practical, and grounded. Dark humor when it fits — results without theatrics.</p>
           </div>
           <div class="persona-avatar" aria-hidden="true">
             <span data-jack-slot="avatar"></span><span>✦</span>
           </div>
         </div>
-        <div class="persona-tabs" role="group" aria-label="أنماط الشخصية">
+        <div class="persona-tabs" role="group" aria-label="Persona presets" data-i18n-aria="persona.tabsAria">
           <button type="button" data-persona-preset="playful" class="preset" data-i18n="persona.preset.playful">
-            ☕ رفيق القهوة</button
+            ☕ Coffee companion</button
           ><button type="button" data-persona-preset="focused" class="preset" data-i18n="persona.preset.focused">
-            ⌘ وقت التركيز</button
+            ⌘ Focus time</button
           ><button type="button" data-persona-preset="calm" class="preset" data-i18n="persona.preset.calm">
-            ◌ على رواق
+            ◌ Easygoing
           </button>
         </div>
         <form id="personaForm" class="persona-layout">
           <div class="setting-card persona-controls">
-            <h3>طريقة الكلام</h3>
+            <h3 data-i18n="persona.speechStyle">Way of speaking</h3>
             <label
-              ><span data-i18n="persona.replyLanguage">لغة الرد</span><div id="personaLanguageHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.replyLanguage">Reply language</span><div id="personaLanguageHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="persona.dialect">العربية اللي تريحك</span><div id="personaDialectHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.dialect">Arabic style</span><div id="personaDialectHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="persona.humor">جرعة خفة الدم</span><div id="personaHumorHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.humor">Humor level</span><div id="personaHumorHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="persona.detail">طول الرد</span><div id="personaDetailHost" class="dropdown-host"></div></label
+              ><span data-i18n="persona.detail">Reply length</span><div id="personaDetailHost" class="dropdown-host"></div></label
             >
             <div class="settings-footer">
-              <button class="primary">حفظ شخصية Jack</button
+              <button class="primary" data-i18n="persona.save">Save Jack persona</button>
               ><span id="personaMessage" role="status"></span>
             </div>
           </div>
           <div class="persona-preview">
-            <span class="eyebrow">A LITTLE TASTE</span>
-            <h3>كذا ممكن يرد عليك</h3>
+            <span class="eyebrow" data-i18n="persona.previewEyebrow">A LITTLE TASTE</span>
+            <h3 data-i18n="persona.previewTitle">How Jack might reply</h3>
             <div class="preview-question" id="previewQuestion">
-              يا Jack، الكود خرب.
+              Jack, my code broke.
             </div>
             <div class="preview-answer">
               <span data-jack-slot="avatar"></span>
               <p id="personaPreview"></p>
             </div>
-            <small>مثال على النبرة، مو رد مولّد. يضبط أسلوبه حسب الموقف.</small>
+            <small data-i18n="persona.previewNote">A tone example, not a generated reply. Style adapts to the situation.</small>
             <div class="principles">
-              <span>◈ حاد وصادق</span><span>◇ مخلص لعبدالرحمن</span
-              ><span>◎ يتحقق قبل ما يجزم</span>
+              <span data-i18n="persona.principle.sharp">◈ Sharp and honest</span
+              ><span data-i18n="persona.principle.loyal">◇ Loyal to you</span
+              ><span data-i18n="persona.principle.verify">◎ Verifies before claiming</span>
             </div>
           </div>
         </form>
         <div class="self-model">
           <div class="self-model-heading">
             <div>
-              <span class="eyebrow">GROUNDED IN WHAT ACTUALLY HAPPENED</span>
-              <h3>يعرف سياقه، ويحاسب خطواته.</h3>
+              <span class="eyebrow" data-i18n="persona.self.eyebrow">GROUNDED IN WHAT ACTUALLY HAPPENED</span>
+              <h3 data-i18n="persona.self.title">Knows context, accounts for its steps.</h3>
             </div>
-            <span class="state-pill" id="selfState">جاهز</span>
+            <span class="state-pill" id="selfState" data-i18n="persona.self.state.ready">Ready</span>
           </div>
           <div class="self-stats">
             <div>
-              <strong id="memoryCount">0</strong><span>ذكرى محفوظة</span>
+              <strong id="memoryCount">0</strong><span data-i18n="persona.self.memories">memories saved</span>
             </div>
             <div>
-              <strong id="conversationCount">0</strong><span>محادثة</span>
+              <strong id="conversationCount">0</strong><span data-i18n="persona.self.conversations">conversations</span>
             </div>
             <div>
-              <strong id="toolCount">0</strong><span>خطوة أداة ناجحة</span>
+              <strong id="toolCount">0</strong><span data-i18n="persona.self.tools">successful tool steps</span>
             </div>
           </div>
-          <p id="lastReflection">تظهر هنا نتيجة آخر طلب بعد تنفيذه.</p>
+          <p id="lastReflection" data-i18n="persona.self.reflectionEmpty">The result of your last request will appear here after it runs.</p>
           <details class="awareness-note">
-            <summary>إيش يعني «يعرف نفسه» هنا؟</summary>
-            <p>
-              له هوية وتعليمات ثابتة، وذاكرة قابلة للتعديل، وملخص مبني على نتائج
-              أدواته. هذا وعي وظيفي بالسياق والحدود، وليس ادعاءً بوعي ذاتي أو
-              مشاعر بشرية. لا يعمل من تلقاء نفسه بين طلباتك.
+            <summary data-i18n="persona.awareness.summary">What does «self-aware» mean here?</summary>
+            <p data-i18n="persona.awareness.body">
+              Jack has a stable identity and instructions, editable memory, and summaries built from tool results. This is functional awareness of context and limits — not a claim of human consciousness or feelings. It does not act on its own between your requests.
             </p>
           </details>
         </div>
@@ -300,46 +302,60 @@
       <section id="memoryView" class="view panel-view hidden">
         <div class="section-intro">
           <span class="eyebrow" data-i18n="memory.eyebrow">A LITTLE CONTEXT GOES A LONG WAY</span>
-          <h2 data-i18n="memory.title">أشياء تستاهل نتذكرها.</h2>
+          <h2 data-i18n="memory.title">Things worth remembering.</h2>
           <p data-i18n="memory.intro">
-            تفضيلاتك، قراراتك، والدروس التي تعلّمناها. تقدر تضيفها أو تحذفها في
-            أي وقت.
+            Your preferences, decisions, and lessons we've learned. Add or remove them anytime.
           </p>
         </div>
-        <div class="inline-form"><input id="memorySearch" data-i18n-placeholder="chat.searchPlaceholder" placeholder="ابحث في الذاكرة…" /></div>
+        <div class="inline-form"><input id="memorySearch" data-i18n-placeholder="memory.searchPlaceholder" placeholder="Search memory…" /></div>
         <form id="memoryForm" class="inline-form">
           <input
             id="memoryInput"
-            placeholder="مثلًا: أفضل الشرح بالعربي مع أمثلة عملية"
+            placeholder="e.g. I prefer explanations in Arabic with practical examples"
             data-i18n-placeholder="memory.placeholder"
             required
-          /><button class="primary" data-i18n="memory.save">حفظ في الذاكرة</button>
+          /><button class="primary" data-i18n="memory.save">Save to memory</button>
         </form>
         <div id="memories" class="card-list"></div>
       </section>
       <section id="activityView" class="view panel-view hidden">
         <div class="section-intro">
           <span class="eyebrow" data-i18n="activity.eyebrow">EVERY STEP, IN THE OPEN</span>
-          <h2 data-i18n="activity.title">تعرف إيش صار، بالضبط.</h2>
-          <p data-i18n="activity.intro">كل أداة استخدمها Jack ونتيجتها، محفوظة هنا على جهازك.</p>
+          <h2 data-i18n="activity.title">You know exactly what happened.</h2>
+          <p data-i18n="activity.intro">Every tool Jack used and its result, stored here on your device.</p>
         </div>
-        <button id="refreshEvents" class="ghost" data-i18n="activity.refresh">تحديث السجل ↻</button>
+        <button id="refreshEvents" class="ghost" data-i18n="activity.refresh">Refresh log ↻</button>
         <div id="events" class="card-list"></div>
       </section>
       <section id="settingsView" class="view panel-view hidden">
         <div class="section-intro">
           <span class="eyebrow" data-i18n="settings.eyebrow">MAKE YOURSELF AT HOME</span>
-          <h2 data-i18n="settings.title">Jack، على طريقتك.</h2>
+          <h2 data-i18n="settings.title">Jack, your way.</h2>
           <p data-i18n="settings.intro">
-            الموديلات والمساحة والذاكرة تعمل من جهازك. خدمات الإنترنت تُستخدم
-            فقط عندما تطلب أدوات الويب.
+            Models, workspace, and memory run on your device. Internet services are used only when you request web tools.
           </p>
         </div>
-        <form id="preferenceForm" class="settings-grid" aria-label="Jack preferences"></form>
+        <form id="preferenceForm" class="settings-grid" aria-label="Jack preferences" data-i18n-aria="settings.formAria"></form>
         <section id="usersSection" class="setting-card">
           <h3 data-i18n="users.title">Users</h3>
           <p id="accountIdentity" class="hint"></p>
           <p id="currentUser"></p>
+          <form id="ownerCredentialsForm" class="owner-credentials hidden">
+            <p class="hint" data-i18n="owner.credentials.intro">
+              Link a CoffeeJack email to the current account. A second Owner will not be created, and chats, memory, and files will not be deleted.
+            </p>
+            <label><span data-i18n="owner.credentials.email">Email</span>
+              <input name="email" type="email" required autocomplete="username" dir="ltr" />
+            </label>
+            <label><span data-i18n="owner.credentials.password">Password</span>
+              <input name="password" type="password" required minlength="10" autocomplete="new-password" dir="ltr" />
+            </label>
+            <label><span data-i18n="owner.credentials.confirm">Confirm password</span>
+              <input name="confirmPassword" type="password" required minlength="10" autocomplete="new-password" dir="ltr" />
+            </label>
+            <button type="submit" class="primary" data-i18n="owner.credentials.save">Save sign-in details</button>
+            <span id="ownerCredentialsMessage" role="status"></span>
+          </form>
           <label class="workspace-select"
             ><span data-i18n="workspaces.label">Workspace</span>
             <select id="workspaceSelect" dir="ltr"></select>
@@ -348,82 +364,194 @@
           <form id="createUserForm" class="inline-form hidden">
             <input name="displayName" maxlength="80" required data-i18n-placeholder="users.name" placeholder="Display name" />
             <select name="role">
-              <option value="trusted">Trusted</option>
-              <option value="standard" selected>Standard</option>
-              <option value="guest">Guest</option>
-              <option value="owner">Owner</option>
+              <option value="trusted" data-i18n="users.role.trusted">Trusted</option>
+              <option value="standard" selected data-i18n="users.role.standard">Standard</option>
+              <option value="guest" data-i18n="users.role.guest">Guest</option>
+              <option value="owner" data-i18n="users.role.owner">Owner</option>
             </select>
             <button class="primary" data-i18n="users.create">Create user</button>
           </form>
         </section>
         <section id="providersSection" class="setting-card">
           <h3 data-i18n="providers.title">AI Providers</h3>
-          <p data-i18n="providers.intro">Local Ollama always works. Remote providers use environment API keys — never stored in chat or SQLite.</p>
+          <p data-i18n="providers.intro">CoffeeJack runs fully local on Ollama (127.0.0.1:11434). Mode and task type stay separate from which model Auto picks.</p>
           <div id="providersList" class="card-list"></div>
         </section>
-        <div class="setting-card"><h3>Branding / الهوية</h3><p>Replace approved assets in <code>public/jack/avatar.png</code>, <code>icon.png</code>, or <code>logo.png</code>. A J monogram appears until then.</p><p>Voice is not installed. Startup remains controlled by your CoffeeJack launcher.</p></div>
+        <div class="setting-card"><h3 data-i18n="settings.branding">Branding / Identity</h3><p data-i18n="settings.brandingBody">Replace approved assets in public/jack/avatar.png, icon.png, or logo.png. A J monogram appears until then.</p><p data-i18n="settings.voiceNote">Voice is not installed. Startup remains controlled by your CoffeeJack launcher.</p></div>
         <form id="settingsForm" class="settings-grid">
           <div class="setting-card">
-            <h3 data-i18n="settings.localMind">العقل المحلي</h3>
+            <h3 data-i18n="settings.localMind">Local mind</h3>
             <label
-              ><span data-i18n="settings.primaryModel">الموديل الأساسي</span><div id="modelSelectHost" class="dropdown-host"></div></label
+              ><span data-i18n="settings.primaryModel">Primary model</span><div id="modelSelectHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="settings.codingModel">موديل البرمجة</span><div id="codingModelHost" class="dropdown-host"></div></label
+              ><span data-i18n="settings.codingModel">Coding model</span><div id="codingModelHost" class="dropdown-host"></div></label
             ><label
-              ><span data-i18n="settings.visionModel">موديل الصور</span><div id="visionModelHost" class="dropdown-host"></div></label
-            ><small
-              >اختر موديلًا يدعم الرؤية لتحليل الصور والشاشة. قائمة الموديلات
-              تأتي من Ollama.</small
+              ><span data-i18n="settings.visionModel">Vision model</span><div id="visionModelHost" class="dropdown-host"></div></label
+            ><small data-i18n="settings.visionHint"
+              >Pick a vision-capable model for image and screen analysis. Model list comes from Ollama.</small
             >
           </div>
           <div class="setting-card">
-            <h3 data-i18n="settings.workspaceCard">مساحة العمل</h3>
+            <h3 data-i18n="settings.workspaceCard">Workspace</h3>
             <label
-              >المجلد الذي ينشئ Jack المشاريع داخله<input
+              ><span data-i18n="settings.workspaceFolder">Folder where Jack creates projects</span><input
                 name="workspace"
                 dir="ltr"
                 required /></label
             ><label
-              >أسلوبك وتفضيلاتك<textarea
+              ><span data-i18n="settings.instructions">Your style and preferences</span><textarea
                 name="instructions"
                 rows="4"
-                placeholder="كيف تحب Jack يساعدك؟"
+                placeholder="How do you want Jack to help you?"
+                data-i18n-placeholder="settings.instructionsPlaceholder"
               ></textarea>
             </label>
           </div>
           <div class="setting-card">
-            <h3 data-i18n="settings.toolsCard">الأدوات والصلاحيات</h3>
+            <h3 data-i18n="settings.toolsCard">Tools &amp; permissions</h3>
             <label class="toggle-row"
               ><input type="checkbox" name="autoApprove" /><span
-                >تنفيذ تلقائي للأدوات</span
+                data-i18n="settings.autoApprove"
+                >Auto-run tools</span
               ></label
             >
-            <p class="hint">
-              عند التفعيل، ينفذ Jack الكتابة والأوامر والتحكم بدون تأكيد لكل
-              خطوة. أوامر النظام يمكنها الوصول خارج مجلد المشروع. يمكنك إيقاف
-              المهمة في أي وقت.
+            <p class="hint" data-i18n="settings.autoApproveHint">
+              When enabled, Jack runs writes, commands, and control without per-step confirmation. System commands can access outside the project folder. You can stop a task anytime.
             </p>
           </div>
           <div class="setting-card">
-            <h3 data-i18n="settings.gamingCard">الأولوية لألعابك</h3>
+            <h3 data-i18n="settings.gamingCard">Gaming priority</h3>
             <label class="toggle-row"
               ><input type="checkbox" name="autoGaming" /><span
-                >تشغيل وضع الألعاب تلقائيًا</span
+                data-i18n="settings.autoGaming"
+                >Enable gaming mode automatically</span
               ></label
             ><label
-              >أسماء ملفات الألعاب، مفصولة بفواصل<input
+              ><span data-i18n="settings.gameProcesses">Game process names, comma-separated</span><input
                 name="gameProcesses"
                 dir="ltr" /></label
-            ><small
-              >يفحص الألعاب المحددة كل 15 ثانية، يوقف المهمة ويفرّغ الموديلات.
-              عند إغلاق اللعبة يصبح Jack جاهزًا لطلبك التالي.</small
+            ><small data-i18n="settings.gamingHint"
+              >Checks listed games every 15 seconds, stops tasks and unloads models. When the game closes, Jack is ready for your next request.</small
             >
           </div>
           <div class="settings-footer">
-            <button class="primary" data-i18n="settings.save">حفظ الإعدادات</button
+            <button class="primary" data-i18n="settings.save">Save settings</button
             ><span id="settingsMessage" role="status"></span>
           </div>
         </form>
+        <section id="advancedRoutingSection" class="setting-card">
+          <h3 data-i18n="settings.advancedTitle">Advanced</h3>
+          <h4 data-i18n="settings.aiRoutingTitle">AI Routing</h4>
+          <p class="hint" data-i18n="settings.aiRoutingIntro">
+            Optional manual overrides. Leave all on Auto for normal use — Jack detects mode, task, and model automatically.
+          </p>
+          <label class="toolbar-dropdown"
+            ><span data-i18n="composer.currentMode">Current mode</span
+            ><div id="jackModeHost" class="dropdown-host"></div
+          ></label>
+          <label class="toolbar-dropdown"
+            ><span data-i18n="composer.taskType">Task type</span
+            ><div id="taskModeHost" class="dropdown-host"></div
+          ></label>
+          <label class="toolbar-dropdown"
+            ><span data-i18n="settings.autoModel">Auto model</span
+            ><div id="modelHost" class="dropdown-host"></div
+          ></label>
+        </section>
+        <section id="selfRepairSection" class="setting-card owner-only hidden">
+          <h3 data-i18n="selfRepair.title">Self Repair</h3>
+          <p class="hint" data-i18n="selfRepair.intro">
+            Owner-only: Jack can diagnose CoffeeJack issues and propose fixes. Source changes always need your approval.
+          </p>
+          <label class="toggle-row"
+            ><input type="checkbox" id="selfRepairEnabled" checked /><span
+              data-i18n="selfRepair.enabled"
+              >Self Repair: Enabled</span
+            ></label
+          >
+          <label class="toggle-row"
+            ><input type="checkbox" id="selfRepairAutoDiagnose" checked /><span
+              data-i18n="selfRepair.autoDiagnose"
+              >Auto-diagnose: Enabled</span
+            ></label
+          >
+          <p class="hint" data-i18n="selfRepair.askAlways">
+            Ask before modifying code: Always
+          </p>
+          <button type="button" id="selfRepairSave" class="ghost" data-i18n="selfRepair.save">
+            Save Self Repair settings
+          </button>
+          <span id="selfRepairMessage" role="status"></span>
+          <h4 data-i18n="selfRepair.historyTitle">Repair history</h4>
+          <div id="selfRepairHistory" class="card-list"></div>
+        </section>
+      </section>
+      <section id="labView" class="view panel-view hidden">
+        <div class="section-intro">
+          <span class="eyebrow" data-i18n="lab.eyebrow">OWNER-AUTHORIZED DEFENSIVE VALIDATION</span>
+          <h2 data-i18n="lab.title">Security Lab</h2>
+          <p data-i18n="lab.intro">
+            Learn how defensive controls behave on Owner-authorized lab targets. Tests require a registered target_id. Lessons stay local and never authorize another host.
+          </p>
+        </div>
+        <div class="lab-toolbar">
+          <button type="button" id="labNewValidation" class="primary" data-i18n="lab.new">New validation</button>
+          <button type="button" id="labStop" class="ghost" data-i18n="lab.stop">Stop</button>
+          <button type="button" id="labExport" class="ghost" data-i18n="lab.export">Export report</button>
+          <button type="button" id="labClearLessons" class="ghost" data-i18n="lab.clearLessons">Clear lab lessons</button>
+        </div>
+        <p id="labMessage" class="hint" role="status"></p>
+        <div class="lab-grid">
+          <section class="setting-card">
+            <h3 data-i18n="lab.targets">Authorized Targets</h3>
+            <form id="labTargetForm" class="lab-form">
+              <label><span data-i18n="lab.field.name">Name</span><input name="name" required /></label>
+              <label><span data-i18n="lab.field.host">Host / IP / domain</span><input name="host" required dir="ltr" /></label>
+              <label><span data-i18n="lab.field.ports">Ports</span><input name="ports" placeholder="80,443" dir="ltr" /></label>
+              <label><span data-i18n="lab.field.protocols">Protocols</span><input name="protocols" placeholder="http,https" dir="ltr" /></label>
+              <label><span data-i18n="lab.field.environment">Environment</span>
+                <select name="environment" dir="ltr">
+                  <option value="localhost">localhost</option>
+                  <option value="rfc1918">RFC1918</option>
+                  <option value="docker">Docker</option>
+                  <option value="vm">VM</option>
+                  <option value="authorized_explicit" data-i18n="lab.env.authorized_explicit">Explicit domain/IP</option>
+                </select>
+              </label>
+              <label><span data-i18n="lab.field.authNote">Authorization note</span><input name="authorization_note" required /></label>
+              <button type="submit" class="primary" data-i18n="lab.addTarget">Add target</button>
+            </form>
+            <div id="labTargets" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.plans">Test Plans</h3>
+            <div id="labPlans" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.active">Active Validation</h3>
+            <div id="labActive" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.findings">Findings</h3>
+            <div id="labFindings" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.lessons">Learned Behavior</h3>
+            <div id="labLessons" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.matrix">Control Matrix</h3>
+            <div id="labMatrix" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.evidence">Evidence</h3>
+            <div id="labEvidence" class="card-list"></div>
+          </section>
+          <section class="setting-card">
+            <h3 data-i18n="lab.tools">Tool Availability</h3>
+            <div id="labAvailability" class="card-list"></div>
+          </section>
+        </div>
       </section>
     </main>
     <script type="module" src="/app.js"></script>

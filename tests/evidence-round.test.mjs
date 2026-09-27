@@ -76,6 +76,31 @@ test("failed tests are decisive and block success synthesis", () => {
   assert.doesNotMatch(text, /tests passed/i);
 });
 
+test("latest successful test run supersedes an earlier failure from newest-first events", () => {
+  const olderFailure = {
+    ...event("run_tests", "error", {
+      args: {},
+      error: "Tool process failed (exit 1): fail",
+    }),
+    id: 11,
+  };
+  const newerSuccess = {
+    ...event("run_tests", "done", {
+      args: {},
+      result: { code: 0, output: "1 test passed" },
+    }),
+    id: 12,
+  };
+  const pack = buildEvidencePack([newerSuccess, olderFailure], {
+    taskType: "coding",
+    chatId: "c1",
+  });
+  assert.equal(pack.tests.passed, true);
+  assert.equal(pack.decisiveFailure, false);
+  assert.equal(pack.failures.some((failure) => failure.type === "tests"), false);
+  assert.match(synthesizeFromEvidence({ pack }), /tests passed/i);
+});
+
 test("automatic Round 2 runs after verified coding evidence", async () => {
   const pack = buildEvidencePack([
     event("apply_patch", "done", { args: { path: "a.mjs" }, result: {} }),

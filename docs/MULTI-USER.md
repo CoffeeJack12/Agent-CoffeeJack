@@ -4,10 +4,10 @@ CoffeeJack supports local profiles backed by SQLite. On first upgrade, it create
 
 ## Identity and isolation
 
-Identity comes only from `X-CoffeeJack-Token` (and, for remote hosts, a verified Cloudflare Access JWT mapped to a CoffeeJack user). Request bodies and query strings never select the acting user.
+Identity comes only from a CoffeeJack session (`X-CoffeeJack-Token` or `coffeejack_session`) or, for Cloudflare Access hosts, a verified Access JWT mapped to a CoffeeJack user. Loopback IP, localhost hostname, display name, email text, and chat claims never select the acting user.
 
-- **Local (127.0.0.1 / localhost):** `GET /api/status` bootstraps an owner session when no valid token exists. Profile switching remains owner-only and local-only.
-- **Remote (configured Cloudflare host):** Access JWT is verified server-side. Verified `email` + `sub` map through `external_identities` to a CoffeeJack user. Unmapped identities get `pending_identity` (no owner fallback). Spoofed CF headers on loopback are ignored.
+- **Local (127.0.0.1 / localhost):** Unauthenticated `GET /` redirects to `/login`. `GET /api/status` without a session returns 401 and does not create or attach an Owner session. Every browser user signs in with their own CoffeeJack email/password. Profile switching remains owner-only and local-only.
+- **Remote (configured public host):** Native mode uses the same CoffeeJack cookie session. Cloudflare Access JWT is verified server-side when that mode is enabled. Verified `email` + `sub` map through `external_identities` to a CoffeeJack user. Unmapped identities get `pending_identity` (no owner fallback). Spoofed CF headers on loopback are ignored.
 
 Chats, memories, preferences, activity, memory proposals, approvals and workspaces are filtered by the session user. Switching profiles returns a new token; the client must use that token before the target identity applies.
 
@@ -50,4 +50,4 @@ User creation, profile changes, identity link/unlink, remote login/deny, workspa
 
 ## Current limits
 
-Profiles share the machine, model installation and the single active agent slot. Isolation is SQLite + workspace path policy, not OS multi-tenancy. There is no password login UI beyond Cloudflare Access for remote; local remains frictionless for the owner. Artifact files are session-gated but not yet per-user path partitioned.
+Profiles share the machine, model installation and the single active agent slot. Isolation is SQLite + workspace path policy, not OS multi-tenancy. Localhost and the public host both use the CoffeeJack email/password login UI. Artifact files are session-gated but not yet per-user path partitioned.
