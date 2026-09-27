@@ -67,6 +67,28 @@ function requiredSteamAction(text = "") {
   return "search";
 }
 
+function requiredLuaToolsAction(text = "") {
+  const value = String(text || "");
+  if (/\b(?:install|download)\b|(?:ثبت|حمّل|حمل|نزّل|نزل)/iu.test(value))
+    return "download_install";
+  if (/\b(?:open|launch)\b|(?:افتح|شغل|شغّل)/iu.test(value))
+    return "open";
+  if (/\b(?:status)\b|(?:حالة)/iu.test(value)) return "status";
+  if (/\b(?:inventory|list|manage)\b|(?:اعرض|ادارة|إدارة)/iu.test(value))
+    return "inventory";
+  if (/\b(?:verify|check)\b|(?:تحقق|شيك)/iu.test(value))
+    return "verify_state";
+  return "inspect_app";
+}
+
+function unsupportedLuaToolsReply(requestText = "") {
+  if (requiredLuaToolsAction(requestText) !== "download_install") return "";
+  const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
+  return arabic
+    ? "Jack ما عنده action للتنزيل/التثبيت عبر LuaTools حاليًا. ما بدأ أي تحميل. الـadapter الحالي يدعم status / inventory / inspect / verify / open فقط. الـaction الناقص: luatools.download/install."
+    : "LuaTools download/install is not wired into Jack yet. No download was started. The current adapter supports status, inventory, inspect, verify, and open only. Missing action: luatools.download/install.";
+}
+
 
 function verifiedSteamReply(result, requestText = "") {
   if (!result || typeof result !== "object") return "";
@@ -387,6 +409,24 @@ export async function runAgent({
     emit({ type: "token", text: canned });
     emit({ type: "done", tokens: 0 });
     return;
+  }
+  if (turnPolicy?.taskHint === "luatools_action") {
+    const unsupported = unsupportedLuaToolsReply(turnPolicy?.effectiveIntent || text);
+    if (unsupported) {
+      taskState.status = "incomplete";
+      store.saveTaskState(chatId, taskState);
+      store.message(chatId, "user", text);
+      store.message(chatId, "assistant", unsupported);
+      emit({
+        type: "mode",
+        requestedMode: modeInfo.requestedMode,
+        effectiveMode: modeInfo.effectiveMode,
+        reason: modeInfo.reason,
+      });
+      emit({ type: "token", text: unsupported });
+      emit({ type: "done", tokens: 0 });
+      return;
+    }
   }
   if (capabilityQuestion && priorityLane !== "self_repair") {
     const canned = capabilityQuestionReply({

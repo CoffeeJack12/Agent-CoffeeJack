@@ -110,3 +110,37 @@ test("verified LuaTools inspection ends the turn after one successful call", asy
   assert.match(output, /App ID 2825860/);
   assert.equal(store.taskState(chatId).status, "completed");
 });
+
+test("LuaTools download request stops cleanly instead of dumping inventory JSON", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "jack-luatools-download-"));
+  const store = new Store(dir);
+  t.after(async () => {
+    store.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+  const chatId = store.createChat("luatools download regression").id;
+  let modelCalls = 0;
+  let toolCalls = 0;
+  let output = "";
+  await runAgent({
+    store,
+    ollama: { chat: async () => { modelCalls++; throw new Error("model must not run"); } },
+    tools: { workspace: dir, execute: async () => { toolCalls++; return {}; } },
+    chatId,
+    text: "Hey jack download CONTROL Resonant. From luaools",
+    model: "test",
+    signal: new AbortController().signal,
+    emit: (e) => { if (e.type === "token") output += e.text; },
+    turnPolicy: {
+      taskHint: "luatools_action",
+      effectiveIntent: "Hey jack download CONTROL Resonant. From luaools",
+      snapshot: { lastUser: "" },
+    },
+  });
+  assert.equal(modelCalls, 0);
+  assert.equal(toolCalls, 0);
+  assert.match(output, /No download was started/);
+  assert.match(output, /Missing action: luatools\.download\/install/);
+  assert.doesNotMatch(output, /depot_id|manifest_id|you've shared/i);
+  assert.equal(store.taskState(chatId).status, "incomplete");
+});
