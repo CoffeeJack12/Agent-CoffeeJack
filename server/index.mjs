@@ -99,6 +99,11 @@ import {
   filterToolsForTurn,
 } from "./conversation-intent.mjs";
 import {
+  enrichLanguageOnDemand,
+  normalizeKnownLanguage,
+  shouldUseLanguageFallback,
+} from "./language-understanding.mjs";
+import {
   attachOwnerCredentials,
   authenticateAccount,
   backupSqliteOnce,
@@ -1538,9 +1543,11 @@ export async function createApp({
           const previousState = store.taskState(boundChat.id);
           const previousStyle = previousState?.style || null;
           const previousTopic = previousState?.canonicalTopic || null;
-          // PRE-ROUTING: dialect understanding then priority lanes then follow-ups.
+          // PRE-ROUTING: cheap language normalization first; large vocabulary is lazy fallback only.
           const previousSpeakerPersona = previousState?.speakerPersona || null;
-          const turn = resolveTurnContext(b.text, {
+          const languageFast = normalizeKnownLanguage(b.text);
+          let understandingText = languageFast.text;
+          const turnOptions = {
             history,
             user,
             previousStyle,
@@ -1548,7 +1555,28 @@ export async function createApp({
             previousSpeakerPersona,
             previousSecurityTarget: previousState?.securityTarget || null,
             store,
-          });
+          };
+          let turn = resolveTurnContext(understandingText, turnOptions);
+          let languageUnderstanding = {
+            source: languageFast.changed ? "fast_alias" : "none",
+            changed: languageFast.changed,
+            changes: languageFast.changes,
+            fallbackMs: 0,
+          };
+          if (!turn.taskHint && shouldUseLanguageFallback(understandingText)) {
+            const deep = await enrichLanguageOnDemand(understandingText, { force: true });
+            languageUnderstanding = {
+              source: deep.source,
+              changed: deep.changed,
+              changes: deep.changes,
+              fallbackMs: deep.fallbackMs || 0,
+            };
+            if (deep.changed && deep.text !== understandingText) {
+              understandingText = deep.text;
+              turn = resolveTurnContext(understandingText, turnOptions);
+            }
+          }
+          turn = { ...turn, languageUnderstanding, understoodText: understandingText };
           timing.mark("context_resolved");
           if (isPureGreeting(b.text)) {
             emitInstantGreeting({
