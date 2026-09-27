@@ -101,6 +101,7 @@ import {
 import {
   enrichLanguageOnDemand,
   normalizeKnownLanguage,
+  resolveTurnWithRoutingStems,
   shouldUseLanguageFallback,
 } from "./language-understanding.mjs";
 import {
@@ -1563,18 +1564,34 @@ export async function createApp({
             changes: languageFast.changes,
             fallbackMs: 0,
           };
-          if (!turn.taskHint && shouldUseLanguageFallback(understandingText)) {
-            const deep = await enrichLanguageOnDemand(understandingText, { force: true });
+          if (
+            !turn.taskHint &&
+            !isPureGreeting(b.text) &&
+            shouldUseLanguageFallback(understandingText)
+          ) {
+            const deep = await enrichLanguageOnDemand(understandingText, {
+              force: true,
+              signal: controller.signal,
+            });
+            if (controller.signal.aborted)
+              throw new Error("Language fallback cancelled");
             languageUnderstanding = {
               source: deep.source,
               changed: deep.changed,
               changes: deep.changes,
               fallbackMs: deep.fallbackMs || 0,
+              routingStemsUsed: false,
             };
-            if (deep.changed && deep.text !== understandingText) {
-              understandingText = deep.text;
-              turn = resolveTurnContext(understandingText, turnOptions);
-            }
+            const textChanged = deep.changed && deep.text !== understandingText;
+            if (textChanged) understandingText = deep.text;
+            const routed = resolveTurnWithRoutingStems({
+              text: understandingText,
+              stems: deep.routingStems,
+              resolve: (value) => resolveTurnContext(value, turnOptions),
+              base: textChanged ? null : turn,
+            });
+            turn = routed.turn;
+            languageUnderstanding.routingStemsUsed = routed.usedStems;
           }
           turn = { ...turn, languageUnderstanding, understoodText: understandingText };
           timing.mark("context_resolved");

@@ -9,11 +9,18 @@ import {
   isQueenAccount,
 } from "./account-personas.mjs";
 
+const AFFECTION_VOCATIVE_RE = /^يا\s*(?:حب|حبي|حبيبي|قلبي|بعدي|روحي)[.!؟?~\s]*$/u;
+const FRIENDLY_VOCATIVE_RE = /^يا\s*(?:وحش|رجال|جاك)[.!؟?~\s]*$/u;
+
 export const PURE_GREETING_RE =
-  /^(?:hey(?:\s+jack)?|hi|hello|السلام عليكم|هلا|هاي)[.!؟?~\s]*$/iu;
+  /^(?:hey(?:\s+jack)?|hi|hello|السلام عليكم|هلا|هاي|يا\s*(?:حب|حبي|حبيبي|قلبي|بعدي|روحي|وحش|رجال|جاك))[.!؟?~\s]*$/iu;
+
+function stripArabicMarks(text) {
+  return String(text || "").replace(/[\u064B-\u0652\u0670\u0640]/gu, "").trim();
+}
 
 export function isPureGreeting(text = "") {
-  const trimmed = String(text || "").trim();
+  const trimmed = stripArabicMarks(text);
   if (!trimmed || trimmed.length > 40) return false;
   return PURE_GREETING_RE.test(trimmed);
 }
@@ -23,10 +30,12 @@ export function greetingDeterministicReply({
   text = "",
   store = null,
 } = {}) {
+  const trimmed = stripArabicMarks(text);
+  if (AFFECTION_VOCATIVE_RE.test(trimmed)) return "هلا يا حب، وش عندك؟";
+  if (FRIENDLY_VOCATIVE_RE.test(trimmed)) return "هلا، وش عندك؟";
+
   if (isQueenAccount(user, store)) return "At your service, Queen.";
   if (isMasterAccount(user)) return "At your service, Master.";
-
-  const trimmed = String(text || "").trim();
   if (/^السلام عليكم[.!؟?~\s]*$/u.test(trimmed)) return "وعليكم السلام.";
   if (/^هلا[.!؟?~\s]*$/u.test(trimmed)) return "هلا.";
   if (/^هاي[.!؟?~\s]*$/u.test(trimmed)) return "هاي.";
