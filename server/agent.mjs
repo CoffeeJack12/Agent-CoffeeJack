@@ -57,12 +57,28 @@ import {
 import { speakerHonorific } from "./speaker-persona.mjs";
 import { isPureGreeting, greetingDeterministicReply } from "./greeting.mjs";
 import { accountBoundSpeaker, privilegedHonorific } from "./account-personas.mjs";
+import {
+  detectEmotionalReplyViolation,
+  emotionalDeterministicReply,
+} from "./emotional-turn.mjs";
 
 function requiredSteamAction(text = "") {
-  const value = String(text || "");
+  const value = String(text || "").trim();
   if (/\b(?:install|download)\b|(?:ثبت|حمّل|حمل|نزّل|نزل)/iu.test(value))
     return "install";
-  if (/\b(?:open|launch|show)\b|(?:افتح|شغل|شغّل|وريني)/iu.test(value))
+  const openClientOnly =
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:open|launch|run)\s+(?:the\s+)?steam(?:\s+client)?[.!?\s]*$/iu.test(
+      value,
+    ) ||
+    /^(?:ممكن\s+)?(?:ت?فتح|شغ(?:ل|ّل)|تشغ(?:ل|ّل))\s+(?:لي\s+)?ستيم[.!؟\s]*$/u.test(
+      value,
+    );
+  if (openClientOnly) return "open_client";
+  if (
+    /\b(?:open|launch|show)\b|(?:افتح|تفتح|شغل|شغّل|تشغل|تشغّل|وريني)/iu.test(
+      value,
+    )
+  )
     return "open_store";
   return "search";
 }
@@ -132,6 +148,10 @@ function verifiedSteamReply(result, requestText = "") {
       : "";
     return [line1, line2, first.store_url || ""].filter(Boolean).join("\n");
   }
+  if (result.action === "open_client" && result.launched)
+    return arabic
+      ? "فتحت Steam على جهازك."
+      : "Opened the Steam client on your PC.";
   if (result.action === "open_store" && result.verified_app && result.launched)
     return arabic
       ? "فتحت صفحة Steam الموثقة لـ " +
@@ -159,15 +179,95 @@ function verifiedSteamReply(result, requestText = "") {
   return "";
 }
 
+function verifiedPcReply(result, requestText = "") {
+  if (!result || typeof result !== "object" || result.error) return "";
+  const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
+  const section = String(result.section || "").toLowerCase();
+  if (section === "disk")
+    return arabic
+      ? [
+          result.drive + " — الزبدة:",
+          "الإجمالي: " + result.totalGiB + " GiB.",
+          "المستخدم: " + result.usedGiB + " GiB.",
+          "المتاح: " + result.freeGiB + " GiB (" + result.freePercent + "%).",
+          "الحالة: " +
+            ({ enough: "المساحة كويسة.", low: "المساحة قليلة.", critically_low: "المساحة منخفضة جدًا.", unknown: "غير معروفة." }[result.status] || String(result.status || "غير معروفة.")),
+        ].join("\n")
+      : [
+          result.drive + " drive:",
+          "Total: " + result.totalGiB + " GiB.",
+          "Used: " + result.usedGiB + " GiB.",
+          "Free: " + result.freeGiB + " GiB (" + result.freePercent + "%).",
+          "Status: " + String(result.status || "unknown") + ".",
+        ].join("\n");
+  if (section === "memory")
+    return arabic
+      ? "الرام: " + result.usedGiB + " GiB مستخدم من " + result.totalGiB + " GiB، والمتاح " + result.freeGiB + " GiB (" + result.freePercent + "%)."
+      : "RAM: " + result.usedGiB + " GiB used of " + result.totalGiB + " GiB; " + result.freeGiB + " GiB free (" + result.freePercent + "%).";
+  if (section === "cpu")
+    return arabic
+      ? "المعالج: " + (result.name || "غير معروف") + " — الاستخدام " + (result.loadPercent ?? "?") + "%، " + (result.cores ?? "?") + " أنوية."
+      : "CPU: " + (result.name || "unknown") + " — " + (result.loadPercent ?? "?") + "% load, " + (result.cores ?? "?") + " cores.";
+  if (section === "gpu")
+    return (result.adapters || []).map((g) => (g.name || "GPU") + (g.driverVersion ? " — driver " + g.driverVersion : "")).join("\n");
+  if (section === "uptime")
+    return arabic
+      ? "مدة تشغيل ويندوز: " + result.uptimeHours + " ساعة."
+      : "Windows uptime: " + result.uptimeHours + " hours.";
+  if (section === "network") {
+    const active = (result.interfaces || []).filter((x) => x.IPv4);
+    return arabic
+      ? "الشبكة: لقيت " + active.length + " واجهة فيها IPv4. هذا فحص شبكة فقط، مو حكم على صحة الجهاز كاملة."
+      : "Network: " + active.length + " interface(s) have IPv4. This is a network check only, not a full PC-health verdict.";
+  }
+  if (section === "hardware")
+    return arabic
+      ? "الجهاز: " + [result.manufacturer, result.model].filter(Boolean).join(" ") + " — المعالجات المنطقية: " + (result.numberOfLogicalProcessors ?? "?") + "."
+      : "Hardware: " + [result.manufacturer, result.model].filter(Boolean).join(" ") + " — logical processors: " + (result.numberOfLogicalProcessors ?? "?") + ".";
+  if (section === "health") {
+    const concerns = Array.isArray(result.concerns) ? result.concerns : [];
+    return arabic
+      ? (concerns.length ? "لقيت ملاحظات:\n- " + concerns.join("\n- ") : "ما لقيت ملاحظات واضحة في الفحوصات اللي اكتملت.")
+      : (concerns.length ? "Concerns found:\n- " + concerns.join("\n- ") : "No obvious concerns were found in the checks that completed.");
+  }
+  return "";
+}
+
 function verifiedLuaToolsReply(result, requestText = "") {
   if (!result || typeof result !== "object") return "";
   const action = String(result.action || "").toLowerCase();
+  const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
+  if (action === "status")
+    return arabic
+      ? [
+          result.installed ? "LuaTools مثبت ويشتغل." : "LuaTools غير مثبت.",
+          result.version ? "الإصدار: " + result.version + "." : "",
+          result.steam_root ? "Steam: " + result.steam_root + "." : "",
+        ].filter(Boolean).join("\n")
+      : [
+          result.installed ? "LuaTools is installed and operational." : "LuaTools is not installed.",
+          result.version ? "Version: " + result.version + "." : "",
+          result.steam_root ? "Steam root: " + result.steam_root + "." : "",
+        ].filter(Boolean).join("\n");
+  if (action === "inventory")
+    return arabic
+      ? "فحصت مخزون LuaTools: " +
+        Number(result.lua_entry_count || 0) +
+        " Lua، و" +
+        Number(result.installed_app_count || 0) +
+        " تطبيق Steam مثبت."
+      : "LuaTools inventory: " +
+        Number(result.lua_entry_count || 0) +
+        " Lua entries and " +
+        Number(result.installed_app_count || 0) +
+        " installed Steam apps.";
+  if (action === "open" && result.launched)
+    return arabic ? "فتحت LuaTools على جهازك." : "Opened LuaTools on your PC.";
   if (!["inspect_app", "inspect_artifacts", "verify_state"].includes(action))
     return "";
   const verification =
     action === "verify_state" ? result : result.verification;
   if (!verification || typeof verification !== "object") return "";
-  const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
   const appId = Number(result.app_id || verification.app_id || 0) || null;
   const name = result.appmanifest?.name || null;
   const build = result.appmanifest?.buildid || null;
@@ -237,6 +337,22 @@ export async function runAgent({
     emit({ type: "token", text: reply });
     emit({ type: "done", tokens: 0 });
     return;
+  }
+  const emotionalPlan = turnPolicy?.emotional || null;
+  if (emotionalPlan?.deterministic) {
+    const reply = emotionalDeterministicReply({
+      plan: emotionalPlan,
+      user,
+      store,
+      lastAssistant: turnPolicy?.snapshot?.lastAssistant || "",
+    });
+    if (reply) {
+      store.message(chatId, "user", text);
+      store.message(chatId, "assistant", reply);
+      emit({ type: "token", text: reply });
+      emit({ type: "done", tokens: 0 });
+      return;
+    }
   }
   const basePreferences = getPreferences(store, profileId);
   const fastPath = turnPolicy?.fastPath === true;
@@ -596,6 +712,7 @@ ${finalContract}`;
   const verifiedSteamResults = new Map();
   let steamImmediateReply = "";
   let luaToolsImmediateReply = "";
+  let pcImmediateReply = "";
   let styleRevisionAttempts = 0;
   let jeddawiRenderMeta = null;
   const jeddawiActive = shouldInvokeJeddawiRenderer(
@@ -737,12 +854,25 @@ ${finalContract}`;
       let candidate = responseText || response.content || "";
 
       const requiresActionTool =
-        turnPolicy?.taskHint === "steam_action" ||
-        turnPolicy?.taskHint === "luatools_action" ||
+        [
+          "steam_action",
+          "luatools_action",
+          "file_read",
+          "developer_action",
+          "disk",
+          "network",
+          "hardware",
+          "memory",
+          "cpu",
+          "gpu",
+          "uptime",
+          "health",
+        ].includes(turnPolicy?.taskHint) ||
         (turnPolicy?.taskHint === "pc_action" &&
           Boolean(turnPolicy?.snapshot?.lastUser));
       if (
         requiresActionTool &&
+        successfulTools === 0 &&
         !response.tool_calls?.length &&
         actionToolRepairAttempts++ === 0 &&
         round < 15
@@ -752,7 +882,7 @@ ${finalContract}`;
         messages.push({
           role: "system",
           content:
-            "This is an execution request and compatible tools are available. Do not answer with a capability denial or instructions for the user to do it manually. Call an appropriate offered tool now to inspect or advance the actual task. For Steam tasks, use the dedicated steam tool first; search there for a verified app_id and never guess one or use steamcmd for store discovery. Use browser/desktop only after a real steam-tool blocker. If the request names a local application, inspect whether it exists before claiming it is unavailable. Never claim success until a tool verifies the requested goal.",
+            "This is an execution request and compatible tools are available. Do not answer with a capability denial or instructions for the user to do it manually. Call an appropriate offered tool now to inspect or advance the actual task. For Steam tasks, use the dedicated steam tool first; open_client opens Steam itself, while game lookup must search for a verified app_id. For file_read, call read_file with the exact named/reused workspace file. For developer_action, read the exact named code file first and do not invent a path from words such as test/اختبار. For PC diagnostics, call inspect_pc with the requested section. Never claim success until a tool verifies the requested goal.",
         });
         continue;
       }
@@ -1045,7 +1175,24 @@ ${finalContract}`;
       }
 
       timing?.mark?.("guard_done");
+      const emotionalPlan = turnPolicy?.emotional || null;
       if (
+        emotionalPlan &&
+        priorityLane !== "persona" &&
+        !response.tool_calls?.length
+      ) {
+        guarded.text = String(guarded.text || "")
+          .replace(/\s*\/no_think\s*/gi, " ")
+          .trim();
+        if (detectEmotionalReplyViolation(guarded.text, { user, store })) {
+          guarded.text = emotionalDeterministicReply({
+            plan: emotionalPlan,
+            user,
+            store,
+            lastAssistant: turnPolicy?.snapshot?.lastAssistant || "",
+          });
+        }
+      } else if (
         priorityLane !== "persona" &&
         !response.tool_calls?.length &&
         guarded.text
@@ -1236,12 +1383,21 @@ ${finalContract}`;
           toolBudget.set(name, count);
           if (turnPolicy?.securityIntent?.tool === name)
             securityToolInvoked = true;
-          const requestedSteamAction =
-            name === "steam" ? String(args?.action || "").toLowerCase() : "";
           const steamGoalAction =
             turnPolicy?.taskHint === "steam_action"
               ? requiredSteamAction(turnPolicy?.effectiveIntent || text)
               : null;
+          if (
+            name === "steam" &&
+            steamGoalAction === "open_client" &&
+            String(args?.action || "").toLowerCase() !== "open_client"
+          ) {
+            args = { ...args, action: "open_client" };
+            delete args.app_id;
+            delete args.query;
+          }
+          const requestedSteamAction =
+            name === "steam" ? String(args?.action || "").toLowerCase() : "";
           if (
             name === "steam" &&
             steamGoalAction === "search" &&
@@ -1275,6 +1431,18 @@ ${finalContract}`;
           failedCallHistory.delete(callKey);
           successfulTools++;
           if (
+            name === "inspect_pc" &&
+            ["disk", "network", "hardware", "memory", "cpu", "gpu", "uptime", "health"].includes(
+              turnPolicy?.taskHint,
+            )
+          ) {
+            const reply = verifiedPcReply(result, text);
+            if (reply) pcImmediateReply = reply;
+          }
+          if (name === "read_file" && turnPolicy?.taskHint === "file_read") {
+            offeredTools = [];
+          }
+          if (
             name === "luatools" &&
             turnPolicy?.taskHint === "luatools_action"
           ) {
@@ -1286,7 +1454,8 @@ ${finalContract}`;
             successfulSteamActions.add(steamActionName);
             if (
               (steamActionName === "search" && Array.isArray(result.results)) ||
-              result.verified_app
+              result.verified_app ||
+              (steamActionName === "open_client" && result.launched)
             ) {
               verifiedSteamResults.set(steamActionName, result);
               const steamGoal = requiredSteamAction(

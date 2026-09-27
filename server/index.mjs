@@ -18,6 +18,7 @@ import { Tools, runProcess } from "./tools.mjs";
 import { routeModel } from "./router.mjs";
 import { runAgent } from "./agent.mjs";
 import { isPureGreeting, emitInstantGreeting } from "./greeting.mjs";
+import { emitEmotionalReply } from "./emotional-turn.mjs";
 import { createDefaultRegistry } from "./providers/index.mjs";
 import {
   expertQuestionFromRequest,
@@ -1604,6 +1605,19 @@ export async function createApp({
               emit,
               timing,
             });
+          } else if (
+            turn.emotional?.deterministic &&
+            !b.attachments?.length
+          ) {
+            emitEmotionalReply({
+              store,
+              chatId: boundChat.id,
+              user,
+              text: b.text,
+              plan: turn.emotional,
+              emit,
+              timing,
+            });
           } else {
           const conversationIntent = turn;
           const routingText = turn.effectiveIntent || b.text;
@@ -1714,6 +1728,7 @@ export async function createApp({
             styleChanged: Boolean(turn.styleChanged),
             canonicalTopic: turn.canonicalTopic || null,
             semanticKind: turn.semantic?.kind || null,
+            emotionalKind: turn.emotional?.kind || null,
             speakerPersona: turn.speakerPersona || null,
           });
           if (routing.needsRemoteApproval) {

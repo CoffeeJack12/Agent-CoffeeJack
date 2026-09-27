@@ -225,3 +225,50 @@ test("LuaTools typo plus download request stays on LuaTools and excludes securit
   assert.equal(offered.includes("security_strings"), false);
   assert.equal(offered.some((name) => name.startsWith("security_")), false);
 });
+
+test("PC disk request with الزبدة remains a disk diagnostic", () => {
+  const turn = resolveTurnContext("شيك على مساحة قرص C عندي وعطيني الزبدة", { history: [] });
+  assert.equal(turn.taskHint, "disk");
+  const offered = filterToolsForTurn(definitions, turn).map((x) => x.function.name);
+  assert.ok(offered.includes("inspect_pc"));
+  assert.notEqual(turn.intent, "rewrite");
+});
+
+test("plain workspace file read excludes security tools", () => {
+  const turn = resolveTurnContext("اقرأ note.txt وقلي الـ CODEWORD فقط", { history: [] });
+  assert.equal(turn.taskHint, "file_read");
+  const offered = filterToolsForTurn(definitions, turn).map((x) => x.function.name);
+  assert.deepEqual(offered.sort(), ["list_files", "read_file"].sort());
+});
+
+test("file follow-up reuses the explicitly named prior workspace file", () => {
+  const history = [
+    { role: "user", content: "تذكر داخل هذه المحادثة فقط: الملف اللي بنتكلم عنه هو note.txt" },
+    { role: "assistant", content: "تم، الملف هو note.txt." },
+  ];
+  const turn = resolveTurnContext("طيب ايش الـ CODEWORD اللي فيه؟", { history });
+  assert.equal(turn.taskHint, "file_read");
+  assert.match(turn.directive, /note\.txt/);
+});
+
+test("named coding file routes to developer tools and preserves the exact file", () => {
+  const turn = resolveTurnContext(
+    "افحص math.mjs وصلح دالة add بحيث الاختبار ينجح، شغل الاختبار وتأكد قبل ما تقول تم.",
+    { history: [] },
+  );
+  assert.equal(turn.taskHint, "developer_action");
+  assert.match(turn.directive, /math\.mjs/);
+  assert.doesNotMatch(turn.directive, /path=test\b/i);
+  const offered = filterToolsForTurn(definitions, turn).map((x) => x.function.name);
+  assert.ok(offered.includes("read_file"));
+  assert.ok(offered.includes("apply_patch"));
+  assert.equal(offered.includes("security_strings"), false);
+});
+
+test("Steam client-open request is distinct from opening a game store page", () => {
+  const turn = resolveTurnContext("ممكن تفتح ستيم", { history: [] });
+  assert.equal(turn.taskHint, "steam_action");
+  assert.match(turn.directive, /open_client/);
+  const steamDef = definitions.find((x) => x.function.name === "steam");
+  assert.ok(steamDef.function.parameters.properties.action.enum.includes("open_client"));
+});

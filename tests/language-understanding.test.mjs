@@ -126,17 +126,17 @@ test("routing stems map to classifier forms and never repeat user words", () => 
   assert.deepEqual(tokens, ["فتح", "افتح", "برنامج"]);
 });
 
-test("routing stems improve classification without leaking into turn text", () => {
+test("routing keeps direct classification and never leaks fallback stems", () => {
   const text = "ممكن تفتح ستيم";
   const base = resolveTurnContext(text, { history: [] });
-  assert.equal(base.taskHint, null);
+  assert.equal(base.taskHint, "steam_action");
   const { turn, usedStems } = resolveTurnWithRoutingStems({
     text,
     stems: ["فتح", "برنامج"],
     resolve: (value) => resolveTurnContext(value, { history: [] }),
     base,
   });
-  assert.equal(usedStems, true);
+  assert.equal(usedStems, false);
   assert.equal(turn.taskHint, "steam_action");
   assert.equal(turn.effectiveIntent, text);
   assert.equal(turn.rawText, text);
@@ -183,13 +183,15 @@ test("Farasa end-to-end routing keeps effectiveIntent clean", { skip: needsFaras
   const text = "ممكن تفتح ستيم";
   const deep = await enrichLanguageOnDemand(text, { force: true });
   assert.equal(deep.text, text);
+  const base = resolveTurnContext(text, { history: [] });
   const { turn, usedStems } = resolveTurnWithRoutingStems({
     text: deep.text,
     stems: deep.routingStems,
     resolve: (value) => resolveTurnContext(value, { history: [] }),
+    base,
   });
-  assert.equal(usedStems, true);
   assert.equal(turn.taskHint, "steam_action");
+  assert.equal(usedStems, false);
   assert.equal(turn.effectiveIntent, text);
 });
 

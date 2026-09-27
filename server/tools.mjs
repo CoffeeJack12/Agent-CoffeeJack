@@ -57,11 +57,11 @@ export const definitions = [
   ),
   tool(
     "steam",
-    "Use the official Steam Store API and the installed Steam client. For game lookup/search, ALWAYS call action=search first and use the returned verified app_id; never guess an App ID and never use steamcmd for store discovery. action=open_store opens the verified store page in the installed Steam client. action=install starts Steam's official install flow and does not claim completion until Steam itself completes it.",
+    "Use the official Steam Store API and the installed Steam client. action=open_client opens the Steam client itself. For game lookup/search, ALWAYS call action=search first and use the returned verified app_id; never guess an App ID and never use steamcmd for store discovery. action=open_store opens the verified store page in the installed Steam client. action=install starts Steam's official install flow and does not claim completion until Steam itself completes it.",
     {
       action: {
         type: "string",
-        enum: ["status", "search", "open_store", "install"],
+        enum: ["status", "open_client", "search", "open_store", "install"],
       },
       query: str("Game name/search text. Required for search and as expected name for open_store/install."),
       app_id: { type: "integer", description: "Verified Steam app ID returned by action=search" },
@@ -577,6 +577,19 @@ async function steamAction(args = {}, signal) {
       client_path: client,
       verified: true,
     };
+
+  if (action === "open_client") {
+    if (!client)
+      throw new Error("Steam desktop client is not installed in a detected standard location");
+    await launchDetached(client, []);
+    return {
+      action,
+      installed: true,
+      client_path: client,
+      launched: true,
+      verified: true,
+    };
+  }
 
   if (action === "search") {
     const results = await steamStoreSearch(args.query, signal);

@@ -40,6 +40,7 @@ import {
   formatSpeakerPersonaPrompt,
 } from "./speaker-persona.mjs";
 import { isPureGreeting } from "./greeting.mjs";
+import { emotionalDirective, emotionalTurnPlan } from "./emotional-turn.mjs";
 
 const CONFIRM =
   /^(?:y(?:eah|ep|ea|up|a)?|yes|sure|ok(?:ay)?|alright|right|correct|affirmative|do it|go ahead|proceed|please do|go for it|sounds good|that(?:'s| is) fine|نعم|ايوه|أيوه|أيوا|ايوا|يب|تمام|اوك|أوك|موافق|نفّذ|نفذ|سويه|سوّيه|يلا|امش|يمشي)[.!؟\s]*$/iu;
@@ -57,6 +58,16 @@ const FIX_REF =
 
 const REWRITE =
   /^(?:make (?:it|your answer|the answer|that|this) (?:shorter|simpler|better|clearer|brief|concise)|make (?:it|your answer) (?:a )?(?:bit |little )?shorter|simplify(?: it)?|rewrite(?: it)?|shorten(?: it| your answer)?|clean(?: it)? up|be (?:more )?concise|ابغاك.{0,40}(?:تعد(?:ّ|ل)?|بسط|أبسط).{0,40}|عد(?:ّ|ل)?ها.{0,20}|بسطها|بسّطها|خليها\s*أبسط|خلها\s*أبسط|اختصر(?:ها)?|بسّط)[.!؟\s]*$/iu;
+
+const OPERATIONAL_REQUEST =
+  /\b(?:check|inspect|read|open|launch|run|test|fix|repair|search|find|download|install|drive|disk|steam|luatools|file)\b|(?:شيك|افحص|اقرأ|اقرا|افتح|شغل|شغّل|اختبر|صلح|أصلح|ابحث|دور|حمّل|حمل|نزّل|نزل|ثبت|قرص|مساحة|ملف|ستيم)/iu;
+
+const WORKSPACE_FILE_MENTION =
+  /(?:^|[\s"'\x60])([A-Za-z0-9_.\/\\-]+\.(?:txt|md|json|js|mjs|cjs|ts|tsx|jsx|py|css|html|yaml|yml|toml|ini|csv|xml|log))(?=$|[\s"'،,.!?؟])/iu;
+
+function extractWorkspaceFileMention(text = "") {
+  return String(text || "").match(WORKSPACE_FILE_MENTION)?.[1] || "";
+}
 
 /** Recent-turn recall (transient facts — not long-term memory). */
 const RECALL_RECENT =
@@ -314,7 +325,10 @@ function summarizeTopic(text) {
 /**
  * Classify dialogue act (before task/mode routing).
  */
-export function classifyConversationIntent(text = "", { history = [] } = {}) {
+export function classifyConversationIntent(
+  text = "",
+  { history = [], style = null } = {},
+) {
   const trimmed = String(text || "").trim();
   const snapshot = buildRecentContext(history);
   if (!trimmed) {
@@ -332,13 +346,20 @@ export function classifyConversationIntent(text = "", { history = [] } = {}) {
   const languageSwitch = classifyLanguageSwitch(trimmed);
   const arabicFollow = classifyArabicFollowUp(trimmed);
   const semantic = normalizeJeddawiSemantics(trimmed);
+  const emotional = emotionalTurnPlan(trimmed, { snapshot, style });
 
   if (CONFIRM.test(trimmed)) intent = "confirm";
   else if (REJECT.test(trimmed)) intent = "reject";
   else if (CONTINUE.test(trimmed)) intent = "continue";
-  else if (semantic.kind === "gist" || semantic.kind === "be_direct")
+  else if (
+    (semantic.kind === "gist" || semantic.kind === "be_direct") &&
+    !OPERATIONAL_REQUEST.test(trimmed)
+  )
     intent = "rewrite";
-  else if (arabicFollow?.intent === "rewrite" || REWRITE.test(trimmed))
+  else if (
+    (arabicFollow?.intent === "rewrite" || REWRITE.test(trimmed)) &&
+    !OPERATIONAL_REQUEST.test(trimmed)
+  )
     intent = "rewrite";
   else if (arabicFollow?.intent === "continue") intent = "continue";
   else if (arabicFollow?.intent === "confirm") intent = "confirm";
@@ -352,6 +373,7 @@ export function classifyConversationIntent(text = "", { history = [] } = {}) {
   else if (FIX_REF.test(trimmed)) intent = "fix_ref";
   else if (WHY_HOW.test(trimmed)) intent = "clarify";
   else if (REFERENCE.test(trimmed)) intent = "reference";
+  else if (emotional) intent = "emotional";
   else if (GREETING.test(trimmed) && trimmed.length <= 40) intent = "greeting";
 
   const conversational = intent !== "task";
@@ -370,6 +392,7 @@ export function classifyConversationIntent(text = "", { history = [] } = {}) {
         : null,
     languageSwitch,
     semantic,
+    emotional: intent === "emotional" ? emotional : null,
     styleCommand:
       styleCommand ||
       (arabicFollow?.intent === "style_tone"
@@ -463,7 +486,10 @@ export function resolveTurnContext(
     };
   }
 
-  const classified = classifyConversationIntent(rawText, { history });
+  const classified = classifyConversationIntent(rawText, {
+    history,
+    style: styleAfter,
+  });
   const snapshot =
     classified.snapshot ||
     buildRecentContext(history, { canonicalTopic });
@@ -557,9 +583,7 @@ export function resolveTurnContext(
   }
 
   // Structured Windows diagnostics beat free-form terminal invention.
-  const pcDiag = !classified.conversational
-    ? classifyPcDiagnosticIntent(trimmed)
-    : null;
+  const pcDiag = classifyPcDiagnosticIntent(trimmed);
   if (pcDiag) {
     return {
       rawText: trimmed,
@@ -613,6 +637,7 @@ export function resolveTurnContext(
     classified,
     snapshot,
     conversationStyle,
+    { user, store },
   );
 
   const followUp =
@@ -630,6 +655,7 @@ export function resolveTurnContext(
       "language_switch",
       "style_switch",
       "recall_recent",
+      "emotional",
     ].includes(classified.intent);
 
   const trivial =
@@ -653,6 +679,7 @@ export function resolveTurnContext(
         "language_switch",
         "style_switch",
         "recall_recent",
+        "emotional",
       ].includes(classified.intent) &&
       !explicitVerify &&
       !explicitRemember);
@@ -706,11 +733,18 @@ export function resolveTurnContext(
     semantic,
     canonicalTopic,
     speakerPersona,
+    emotional: classified.emotional || null,
     instantGreeting: isPureGreeting(trimmed),
   };
 }
 
-function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
+function buildEffectiveIntent(
+  trimmed,
+  classified,
+  snapshot,
+  style = null,
+  { user = null, store = null } = {},
+) {
   const proposal = snapshot.lastExecutableProposal || "";
   const priorAssistant = snapshot.lastAssistant || "";
   const priorUser = snapshot.lastUser || "";
@@ -754,6 +788,63 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
     };
   }
 
+  const explicitWorkspaceFile = extractWorkspaceFileMention(trimmed);
+  const priorWorkspaceFile = extractWorkspaceFileMention(priorUser);
+  const developerFileAction =
+    Boolean(explicitWorkspaceFile) &&
+    /\b(?:fix|repair|edit|patch|change|test|debug)\b|(?:صلح|أصلح|اصلح|عدل|عدّل|اختبر|شغل.{0,12}اختبار|صحح|صحّح)/iu.test(
+      trimmed,
+    );
+  if (developerFileAction) {
+    return {
+      taskHint: "developer_action",
+      effectiveIntent: trimmed,
+      directive: [
+        "DEVELOPER FILE ACTION.",
+        `The user explicitly named this workspace file: ${explicitWorkspaceFile}.`,
+        `Read ${explicitWorkspaceFile} first. Do not invent a directory or substitute a nearby word such as test/اختبار as the path.`,
+        "Use the smallest exact edit, then run the relevant tests/checks and verify before claiming success.",
+        "Do not use security-analysis tools for an ordinary coding request.",
+        styleBlock,
+        thread,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      resetTaskState: false,
+    };
+  }
+
+  const explicitFileRead =
+    Boolean(explicitWorkspaceFile) &&
+    /\b(?:read|open|show|contents?|codeword)\b|(?:اقرأ|اقرا|اعرض|وريني|قلي|قل\s*لي|وش|ايش|إيش)/iu.test(
+      trimmed,
+    );
+  const followUpFileRead =
+    !explicitWorkspaceFile &&
+    Boolean(priorWorkspaceFile) &&
+    /\b(?:codeword|content|contents?|inside|in it)\b|(?:وش.{0,20}فيه|ايش.{0,20}فيه|إيش.{0,20}فيه|اللي\s*فيه|محتواه|محتوى)/iu.test(
+      trimmed,
+    );
+  if (explicitFileRead || followUpFileRead) {
+    const filePath = explicitWorkspaceFile || priorWorkspaceFile;
+    return {
+      taskHint: "file_read",
+      effectiveIntent: trimmed,
+      directive: [
+        "WORKSPACE FILE READ.",
+        `Call read_file once with path=${filePath}.`,
+        "This is ordinary user-owned workspace content, not a security-analysis task.",
+        "Do not call security_* tools unless the user explicitly asks for security/reverse-engineering analysis.",
+        "Answer only the requested information from the file. Never expose tool-call JSON or internal payloads.",
+        styleBlock,
+        thread,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      resetTaskState: false,
+    };
+  }
+
   const luaToolsAction =
     LUATOOLS_MENTION.test(trimmed) &&
     /\b(?:use|inspect|check|status|list|manage|open|launch|find|look\s+for|search|install|download)\b|(?:استخدم|افحص|شيك|تحقق|اعرض|إدارة|ادارة|افتح|شغل|ابحث|دور|ثبت|حمّل|حمل|نزّل|نزل)/iu.test(
@@ -786,7 +877,7 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
 
   const steamAction =
     /\bsteam\b|ستيم/iu.test(trimmed) &&
-    /\b(?:look\s+for|find|search|open|install|download|launch|run|check|locate)\b|(?:ابحث|دور|افتح|ثبت|حمّل|حمل|شغل|نزّل|نزل)/iu.test(
+    /\b(?:look\s+for|find|search|open|install|download|launch|run|check|locate)\b|(?:ابحث|دور|افتح|تفتح|ثبت|حمّل|حمل|شغل|شغّل|تشغل|تشغّل|نزّل|نزل)/iu.test(
       trimmed,
     );
   if (steamAction) {
@@ -799,7 +890,7 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
       effectiveIntent: trimmed,
       directive: [
         "STEAM ACTION: treat this as an operational PC task, not a capability question.",
-        "Use the dedicated steam tool first. For lookup/search, call steam action=search with the game name and use only a verified app_id returned by that tool.",
+        "Use the dedicated steam tool first. If the user asks to open/launch Steam itself, call steam action=open_client exactly once. For game lookup/search, call steam action=search with the game name and use only a verified app_id returned by that tool.",
         "Never guess a Steam App ID. Never use steamcmd for store discovery.",
         "Use browser, terminal, files, or desktop only as a fallback after the steam tool reports an actual blocker. Do not claim Steam or PC access is unsupported while the steam tool is enabled.",
         "For ordinary Steam installs/downloads, verify what actually happened before claiming success.",
@@ -809,6 +900,26 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
         .filter(Boolean)
         .join("\n"),
       resetTaskState: Boolean(previousUserText) && !priorSteamContext,
+    };
+  }
+
+  if (classified.intent === "emotional" && classified.emotional) {
+    const plan = classified.emotional;
+    return {
+      taskHint: "emotional_support",
+      effectiveIntent: plan.priorAnswer
+        ? "The user did not understand your previous answer and is frustrated. Acknowledge briefly, then re-explain it simply."
+        : trimmed,
+      directive: [
+        emotionalDirective(plan, { user, store }),
+        plan.priorAnswer
+          ? `Previous answer to re-explain simply:\n${plan.priorAnswer}`
+          : "",
+        styleBlock,
+        thread,
+      ]
+        .filter(Boolean)
+        .join("\n"),
     };
   }
 
@@ -1231,6 +1342,34 @@ export function filterToolsForTurn(definitions = [], turn) {
     if (
       turn.taskHint === "luatools_action" &&
       !["luatools", "steam", "consult_expert", "browser", "desktop"].includes(name)
+    )
+      return false;
+    if (
+      turn.taskHint === "file_read" &&
+      !["read_file", "list_files"].includes(name)
+    )
+      return false;
+    if (
+      turn.taskHint === "developer_action" &&
+      ![
+        "project_map",
+        "read_file",
+        "list_files",
+        "search_code",
+        "apply_patch",
+        "write_file",
+        "run_tests",
+        "run_check",
+        "git_status",
+        "git_diff",
+        "terminal",
+        "consult_expert",
+      ].includes(name)
+    )
+      return false;
+    if (
+      String(name || "").startsWith("security_") &&
+      !String(turn.taskHint || "").startsWith("security_")
     )
       return false;
     if (!turn.allowResearch && (name === "research" || name === "web_search"))

@@ -77,6 +77,7 @@ export function formatSpeakerPersonaPrompt(speaker = null, style = null) {
     ? {
         speaker_name: String(speaker.speaker_name),
         honorific: speaker.honorific || null,
+        gender: speaker.gender || null,
       }
     : accountBoundSpeaker(null);
   const lines = [
@@ -95,6 +96,10 @@ export function formatSpeakerPersonaPrompt(speaker = null, style = null) {
   if (p.honorific === "Queen") {
     lines.push(
       "Arabic/Jeddawi: use feminine grammar for Lubna (إنتِ, تبي, تقدرين) when addressing her.",
+    );
+  } else if (p.gender === "m") {
+    lines.push(
+      "Arabic/Jeddawi: this user is male — always use masculine grammar (إنت، تبغى، حاب، تقدر). Never feminine forms (إنتِ، تبغين، حابة، تقدرين).",
     );
   }
   void style;
