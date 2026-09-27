@@ -181,6 +181,7 @@ function verifiedSteamReply(result, requestText = "") {
 
 function verifiedPcReply(result, requestText = "") {
   if (!result || typeof result !== "object" || result.error) return "";
+  if (result.data && typeof result.data === "object") result = result.data;
   const arabic = /[\u0600-\u06ff]/u.test(String(requestText || ""));
   const section = String(result.section || "").toLowerCase();
   if (section === "disk")
@@ -1318,6 +1319,20 @@ ${finalContract}`;
           if (typeof args === "string") args = JSON.parse(args);
           if (!args || typeof args !== "object" || Array.isArray(args))
             throw new Error("Invalid tool arguments");
+          if (
+            name === "luatools" &&
+            turnPolicy?.taskHint === "luatools_action" &&
+            ["inspect_app", "inspect_game", "inspect_artifacts", "verify_state"].includes(
+              String(args.action || "").toLowerCase(),
+            )
+          ) {
+            const explicitAppId = String(turnPolicy?.effectiveIntent || text).match(
+              /\bapp(?:\s*id)?\s*[:#-]?\s*(\d{5,10})\b/i,
+            );
+            if (explicitAppId) {
+              args = { ...args, app_id: Number(explicitAppId[1]) };
+            }
+          }
           argsNormalized = stableNormalize(args);
         } catch {
           argsNormalized = String(args);
@@ -1436,7 +1451,7 @@ ${finalContract}`;
               turnPolicy?.taskHint,
             )
           ) {
-            const reply = verifiedPcReply(result, text);
+            const reply = verifiedPcReply(result?.data || result, text);
             if (reply) pcImmediateReply = reply;
           }
           if (name === "read_file" && turnPolicy?.taskHint === "file_read") {
@@ -1528,6 +1543,16 @@ ${finalContract}`;
         }
       }
 
+      if (pcImmediateReply) {
+        transcript += pcImmediateReply;
+        store.message(chatId, "assistant", pcImmediateReply);
+        taskState.status = "completed";
+        store.saveTaskState(chatId, taskState);
+        reflect("completed");
+        emit({ type: "token", text: pcImmediateReply });
+        emit({ type: "done", tokens: totalTokens });
+        return;
+      }
       if (luaToolsImmediateReply) {
         transcript += luaToolsImmediateReply;
         store.message(chatId, "assistant", luaToolsImmediateReply);

@@ -626,9 +626,11 @@ function clip(text, n = 400) {
  * Build a bounded evidence pack from tool events for this chat turn.
  */
 export function buildEvidencePack(events = [], { taskType = "general", chatId } = {}) {
-  const rows = (events || []).filter(
-    (e) => !chatId || e.chat_id === chatId || e.chatId === chatId,
-  );
+  // Store.events() is newest-first; process chronologically so the
+  // latest verification run wins over earlier failed attempts in the same turn.
+  const rows = (events || [])
+    .filter((e) => !chatId || e.chat_id === chatId || e.chatId === chatId)
+    .sort((a, b) => Number(a.id || 0) - Number(b.id || 0));
   const pack = {
     taskType,
     changedFiles: [],
@@ -751,6 +753,8 @@ export function buildEvidencePack(events = [], { taskType = "general", chatId } 
     }
   }
 
+  if (pack.tests?.passed)
+    pack.failures = pack.failures.filter((failure) => failure.type !== "tests");
   pack.changedFiles = pack.changedFiles.slice(0, 12);
   pack.failures = pack.failures.slice(0, 8);
   pack.warnings = pack.warnings.slice(0, 8);
