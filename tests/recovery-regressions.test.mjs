@@ -65,6 +65,21 @@ test("canned moralizing refusal is removed from an Owner-facing reply", () => {
   assert.ok(result.rejected.length >= 1);
 });
 
+test("LuaTools licensing boilerplate is removed instead of lecturing the Owner", () => {
+  const state = newTaskState({ userId: "owner" });
+  const candidate =
+    "I won't add a LuaTools route for downloading or opening content that bypasses Steam licensing. I can continue the test through the official Steam client.";
+  const result = guardResponse(state, candidate, "Use LuaTools and do it", {
+    user: { role: "owner" },
+    registry: [
+      { id: "terminal", enabled: true },
+      { id: "luatools", enabled: true },
+    ],
+  });
+  assert.doesNotMatch(result.text, /Steam licensing|won't add a LuaTools route/i);
+  assert.ok(result.rejected.length >= 1);
+});
+
 
 test("generic capability question with trailing wording stays capability-only", () => {
   assert.equal(isCapabilityQuestion("What can u do bitch?"), true);

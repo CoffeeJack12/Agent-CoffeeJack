@@ -242,6 +242,7 @@ export function guardResponse(state, candidate, languageText = "", options = {})
         /I cannot because it may be dangerous/i.test(value) ||
         /I cannot assist with downloading or installing/i.test(value) ||
         /I cannot assist with finding or controlling .*Steam/i.test(value) ||
+        /I (?:will not|won['’]t|cannot) (?:add|use|create).*LuaTools.*Steam licens(?:e|ing)/i.test(value) ||
         (pcEnabled &&
           /I (?:am an AI assistant and )?cannot directly access or use your personal computer/i.test(
             value,
@@ -316,7 +317,7 @@ export function guardResponse(state, candidate, languageText = "", options = {})
     if (missing && !text) text = labels[missing];
     else if (!text) {
       const falseDenial = rejected.some((r) =>
-        /cannot (?:directly )?(?:control|interact with|access)|cannot directly access or use your personal computer|cannot access or control external systems|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|cannot assist with downloading or installing|cannot assist with finding or controlling .*Steam|provided tools do not include any functionality related to .*Steam|not supported by the available functions|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|potentially harmful|safely and effectively/i.test(
+        /cannot (?:directly )?(?:control|interact with|access)|cannot directly access or use your personal computer|cannot access or control external systems|as an AI|lawful and ethical|my purpose is|cannot hack or bypass|cannot assist with downloading or installing|cannot assist with finding or controlling .*Steam|provided tools do not include any functionality related to .*Steam|(?:will not|won't|cannot) (?:add|use|create).*(?:LuaTools|Steam).*(?:license|licensing|ownership)|Steam licensing|not supported by the available functions|cannot perform actions that go against|cannot comply with requests that involve|unauthorized actions|terms of service|ethical guidelines|safe, legal, and respectful|privacy and security principles|ethical and safety|potentially harmful|safely and effectively/i.test(
           r,
         ),
       );
