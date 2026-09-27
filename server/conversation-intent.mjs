@@ -727,9 +727,14 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
   if (barePcUse) {
     const priorObjective =
       priorUser || snapshot.canonicalTopic || snapshot.lastTopic || "";
+    const priorIsLuaTools = /\bluatools\b/iu.test(priorObjective);
     const priorIsSteam = /\bsteam\b|ستيم/iu.test(priorObjective);
     return {
-      taskHint: priorIsSteam ? "steam_action" : "pc_action",
+      taskHint: priorIsLuaTools
+        ? "luatools_action"
+        : priorIsSteam
+          ? "steam_action"
+          : "pc_action",
       effectiveIntent: priorObjective
         ? `Continue the previous concrete objective using the connected PC tools. Previous user objective: ${priorObjective}`
         : "Use the connected PC tools for the user's objective.",
@@ -744,6 +749,33 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
         .filter(Boolean)
         .join("\n"),
       resetTaskState: false,
+    };
+  }
+
+  const luaToolsAction =
+    /\bluatools\b/iu.test(trimmed) &&
+    /\b(?:use|inspect|check|status|list|manage|open|launch|find|look\s+for|search)\b|(?:استخدم|افحص|شيك|تحقق|اعرض|إدارة|ادارة|افتح|شغل|ابحث|دور)/iu.test(
+      trimmed,
+    );
+  if (luaToolsAction) {
+    const previousUserText = String(snapshot.lastUser || "");
+    const priorLuaToolsContext = /\bluatools\b|\bsteam\b|ستيم|\bgame\b|لعبة/iu.test(
+      previousUserText,
+    );
+    return {
+      taskHint: "luatools_action",
+      effectiveIntent: trimmed,
+      directive: [
+        "LUATOOLS ACTION: treat this as an operational local-PC task, not a capability question.",
+        "Use the dedicated luatools tool first for installation status, local managed entries, per-game inspection, or opening the app. Do not claim LuaTools is unavailable before using that tool.",
+        "Do not silently reroute legitimate LuaTools inspection, local configuration, plugin/fix, depot-version, save, mod, or owned-game management workflows to Steam.",
+        "Verify the local result before claiming success.",
+        styleBlock,
+        thread,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      resetTaskState: Boolean(previousUserText) && !priorLuaToolsContext,
     };
   }
 
@@ -765,10 +797,7 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
         "Use the dedicated steam tool first. For lookup/search, call steam action=search with the game name and use only a verified app_id returned by that tool.",
         "Never guess a Steam App ID. Never use steamcmd for store discovery.",
         "Use browser, terminal, files, or desktop only as a fallback after the steam tool reports an actual blocker. Do not claim Steam or PC access is unsupported while the steam tool is enabled.",
-        /luatools/i.test(trimmed)
-          ? "LuaTools was explicitly named. Inspect the local machine for LuaTools before claiming it is unavailable. If the requested path would bypass Steam ownership/licensing, use the official Steam client path instead and state that exact operational limitation."
-          : "",
-        "For installs/downloads, prefer the official Steam client and owned-library flow; verify what actually happened before claiming success.",
+        "For ordinary Steam installs/downloads, verify what actually happened before claiming success.",
         styleBlock,
         thread,
       ]
@@ -1191,7 +1220,12 @@ export function filterToolsForTurn(definitions = [], turn) {
     if (locked) return locked.includes(name);
     if (
       turn.taskHint === "steam_action" &&
-      !["steam", "consult_expert", "browser", "desktop"].includes(name)
+      !["steam", "luatools", "consult_expert", "browser", "desktop"].includes(name)
+    )
+      return false;
+    if (
+      turn.taskHint === "luatools_action" &&
+      !["luatools", "steam", "consult_expert", "browser", "desktop"].includes(name)
     )
       return false;
     if (!turn.allowResearch && (name === "research" || name === "web_search"))

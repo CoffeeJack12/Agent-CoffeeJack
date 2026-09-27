@@ -21,6 +21,7 @@ import {
 import { createSecurityToolkit, SECURITY_TOOLS } from "./security/index.mjs";
 import { getUser } from "./users.mjs";
 import { consultExpert } from "./expert-consult.mjs";
+import { luaToolsAction } from "./luatools.mjs";
 
 const str = (description) => ({ type: "string", description });
 const tool = (
@@ -64,6 +65,19 @@ export const definitions = [
       },
       query: str("Game name/search text. Required for search and as expected name for open_store/install."),
       app_id: { type: "integer", description: "Verified Steam app ID returned by action=search" },
+    },
+    ["action"],
+  ),
+  tool(
+    "luatools",
+    "Inspect and open the installed LuaTools application using dedicated local integration. Use status to verify the installation, list_managed to inspect local LuaTools/Steam configuration entries, inspect_game to inspect one locally known game by app_id or name, and open to launch the LuaTools UI. Do not infer ownership from local files.",
+    {
+      action: {
+        type: "string",
+        enum: ["status", "list_managed", "inspect_game", "open"],
+      },
+      query: str("Optional local game name for inspect_game."),
+      app_id: { type: "integer", description: "Optional Steam App ID for inspect_game." },
     },
     ["action"],
   ),
@@ -821,6 +835,7 @@ export class Tools {
       "terminal",
       "desktop",
       "steam",
+      "luatools",
       "run_tests",
       "inspect_pc",
       "apply_patch",
@@ -836,6 +851,7 @@ export class Tools {
 
     if (name === "research") return research(args,{signal});
     if (name === "steam") return steamAction(args, signal);
+    if (name === "luatools") return luaToolsAction(args, signal);
     if (name === "consult_expert") {
       const user =
         this.securityUser ||

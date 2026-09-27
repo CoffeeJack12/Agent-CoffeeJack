@@ -163,3 +163,36 @@ test("Use my pc after a Steam request remains a Steam action", () => {
   assert.equal(turn.taskHint, "steam_action");
   assert.match(turn.effectiveIntent, /Control on Steam/i);
 });
+
+
+test("LuaTools action exposes dedicated local tool without terminal", () => {
+  const turn = resolveTurnContext("Use LuaTools to inspect The Sinking City 2", {
+    history: [],
+  });
+  assert.equal(turn.taskHint, "luatools_action");
+  const offered = filterToolsForTurn(definitions, turn).map(
+    (entry) => entry.function.name,
+  );
+  assert.ok(offered.includes("luatools"));
+  assert.ok(offered.includes("steam"));
+  assert.ok(offered.includes("desktop"));
+  assert.equal(offered.includes("terminal"), false);
+});
+
+test("LuaTools tool permission keeps read actions inspect-only", () => {
+  assert.equal(toolCapability("luatools", { action: "status" }), "system_inspect");
+  assert.equal(toolCapability("luatools", { action: "list_managed" }), "system_inspect");
+  assert.equal(toolCapability("luatools", { action: "inspect_game" }), "system_inspect");
+  assert.equal(toolCapability("luatools", { action: "open" }), "desktop_control");
+});
+
+test("Use my pc after a LuaTools request remains a LuaTools action", () => {
+  const turn = resolveTurnContext("Use my pc", {
+    history: [
+      { role: "user", content: "Use LuaTools to inspect The Sinking City 2" },
+      { role: "assistant", content: "I will inspect it locally." },
+    ],
+  });
+  assert.equal(turn.taskHint, "luatools_action");
+  assert.match(turn.effectiveIntent, /LuaTools/i);
+});

@@ -248,6 +248,11 @@ export function toolCapability(toolName, args = {}) {
     if (action === "open_store") return "desktop_control";
     return "system_inspect";
   }
+  if (name === "luatools") {
+    const action = String(args?.action || "status").toLowerCase();
+    if (action === "open") return "desktop_control";
+    return "system_inspect";
+  }
   if (name === "inspect_pc") return "system_inspect";
   if (
     [
