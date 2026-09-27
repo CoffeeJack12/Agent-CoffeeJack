@@ -70,11 +70,11 @@ export const definitions = [
   ),
   tool(
     "luatools",
-    "Inspect and open the installed LuaTools application using dedicated local integration. Use status to verify the installation, list_managed to inspect local LuaTools/Steam configuration entries, inspect_game to inspect one locally known game by app_id or name, and open to launch the LuaTools UI. Do not infer ownership from local files.",
+    "Use the installed LuaTools application through dedicated local integration. Read-only actions: status, inventory, inspect_app, inspect_artifacts, verify_state. inspect_game is a compatibility alias for inspect_app. open launches the LuaTools UI. Verify actual local state before reporting success.",
     {
       action: {
         type: "string",
-        enum: ["status", "list_managed", "inspect_game", "open"],
+        enum: ["status", "inventory", "list_managed", "inspect_app", "inspect_artifacts", "verify_state", "inspect_game", "open"],
       },
       query: str("Optional local game name for inspect_game."),
       app_id: { type: "integer", description: "Optional Steam App ID for inspect_game." },
@@ -835,7 +835,6 @@ export class Tools {
       "terminal",
       "desktop",
       "steam",
-      "luatools",
       "run_tests",
       "inspect_pc",
       "apply_patch",

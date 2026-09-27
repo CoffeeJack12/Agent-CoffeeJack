@@ -767,7 +767,7 @@ function buildEffectiveIntent(trimmed, classified, snapshot, style = null) {
       effectiveIntent: trimmed,
       directive: [
         "LUATOOLS ACTION: treat this as an operational local-PC task, not a capability question.",
-        "Use the dedicated luatools tool first for installation status, local managed entries, per-game inspection, or opening the app. Do not claim LuaTools is unavailable before using that tool.",
+        "Use the dedicated luatools tool first for status, inventory, inspect_app, inspect_artifacts, verify_state, or opening the app. Do not claim LuaTools is unavailable before using that tool.",
         "Do not silently reroute legitimate LuaTools inspection, local configuration, plugin/fix, depot-version, save, mod, or owned-game management workflows to Steam.",
         "Verify the local result before claiming success.",
         styleBlock,
