@@ -272,7 +272,7 @@ export class GameSaveManager {
           compatibility: compat,
         });
       }
-      const before = cloneSave(parsed);
+      const before = adapter.clone ? adapter.clone(parsed) : cloneSave(parsed);
       const mutation = adapter.prepareMutation(parsed, editId);
       if (!mutation.ok) {
         return fail(mutation.code, mutation.message, {

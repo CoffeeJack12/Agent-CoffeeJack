@@ -40,12 +40,14 @@ import {
 } from "./helpers/game-save-fixture.mjs";
 import { createUser, ROLES, resolveLocalOwner } from "../server/users.mjs";
 
-async function tempDir(t, prefix = "jack-gs-") {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+async function tempDir(prefix = "jack-gs-") {
+  return fs.mkdtemp(path.join(os.tmpdir(), prefix));
+}
+
+function cleanupTemp(t, dir) {
   t.after(async () => {
     await fs.rm(dir, { recursive: true, force: true });
   });
-  return dir;
 }
 
 function ownerUser(store) {
@@ -67,9 +69,10 @@ function managerFor(dir, store, { adapter, saveRoots, processes, user } = {}) {
 }
 
 async function preparedJob(t, options = {}) {
-  const dir = await tempDir(t);
+  const dir = await tempDir();
   const store = new Store(dir);
   t.after(() => store.close());
+  cleanupTemp(t, dir);
   const fixtureRoot = path.join(dir, "fixtures");
   const savePath = path.join(fixtureRoot, "SaveGames", "AUTOSAVE.sav");
   await writeFixtureSave(savePath, options.save || {});
@@ -370,9 +373,10 @@ test("26 legacy autoApprove does not bypass game-save write approval", () => {
 });
 
 test("27-28 jobs are isolated by user and restore cannot cross users", async (t) => {
-  const dir = await tempDir(t);
+  const dir = await tempDir();
   const store = new Store(dir);
   t.after(() => store.close());
+  cleanupTemp(t, dir);
   const owner = resolveLocalOwner(store);
   const other = createUser(store, { displayName: "Other", role: ROLES.TRUSTED });
   const fixtureRoot = path.join(dir, "fixtures");
@@ -398,9 +402,10 @@ test("27-28 jobs are isolated by user and restore cannot cross users", async (t)
 });
 
 test("29 chat request routes through game-save tools not terminal", async (t) => {
-  const dir = await tempDir(t, "jack-gs-chat-");
+  const dir = await tempDir("jack-gs-chat-");
   const store = new Store(dir);
   t.after(() => store.close());
+  cleanupTemp(t, dir);
   const chatId = store.createChat("ammo").id;
   const names = [];
   let output = "";
@@ -485,15 +490,16 @@ test("30 final response does not claim gameplay confirmation", () => {
   );
 });
 
-test("production SC2 adapter stays fail-closed without verified refs", () => {
-  assert.equal(VERIFIED_INFINITE_AMMO_REFS.length, 0);
+test("production SC2 adapter has five verified Astra reference assets", () => {
+  assert.equal(VERIFIED_INFINITE_AMMO_REFS.length, 5);
+  assert.equal(new Set(VERIFIED_INFINITE_AMMO_REFS).size, 5);
   const parsed = buildFixtureSave();
   const mutation = sinkingCity2Adapter.prepareMutation(parsed, "infinite_ammo");
-  assert.equal(mutation.ok, false);
-  assert.equal(mutation.code, "exact_verified_asset_references_missing");
+  assert.equal(mutation.ok, true);
+  assert.equal(mutation.added.length, 5);
   const compat = sinkingCity2Adapter.compatibility(parsed, SUPPORTED_BUILD_ID);
-  assert.equal(compat.writable, false);
-  assert.ok(compat.reasons.includes("exact_verified_asset_references_missing"));
+  assert.equal(compat.writable, true);
+  assert.equal(compat.verifiedRefs, 5);
   assert.equal(compat.stackStructType, STACK_STRUCT_TYPE);
 });
 
@@ -507,9 +513,10 @@ test("game-save edit invalidates downstream verification evidence", () => {
 });
 
 test("Tools reject model-supplied absolute save paths", async (t) => {
-  const dir = await tempDir(t);
+  const dir = await tempDir();
   const store = new Store(dir);
   t.after(() => store.close());
+  cleanupTemp(t, dir);
   const tools = new Tools({
     root: dir,
     workspace: dir,
@@ -547,7 +554,7 @@ test("Trusted cannot prepare or apply live game-save writes", () => {
 });
 
 test("jobs survive store reopen", async (t) => {
-  const dir = await tempDir(t);
+  const dir = await tempDir();
   const store = new Store(dir);
   const fixtureRoot = path.join(dir, "fixtures");
   const savePath = path.join(fixtureRoot, "SaveGames", "AUTOSAVE.sav");
@@ -562,6 +569,7 @@ test("jobs survive store reopen", async (t) => {
   store.close();
   const store2 = new Store(dir);
   t.after(() => store2.close());
+  cleanupTemp(t, dir);
   const job = getJob(store2, prepared.jobId, resolveLocalOwner(store2).id);
   assert.equal(job.prepared_hash, prepared.preparedHash);
 });

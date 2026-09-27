@@ -13,6 +13,14 @@ import {
   makeInt,
   makeNone,
 } from "../gvas.mjs";
+import {
+  isTsc2DynamicSave,
+  parseTsc2Save,
+  serializeTsc2Save,
+  applyTsc2InfiniteAmmo,
+  compareTsc2Preservation,
+  TSC2_STACK_CLASS,
+} from "../tsc2-format.mjs";
 
 export const GAME_ID = "sinking-city-2";
 export const STEAM_APP_ID = "2825860";
@@ -22,13 +30,18 @@ export const ECONOMY_PATH = ["EconomyManager"];
 export const STASHED_STACKS_PATH = ["EconomyManager", "StashedStacksSaveData"];
 
 /**
- * Verified infinite-ammo SoftClass paths for Steam build 24867144.
- * These must come from a previously successful local edit. Searches of this
- * repository, available transcripts, and local artifacts recovered none.
- * Write/apply stays fail-closed until this list contains exactly five verified
- * Unreal paths. Do not invent similar-looking references.
+ * Recovered from the successful Astra/Codex reference edit on 2026-09-25.
+ * Original SHA-256: 9b21d50a8e2bcd7a41b85f7d98a7c5e4781c0bf656f7393ca6f6ce2d31c3d91b
+ * Modified SHA-256: a200277bbab6ad9077a94ca8ab182a6ec21788df19ac3fde351df4118c5a4e60
+ * The reference edit changed only EconomyManager.StashedStacksSaveData.
  */
-export const VERIFIED_INFINITE_AMMO_REFS = Object.freeze([]);
+export const VERIFIED_INFINITE_AMMO_REFS = Object.freeze([
+  "/Game/DataAssets/Items/HG_Colt_M1911/AID_HG_Colt_M1911_Infinite.AID_HG_Colt_M1911_Infinite",
+  "/Game/DataAssets/Items/SG_Winchester_M1897/AID_SG_Winchester_M1897_Infinite.AID_SG_Winchester_M1897_Infinite",
+  "/Game/DataAssets/Items/SMG_Thompson/AID_SMG_Thompson_Infinite.AID_SMG_Thompson_Infinite",
+  "/Game/DataAssets/Items/RFL_Springfield_M1903/AID_RFL_Springfield_M1903_Infinite.AID_RFL_Springfield_M1903_Infinite",
+  "/Game/DataAssets/Items/GL_MartiniHenry/AID_GL_MartiniHenry_Infinite.AID_GL_MartiniHenry_Infinite",
+]);
 
 export const ALIASES = Object.freeze([
   "sinking-city-2",
@@ -257,22 +270,29 @@ export const sinkingCity2Adapter = {
       err.code = "not_gvas";
       throw err;
     }
+    if (isTsc2DynamicSave(buffer)) return parseTsc2Save(buffer);
     return parseGvas(buffer);
   },
 
   serialize(save) {
+    if (save?.format === "tsc2-dynamic") return serializeTsc2Save(save);
     return serializeGvas(save);
+  },
+
+  clone(save) {
+    return this.parse(this.serialize(save));
   },
 
   compatibility(parsed, buildId) {
     const reasons = [];
-    const magicOk = Boolean(parsed?.header);
+    const native = parsed?.format === "tsc2-dynamic";
+    const magicOk = native || Boolean(parsed?.header);
     if (!magicOk) reasons.push("not_gvas");
     const build = String(buildId || "");
     const buildSupported = build === SUPPORTED_BUILD_ID;
     if (!buildSupported) reasons.push("unsupported_version");
-    const economy = parsed ? walkPath(parsed, ECONOMY_PATH) : null;
-    const stacks = parsed ? walkPath(parsed, STASHED_STACKS_PATH) : null;
+    const economy = native ? parsed?.economy : parsed ? walkPath(parsed, ECONOMY_PATH) : null;
+    const stacks = native ? parsed?.stash : parsed ? walkPath(parsed, STASHED_STACKS_PATH) : null;
     if (parsed && !economy) reasons.push("missing_economy_manager");
     if (parsed && !stacks) reasons.push("missing_stashed_stacks");
     const refsReady = VERIFIED_INFINITE_AMMO_REFS.length === 5;
@@ -286,15 +306,27 @@ export const sinkingCity2Adapter = {
       supportedBuildId: SUPPORTED_BUILD_ID,
       buildSupported,
       gvas: magicOk,
+      format: native ? "frogwares-dynamic" : "generic-gvas",
       economyManager: Boolean(economy),
       stashedStacks: Boolean(stacks),
-      stackStructType: stacks?.children?.dummy?.structType || STACK_STRUCT_TYPE,
+      stackStructType: native
+        ? TSC2_STACK_CLASS
+        : stacks?.children?.dummy?.structType || STACK_STRUCT_TYPE,
       verifiedRefs: VERIFIED_INFINITE_AMMO_REFS.length,
       reasons,
     };
   },
 
   validateStructure(parsed) {
+    if (parsed?.format === "tsc2-dynamic") {
+      if (!parsed.economy) return fail("missing_economy_manager", "EconomyManager was not found");
+      if (!parsed.stash) return fail("missing_stashed_stacks", "StashedStacksSaveData was not found");
+      return {
+        ok: true,
+        format: "frogwares-dynamic",
+        stashCount: parsed.stash.count,
+      };
+    }
     if (!parsed?.header) return fail("not_gvas", "Save is not a GVAS document");
     if (!walkPath(parsed, ECONOMY_PATH))
       return fail("missing_economy_manager", "EconomyManager was not found");
@@ -314,6 +346,22 @@ export const sinkingCity2Adapter = {
   },
 
   validatePreservation(before, after, { allowedPrefixes = ["EconomyManager.StashedStacksSaveData"] } = {}) {
+    if (before?.format === "tsc2-dynamic" || after?.format === "tsc2-dynamic") {
+      const result = compareTsc2Preservation(before, after);
+      return {
+        ok: result.ok,
+        changes: result.ok
+          ? [{ path: "EconomyManager.StashedStacksSaveData", addedRefs: result.addedRefs }]
+          : [],
+        unexpected: result.ok ? [] : [{ path: result.reason || "unknown" }],
+        summary: {
+          changedPaths: result.ok ? ["EconomyManager.StashedStacksSaveData"] : [],
+          unexpectedPaths: result.ok ? [] : [result.reason || "unknown"],
+          changeCount: result.ok ? (result.addedRefs?.length || 0) : 0,
+          addedRefs: result.addedRefs || [],
+        },
+      };
+    }
     const beforeSnap = semanticSnapshot(before, [STASHED_STACKS_PATH, ECONOMY_PATH]);
     const afterSnap = semanticSnapshot(after, [STASHED_STACKS_PATH, ECONOMY_PATH]);
     const changes = diffSnapshots(beforeSnap, afterSnap);
@@ -345,13 +393,16 @@ export const sinkingCity2Adapter = {
     if (VERIFIED_INFINITE_AMMO_REFS.length !== 5) {
       return fail(
         "exact_verified_asset_references_missing",
-        "The five verified Sinking City 2 ammo-box asset references were not recovered. Write/apply is refuse-closed.",
+        "The five verified Sinking City 2 ammo-box asset references are unavailable.",
         { verifiedRefs: [] },
       );
     }
     const structure = this.validateStructure(parsed);
     if (!structure.ok) return structure;
-    const mutation = applyStashedStackEdit(parsed, VERIFIED_INFINITE_AMMO_REFS);
+    const mutation =
+      parsed?.format === "tsc2-dynamic"
+        ? applyTsc2InfiniteAmmo(parsed, VERIFIED_INFINITE_AMMO_REFS)
+        : applyStashedStackEdit(parsed, VERIFIED_INFINITE_AMMO_REFS);
     return {
       ok: true,
       editId,

@@ -73,7 +73,8 @@ try {
   report.error = error.message;
 }
 
-report.verifiedRefsRecovered = false;
+report.verifiedRefsRecovered =
+  report.compatibility?.verifiedRefs === 5;
 report.writeAllowed =
   report.supportedBuild === true &&
   report.compatibility?.writable === true;
